@@ -1,0 +1,5 @@
+# config/imports.toml
+
+[data_sources]
+
+obsidian = "vault"
