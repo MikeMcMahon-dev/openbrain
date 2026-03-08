@@ -87,6 +87,8 @@ for doc in documents:
     chunks = chunk_markdown(doc["text"])
     print(doc["source"], "→", len(chunks), "chunks")
     for i, chunk in enumerate(chunks):
+        if len(chunk["text"].strip()) < 80:
+            continue
 
         chunk_id = f"{doc['id']}_{i}"
 
