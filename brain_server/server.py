@@ -120,6 +120,9 @@ class VaultChangeHandler(FileSystemEventHandler):
         self.reindex_timer.start()
 
     def trigger_reindex(self):
+        if self.last_changed_file is None:
+            return
+
         print(f"Reindexing changed file: {self.last_changed_file}")
         reindex_file(self.last_changed_file)
         self.reindex_timer = None
@@ -158,10 +161,10 @@ def reindex_file(filepath):
 
         collection.upsert(
             ids=[doc_id],
-                embeddings=[embedding],
-                documents=[chunk["text"]],
-                metadatas=[metadata],
-            )
+            embeddings=[embedding],
+            documents=[chunk["text"]],
+            metadatas=[metadata],
+        )
 
 
 print("Embedding model ready.")
