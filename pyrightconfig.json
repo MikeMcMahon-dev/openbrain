@@ -1,0 +1,11 @@
+{
+  "typeCheckingMode": "basic",
+  "reportMissingImports": "none",
+  "reportMissingTypeStubs": "none",
+  "executionEnvironments": [
+    {
+      "root": ".",
+      "extraPaths": []
+    }
+  ]
+}

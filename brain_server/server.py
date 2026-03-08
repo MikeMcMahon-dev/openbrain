@@ -1,10 +1,16 @@
-from fastapi import FastAPI
+import hashlib
+import re
+import threading
 from pathlib import Path
+from typing import Any
+
+import chromadb
+from fastapi import FastAPI
 from rank_bm25 import BM25Okapi
-import chromadb, threading, hashlib
-from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler
 from sentence_transformers import SentenceTransformer
+from watchdog.events import FileSystemEventHandler
+from watchdog.observers import Observer
+
 
 app = FastAPI()
 
@@ -16,7 +22,6 @@ brain_index_path = project_root / "brain_index"
 vault_path = project_root / "vault"
 
 print("\nStarting OpenBrain server...")
-
 print(f"Project root: {project_root}")
 
 # validate required directories
@@ -36,11 +41,8 @@ collection = client.get_collection("openbrain")
 print("Building keyword index...")
 
 all_docs = collection.get()
-
-documents = all_docs["documents"]
-metadatas = all_docs["metadatas"]
-
-import re
+documents = all_docs.get("documents") or []
+metadatas = all_docs.get("metadatas") or []
 
 tokenized_corpus = [
     re.findall(r"\b\w+\b", doc.lower())
@@ -48,48 +50,56 @@ tokenized_corpus = [
 ]
 
 bm25 = BM25Okapi(tokenized_corpus)
-
 print(f"Keyword index ready ({len(documents)} chunks)")
 
-def expand_context(meta, doc, window=1):
 
+def as_python_list(value: Any) -> list[float]:
+    if isinstance(value, list):
+        return value
+    if hasattr(value, "tolist"):
+        return value.tolist()
+    return list(value)
+
+
+def expand_context(meta, doc, window=1):
     base_chunk = meta["chunk"]
     source_file = meta["file"]
 
     expanded = [doc]
 
     for offset in range(-window, window + 1):
-
         if offset == 0:
             continue
 
         neighbor_chunk = base_chunk + offset
 
         try:
-
             result = collection.get(
                 where={
                     "file": source_file,
-                    "chunk": neighbor_chunk
+                    "chunk": neighbor_chunk,
                 }
             )
+            neighbor_documents = result.get("documents") or []
 
-            if result["documents"]:
-                expanded.append(result["documents"][0])
-
-        except Exception:
-            pass
+            if neighbor_documents:
+                expanded.append(neighbor_documents[0])
+        except Exception as exc:
+            print(f"Error fetching neighbor chunk {neighbor_chunk}: {exc}")
 
     return "\n".join(expanded)
 
+
+def doc_id_from_meta(meta):
+    return (meta.get("file"), meta.get("chunk"))
 
 
 # load embedding model once
 print("Loading embedding model...")
 model = SentenceTransformer("BAAI/bge-small-en")
 
+
 class VaultChangeHandler(FileSystemEventHandler):
-    
     def __init__(self):
         self.last_changed_file = None
         self.reindex_timer = None
@@ -97,12 +107,12 @@ class VaultChangeHandler(FileSystemEventHandler):
     def on_modified(self, event):
         if event.is_directory:
             return
-        
+
         if not event.src_path.endswith(".md"):
             return
-        
+
         self.last_changed_file = event.src_path
-        
+
         if self.reindex_timer:
             self.reindex_timer.cancel()
 
@@ -114,8 +124,10 @@ class VaultChangeHandler(FileSystemEventHandler):
         reindex_file(self.last_changed_file)
         self.reindex_timer = None
 
+
 def split_into_chunks(text):
     return [{"heading": "root", "text": text}]
+
 
 def reindex_file(filepath):
     filepath = Path(filepath)
@@ -127,13 +139,12 @@ def reindex_file(filepath):
     chunks = split_into_chunks(text)
 
     for chunk_index, chunk in enumerate(chunks):
-        
         if len(chunk["text"].strip()) < 80:
-            continue    
+            continue
 
         print("Processing chunk:", chunk["heading"])
-        embedding = model.encode(chunk["text"])
-        
+        embedding = as_python_list(model.encode(chunk["text"], convert_to_numpy=True))
+
         hash_input = f"{filepath}:{chunk_index}"
         doc_id = hashlib.md5(hash_input.encode()).hexdigest()
 
@@ -142,15 +153,16 @@ def reindex_file(filepath):
             "file": filename,
             "section": section,
             "heading": chunk["heading"],
-            "chunk": chunk_index
+            "chunk": chunk_index,
         }
 
         collection.upsert(
             ids=[doc_id],
-            embeddings=[embedding],
-            documents=[chunk["text"]],
-            metadatas=[metadata]
-        )
+                embeddings=[embedding],
+                documents=[chunk["text"]],
+                metadatas=[metadata],
+            )
+
 
 print("Embedding model ready.")
 handler = VaultChangeHandler()
@@ -161,8 +173,6 @@ observer.start()
 print("Vault watcher started")
 
 
-
-
 @app.get("/")
 def health():
     return {"status": "openbrain online"}
@@ -170,83 +180,85 @@ def health():
 
 @app.post("/search")
 def search_brain(query: str, n_results: int = 5):
-
-    embedding = model.encode(query)
+    embedding = as_python_list(model.encode(query, convert_to_numpy=True))
     tokenized_query = re.findall(r"\b\w+\b", query.lower())
 
-    results = collection.query(
-        query_embeddings=[embedding],
-        n_results=n_results
-    )
+    results = collection.query(query_embeddings=[embedding], n_results=n_results)
+    documents_by_query = results.get("documents") or []
+    metadatas_by_query = results.get("metadatas") or []
+    distances_by_query = results.get("distances") or []
+
+    if not documents_by_query or not metadatas_by_query or not distances_by_query:
+        return {
+            "query": query,
+            "results": [],
+        }
+
     seen = set()
     structured_results = []
 
-    docs = results["documents"][0]
-    metas = results["metadatas"][0]
-    distances = results["distances"][0]
+    docs = documents_by_query[0] or []
+    metas = metadatas_by_query[0] or []
+    distances = distances_by_query[0] or []
 
     keyword_scores = bm25.get_scores(tokenized_query)
-
     top_keyword_indices = sorted(
         range(len(keyword_scores)),
         key=lambda i: keyword_scores[i],
-        reverse=True
+        reverse=True,
     )[:n_results]
 
     for doc, meta, dist in zip(docs, metas, distances):
-        doc_id = f"{meta['file']}:{meta['chunk']}"
-
-        if doc_id in seen:
+        identifier = doc_id_from_meta(meta)
+        if identifier in seen:
             continue
 
-        seen.add(doc_id)
-        
-        score = 1 - dist
-        
+        seen.add(identifier)
+
         doc_text = doc.lower()
         query_words = query.lower().split()
-
-        keyword_hits = sum(1 for w in query_words if w in doc_text)
-        score += keyword_hits * 0.5
-        
+        keyword_hits = sum(1 for word in query_words if word in doc_text)
+        score = (1 - dist) + (keyword_hits * 0.5)
         context = expand_context(meta, doc)
 
-        structured_results.append({
-            "score": 1 - dist,
-            "file": meta.get("file"),
-            "section": meta.get("section"),
-            "heading": meta.get("heading"),
-            "text": context
-        })
-    
-    for idx in top_keyword_indices:
+        structured_results.append(
+            {
+                "score": score,
+                "file": meta.get("file"),
+                "section": meta.get("section"),
+                "heading": meta.get("heading"),
+                "text": context,
+            }
+        )
 
+    for idx in top_keyword_indices:
         doc = documents[idx]
         meta = metadatas[idx]
+        identifier = doc_id_from_meta(meta)
 
-        doc_id = (meta.get("file"), meta.get("chunk"))
-
-        if doc_id in seen:
+        if identifier in seen:
             continue
 
-        seen.add(doc_id)
+        seen.add(identifier)
 
         context = expand_context(meta, doc)
 
-        structured_results.append({
-            "score": keyword_scores[idx],
-            "file": meta.get("file"),
-            "section": meta.get("section"),
-            "heading": meta.get("heading"),
-            "text": context
-        })
+        structured_results.append(
+            {
+                "score": keyword_scores[idx],
+                "file": meta.get("file"),
+                "section": meta.get("section"),
+                "heading": meta.get("heading"),
+                "text": context,
+            }
+        )
 
         if len(structured_results) >= n_results * 2:
             break
-        
-        structured_results.sort(key=lambda x: x["score"], reverse=True)
+
+    structured_results.sort(key=lambda item: item["score"], reverse=True)
 
     return {
         "query": query,
-        "results": structured_results
+        "results": structured_results,
     }
