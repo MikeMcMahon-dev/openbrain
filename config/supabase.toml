@@ -1,0 +1,29 @@
+# config/supabase.toml
+#
+# Supabase/Postgres connection settings for ingestion pipeline.
+# Fill these values before running the ingestion job.
+
+[database]
+
+# Flip to true once credentials are ready.
+enabled = false
+
+# Preferred: full SQLAlchemy-style PostgreSQL URI.
+# Examples:
+#   postgresql+psycopg://postgres:[PASSWORD]@db.[ref].supabase.co:5432/postgres
+#   postgresql://postgres:[PASSWORD]@db.[ref].supabase.co:5432/postgres
+connection_string = ""
+
+# Optional fallback fields when connection_string is omitted.
+host = ""
+port = 5432
+name = "postgres"
+user = "postgres"
+password = ""
+
+# Runtime controls for ingestion connection lifecycle
+connect_timeout_seconds = 10
+connection_autocommit = true
+
+# Optional: table planned for vector/metadata writes (future dual-write phase)
+target_table = "openbrain_chunks"
