@@ -1,12 +1,13 @@
 # OpenBrain Architecture
 
-OpenBrain is a local knowledge retrieval system designed to provide semantic access to engineering notes stored in an Obsidian vault.
+OpenBrain is a local knowledge retrieval system for semantic access to
+engineering notes in an Obsidian vault.
 
 It functions as a **personal RAG engine**.
 
 ---
 
-# Core Components
+## Core Components
 
 ## 1. Obsidian Vault
 
@@ -22,7 +23,8 @@ Contents:
 ---
 
 ## 2. Ingestion Pipeline
-scripts/ingest.py
+
+`scripts/ingest.py`
 
 Responsible for:
 
@@ -35,7 +37,8 @@ Responsible for:
 ---
 
 ## 3. Vector Database
-brain_index/
+
+`brain_index/`
 
 Powered by **ChromaDB**.
 
@@ -46,17 +49,18 @@ Stores:
 - metadata
 
 Metadata fields:
-    file
-    section
-    heading
-    chunk
-    source
 
+- `file`
+- `section`
+- `heading`
+- `chunk`
+- `source`
 
 ---
 
 ## 4. Embedding Model
-BAAI/bge-small-en
+
+`BAAI/bge-small-en`
 
 Chosen because:
 
@@ -67,56 +71,57 @@ Chosen because:
 ---
 
 ## 5. FastAPI Retrieval Server
-brain_server/server.py
+
+`brain_server/server.py`
 
 Provides:
-POST /search
+
+- `POST /search` (development alias)
+- MCP-like routes in scaffold:
+  - `POST /ingest`
+  - `POST /query`
+  - `POST /generate_quiz`
+  - `POST /generate_flashcards`
 
 Hybrid search:
 
 - vector similarity
 - BM25 keyword retrieval
-- keyword boosting
+- keyword-first surfacing with vector fallback
 
 ---
 
 ## 6. Live Vault Indexing
 
 Uses:
-    watchdog
+
+- watchdog
 
 Pipeline:
-vault change
-↓
-debounce timer
-↓
-reindex_file()
-↓
-vector upsert
 
+`vault change -> debounce timer -> reindex_file() -> vector upsert`
 
 ---
 
-# Retrieval Strategy
+## Retrieval Strategy
 
-Search ranking combines:
-semantic similarity
-+
-keyword boost
+Search ranking combines semantic and keyword signals:
 
+- vector similarity
+- keyword-first boost
 
 This improves accuracy for technical queries.
 
 Example:
-query: "terraform modules"
 
-semantic → related automation notes
-keyword boost → exact terraform matches
+query: `terraform modules`
 
+- semantic: related automation notes
+- keyword-first: exact terraform matches
 
 ---
 
-# System Design Goals
+## System Design Goals
 
 OpenBrain prioritizes:
 
@@ -127,7 +132,7 @@ OpenBrain prioritizes:
 
 ---
 
-# Long-Term Direction
+## Long-Term Direction
 
 OpenBrain will support:
 

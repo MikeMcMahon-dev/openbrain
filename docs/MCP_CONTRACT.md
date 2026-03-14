@@ -1,11 +1,13 @@
 # MCP Contract Draft (Current Scope)
 
-This document defines the current OpenBrain MCP API contract for the endpoints planned in Step 4.
+This document defines the current OpenBrain MCP API contract for the
+endpoints planned in Step 4.
 
 ## Goals
 
 - Keep transport simple and predictable.
-- Preserve vector-first retrieval behavior.
+- Preserve keyword-first retrieval prioritization with vector fallback for
+  remaining slots.
 - Defer background orchestration until MCP layer implementation is complete.
 - Maintain compatibility with current server field names and metadata model.
 
@@ -15,7 +17,8 @@ This document defines the current OpenBrain MCP API contract for the endpoints p
 
 The following fields are common across ingest and query-like operations:
 
-- `owner` (string, required in payload examples, defaults to `default_user`)
+- `owner` (string, required in payload examples, defaults to environment
+  or `mmcmahon`)
   - Logical tenant/user namespace for future multi-user separation.
 
 - `subject` (string, optional)
@@ -27,11 +30,12 @@ These map to future `where` filters and UI context.
 
 ## `POST /ingest`
 
-### Purpose
+### Ingest purpose
 
-Ingest a new study material source into the same Chroma collection used by markdown ingestion.
+Ingest a new study material source into the same Chroma collection used
+by markdown ingestion.
 
-### Request body
+### Ingest request body
 
 ```json
 {
@@ -43,38 +47,47 @@ Ingest a new study material source into the same Chroma collection used by markd
 }
 ```
 
-### Response body
+### Ingest response body
 
 ```json
 {
   "ingest_id": "a1b2c3d4...",
-  "status": "queued | accepted",
+  "status": "accepted | queued | failed",
   "source_type": "pdf",
   "source": "/path/to/file.pdf",
   "owner": "student_alpha",
   "subject": "Biology",
-  "topic": "Cell respiration"
+  "topic": "Cell respiration",
+  "message": "Ingest request accepted; queued in MCP scaffold.",
+  "details": ["optional", "failure detail list"]
 }
 ```
 
-### Contract rules
+### Ingest contract rules
 
 - Validate `source_type` is one of the supported ingestion sources.
 - `status`:
-  - `accepted` only when source and type are present/valid.
-  - `queued` when values are present but orchestration is not yet complete.
+  - `accepted`: source and type are valid and trace id is issued.
+  - `queued`: accepted request is waiting for MCP orchestration (for
+    non-obsidian sources).
+  - `failed`: request is rejected due to invalid payload.
+- `subject` and `topic` defaults:
+  - `subject`: source filename or import label if not provided.
+  - `topic`: ingest date `YYYY-MM-DD` if not provided.
 - `ingest_id` is returned immediately for traceability and polling.
-- Initial MCP behavior may remain synchronous acknowledgment with async processing planned.
+- `details` contains failure summaries when status is `failed`.
+- Initial MCP behavior may remain synchronous acknowledgment with async
+  processing planned.
 
 ---
 
 ## `POST /query`
 
-### Purpose
+### Query purpose
 
 Retrieve semantically relevant context and return tutor-ready payload.
 
-### Request body
+### Query request body
 
 ```json
 {
@@ -86,7 +99,7 @@ Retrieve semantically relevant context and return tutor-ready payload.
 }
 ```
 
-### Response body
+### Query response body
 
 ```json
 {
@@ -112,27 +125,36 @@ Retrieve semantically relevant context and return tutor-ready payload.
       "heading": "# Photosynthesis",
       "content_type": "markdown",
       "owner": "student_alpha",
+      "source_channel": "keyword",
       "text": "..."
     }
   ]
 }
 ```
 
-### Contract rules
+### Query contract rules
 
-- `mode` is normalized to a valid tutor mode (`explain`, `quiz`, `flashcards`).
-- Vector retrieval takes priority.
+- `mode` is normalized to a valid tutor mode (`explain`,
+  `quiz`, `flashcards`).
+- Keyword retrieval is surfaced first when matched; vector retrieval fills
+  remaining result slots.
 - Keyword fallback is allowed when vector search returns weak/no results.
+
+### Query result metadata
+
+- `source_channel` indicates how each hit was surfaced:
+  - `keyword`: match came from BM25/term-based retrieval.
+  - `vector`: match came from semantic/vector similarity.
 
 ---
 
 ## `POST /generate_quiz`
 
-### Purpose
+### Quiz purpose
 
 Shortcut endpoint forcing tutor mode to `quiz`.
 
-### Contract
+### Quiz contract
 
 - Request shape mirrors `POST /query`.
 - Server sets `mode: "quiz"` before tutor handling.
@@ -142,11 +164,11 @@ Shortcut endpoint forcing tutor mode to `quiz`.
 
 ## `POST /generate_flashcards`
 
-### Purpose
+### Flashcards purpose
 
 Shortcut endpoint forcing tutor mode to `flashcards`.
 
-### Contract
+### Flashcards contract
 
 - Request shape mirrors `POST /query`.
 - Server sets `mode: "flashcards"` before tutor handling.
@@ -166,3 +188,25 @@ For all endpoints, use a consistent failure shape:
 }
 ```
 
+## MCP execution step-by-step (current scaffold behavior)
+
+1. Client calls `POST /ingest` with a payload that includes source
+   metadata.
+2. Server validates `source_type` against allowed values
+   (`obsidian`, `pdf`, `docx`, `url`).
+3. Server returns an immediate acknowledgement containing:
+   - `ingest_id`
+   - `status` (`accepted`, `queued`, or `failed`)
+   - normalized payload echo fields
+   - `message` and optional `details`
+4. Client sends query with `owner` and mode.
+5. Server normalizes mode and builds query embedding with
+   `BAAI/bge-small-en`.
+6. Server applies BM25 keyword retrieval and vector retrieval.
+7. Keyword-matching hits are surfaced first when present;
+   vector hits fill remaining results.
+8. Tutor layer maps results into one of:
+   - explain
+   - quiz
+   - flashcards
+9. Server returns context + tutor prompt payload to the caller.

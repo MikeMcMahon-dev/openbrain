@@ -41,7 +41,9 @@ These fields are already used and must remain:
 ## Rules
 
 - Keep `source`, `owner`, `content_type`, and `chunk` on every chunk.
-- Continue to keep historical behavior for markdown: `heading` should still describe the current heading context.
+- Continue to keep historical behavior for markdown:
+  `heading` should still describe the
+  current heading context.
 - For `pdf`, `docx`, and `url` ingestors:
   - `heading` may be generated section labels where available.
   - `section` should remain stable per source segment.
@@ -55,11 +57,11 @@ These fields are already used and must remain:
 - Existing chunks without `subject`, `topic`:
   - set to `null` or leave omitted (query layer treats as optional).
 - Existing chunks without `owner`:
-  - set a default user (`default_user`) during backfill to preserve current behavior.
+  - set a default user (`mmcmahon`) during backfill to preserve
+    current behavior.
 
 ## Retrieval implications
 
 - Filter by `owner` first to isolate user context.
 - Filter by `content_type` when UI or tutor mode requests a study material origin.
 - Keep `section` and `heading` for context expansion logic and result provenance.
-

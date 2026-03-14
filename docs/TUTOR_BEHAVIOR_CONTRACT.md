@@ -1,6 +1,7 @@
 # Tutor Behavior Contract (Socratic, Step-Based)
 
-This contract defines the desired behavior for `/query`-driven tutor responses.
+This contract defines the desired behavior for `/query`-driven tutor
+responses.
 
 ## Core behavior invariants
 
@@ -8,7 +9,7 @@ This contract defines the desired behavior for `/query`-driven tutor responses.
 2. Use middle-school appropriate language
 3. Break explanations into steps
 4. Encourage effort before validating answers
-5. Keep vector retrieval as the first source of context
+5. Keep keyword-first retrieval surfacing before vector-only results
 
 ## Universal tutor rules
 
@@ -36,11 +37,13 @@ This contract defines the desired behavior for `/query`-driven tutor responses.
 - Ask the learner to solve first.
 - Provide answer options or open prompts depending on question type.
 - Provide one hint at a time if the learner responds incorrectly.
-- Delay full answer until either repeated misses or explicit follow-up request.
+- Delay full answer until either repeated misses or explicit follow-up
+  request.
 
 ### `flashcards`
 
-- Produce memory-focused prompts first, answers as structured follow-up fields.
+- Produce memory-focused prompts first, answers as structured follow-up
+  fields.
 - Keep each card focused on one concept.
 - Use recall-first wording:
   - Front: question/prompt
@@ -69,4 +72,3 @@ Server-level response should include:
 - Do not grade numerically.
 - Do not replace retrieval output entirely with unrelated explanation.
 - Do not ignore context limits; keep guidance tied to retrieved chunks.
-
