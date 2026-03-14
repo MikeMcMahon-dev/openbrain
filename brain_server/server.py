@@ -2,6 +2,7 @@ import hashlib
 import re
 import sys
 import threading
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,7 @@ project_root = Path(__file__).resolve().parent.parent
 # resolve key directories
 brain_index_path = project_root / "brain_index"
 vault_path = project_root / "vault"
+
 sys.path.append(str(project_root / "scripts"))
 
 try:
@@ -33,7 +35,6 @@ except Exception:  # pragma: no cover
 print("\nStarting OpenBrain server...")
 print(f"Project root: {project_root}")
 
-# validate required directories
 if not brain_index_path.exists():
     raise RuntimeError("brain_index directory not found. Run ingestion first.")
 
@@ -48,7 +49,6 @@ client = chromadb.PersistentClient(path=str(project_root / "brain_index"))
 collection = client.get_collection("openbrain")
 
 print("Building keyword index...")
-
 all_docs = collection.get()
 documents = all_docs.get("documents") or []
 metadatas = all_docs.get("metadatas") or []
@@ -67,6 +67,7 @@ class TutorQueryRequest(BaseModel):
     mode: str = "explain"
     n_results: int = 5
     student_attempt: str | None = None
+    owner: str = "default_user"
 
 
 class IngestRequest(BaseModel):
@@ -74,6 +75,7 @@ class IngestRequest(BaseModel):
     source: str
     subject: str | None = None
     topic: str | None = None
+    owner: str = "default_user"
 
 
 def as_python_list(value: Any) -> list[float]:
@@ -120,6 +122,11 @@ def doc_id_from_meta(meta):
 # load embedding model once
 print("Loading embedding model...")
 model = SentenceTransformer("BAAI/bge-small-en")
+
+
+def _normalize_mode(mode: str) -> str:
+    value = (mode or "explain").lower().strip()
+    return value if value in {"explain", "quiz", "flashcards"} else "explain"
 
 
 class VaultChangeHandler(FileSystemEventHandler):
@@ -181,6 +188,8 @@ def reindex_file(filepath):
             "heading": chunk["heading"],
             "chunk": chunk_index,
             "content_type": "markdown",
+            "owner": "default_user",
+            "user_id": "default_user",
         }
 
         collection.upsert(
@@ -200,26 +209,28 @@ observer.start()
 print("Vault watcher started")
 
 
-def _normalize_mode(mode: str) -> str:
-    value = (mode or "explain").lower().strip()
-    return value if value in {"explain", "quiz", "flashcards"} else "explain"
-
-
-def _keyword_fallback(query: str, n_results: int):
+def _keyword_fallback(query: str, n_results: int, owner: str):
     query_tokens = re.findall(r"\b\w+\b", query.lower())
     if not query_tokens:
         return []
 
-    scores = [
-        (idx, sum(1 for term in query_tokens if term in (doc or "").lower()))
-        for idx, doc in enumerate(documents)
-    ]
-    scores.sort(key=lambda item: item[1], reverse=True)
+    scored = []
+    for idx, doc in enumerate(documents):
+        meta = metadatas[idx]
+        owner_filter = (owner or "").strip() or ""
+        if owner_filter and meta.get("owner") and meta.get("owner") != owner_filter:
+            continue
+
+        score = sum(1 for term in query_tokens if term in (doc or "").lower())
+        if score <= 0:
+            continue
+
+        scored.append((score, idx))
+
+    scored.sort(key=lambda value: value[0], reverse=True)
 
     results = []
-    for idx, score in scores[:n_results]:
-        if score <= 0:
-            break
+    for score, idx in scored[:n_results]:
         meta = metadatas[idx]
         text = documents[idx]
         context = expand_context(meta, text)
@@ -230,20 +241,23 @@ def _keyword_fallback(query: str, n_results: int):
                 "section": meta.get("section"),
                 "heading": meta.get("heading"),
                 "content_type": meta.get("content_type"),
+                "source": meta.get("source"),
                 "text": context,
             }
         )
+
     return results
 
 
 def search_with_tutor(request: TutorQueryRequest):
-    results = search_brain(request.query, request.n_results)
+    owner = (request.owner or "default_user").strip() or "default_user"
+    results = search_brain(request.query, request.n_results, owner)
     if not results:
-        results = _keyword_fallback(request.query, request.n_results)
+        results = _keyword_fallback(request.query, request.n_results, owner)
 
     context_chunks = [
         {
-            "source": result.get("file"),
+            "source": result.get("source") or result.get("file"),
             "file": result.get("file"),
             "section": result.get("section"),
             "heading": result.get("heading"),
@@ -255,8 +269,14 @@ def search_with_tutor(request: TutorQueryRequest):
     if build_tutor_packet is None:
         tutor_payload = {
             "mode": _normalize_mode(request.mode),
-            "status": "tutor_module_unavailable",
-            "message": "Tutor prompt module not importable from server process.",
+            "rules": [
+                "Ask the student to try first.",
+                "Use short, simple language for a middle school learner.",
+                "Explain ideas step by step.",
+                "Encourage effort and curiosity before confirming answers.",
+            ],
+            "tutor_prompt": "Tutor module unavailable in this runtime.",
+            "context_used": context_chunks,
         }
     else:
         tutor_payload = build_tutor_packet(
@@ -267,10 +287,12 @@ def search_with_tutor(request: TutorQueryRequest):
         )
 
     return {
-        "query": request.query,
-        "mode": tutor_payload.get("mode"),
+        "mode": tutor_payload.get("mode", _normalize_mode(request.mode)),
+        "question": request.query,
+        "rules": tutor_payload.get("rules", []),
+        "tutor_prompt": tutor_payload.get("tutor_prompt", ""),
+        "context_used": tutor_payload.get("context_used", []),
         "results": results,
-        "tutor": tutor_payload,
     }
 
 
@@ -281,17 +303,34 @@ def health():
 
 @app.post("/search")
 def search_brain_endpoint(query: str, n_results: int = 5):
-    return search_brain(query, n_results)
+    return search_brain(query, n_results, owner="default_user")
 
 
-def search_brain(query: str, n_results: int = 5):
+def search_brain(query: str, n_results: int = 5, owner: str = "default_user"):
+    normalized_owner = (owner or "").strip() or "default_user"
     embedding = as_python_list(model.encode(query, convert_to_numpy=True))
     tokenized_query = re.findall(r"\b\w+\b", query.lower())
 
-    results = collection.query(query_embeddings=[embedding], n_results=n_results)
-    documents_by_query = results.get("documents") or []
-    metadatas_by_query = results.get("metadatas") or []
-    distances_by_query = results.get("distances") or []
+    where_clause = {"owner": normalized_owner}
+
+    try:
+        results = collection.query(
+            query_embeddings=[embedding],
+            n_results=n_results,
+            where=where_clause,
+        )
+        documents_by_query = results.get("documents") or []
+        metadatas_by_query = results.get("metadatas") or []
+        distances_by_query = results.get("distances") or []
+    except Exception as exc:
+        print(f"Owner-filtered vector query failed: {exc}. Falling back without owner filter.")
+        results = collection.query(
+            query_embeddings=[embedding],
+            n_results=n_results,
+        )
+        documents_by_query = results.get("documents") or []
+        metadatas_by_query = results.get("metadatas") or []
+        distances_by_query = results.get("distances") or []
 
     if not documents_by_query or not metadatas_by_query or not distances_by_query:
         return []
@@ -311,6 +350,9 @@ def search_brain(query: str, n_results: int = 5):
     )[:n_results]
 
     for doc, meta, dist in zip(docs, metas, distances):
+        if meta.get("owner") and meta.get("owner") != normalized_owner:
+            continue
+
         identifier = doc_id_from_meta(meta)
         if identifier in seen:
             continue
@@ -327,9 +369,11 @@ def search_brain(query: str, n_results: int = 5):
             {
                 "score": score,
                 "file": meta.get("file"),
+                "source": meta.get("source"),
                 "section": meta.get("section"),
                 "heading": meta.get("heading"),
                 "content_type": meta.get("content_type"),
+                "owner": meta.get("owner"),
                 "text": context,
             }
         )
@@ -337,8 +381,11 @@ def search_brain(query: str, n_results: int = 5):
     for idx in top_keyword_indices:
         doc = documents[idx]
         meta = metadatas[idx]
-        identifier = doc_id_from_meta(meta)
 
+        if meta.get("owner") and meta.get("owner") != normalized_owner:
+            continue
+
+        identifier = doc_id_from_meta(meta)
         if identifier in seen:
             continue
 
@@ -350,9 +397,11 @@ def search_brain(query: str, n_results: int = 5):
             {
                 "score": keyword_scores[idx],
                 "file": meta.get("file"),
+                "source": meta.get("source"),
                 "section": meta.get("section"),
                 "heading": meta.get("heading"),
                 "content_type": meta.get("content_type"),
+                "owner": meta.get("owner"),
                 "text": context,
             }
         )
@@ -382,14 +431,24 @@ def generate_flashcards(request: TutorQueryRequest):
 
 @app.post("/ingest")
 def ingest_endpoint(request: IngestRequest):
+    source_type = (request.source_type or "").strip().lower()
+    normalized_source = (request.source or "").strip()
+
+    allowed_source_types = {"obsidian", "pdf", "docx", "url"}
+    status = "queued"
+    if normalized_source and source_type in allowed_source_types:
+        status = "accepted"
+
     return {
-        "status": "planned",
-        "message": (
-            "Ingest endpoint scaffolded only. Use scripts/ingest.py now, then bind this endpoint "
-            "to an async worker queue in the MCP layer."
-        ),
-        "source_type": request.source_type,
-        "source": request.source,
+        "ingest_id": uuid.uuid4().hex,
+        "status": status,
+        "source_type": source_type,
+        "source": normalized_source,
+        "owner": (request.owner or "default_user").strip() or "default_user",
         "subject": request.subject,
         "topic": request.topic,
+        "message": (
+            "Ingest endpoint scaffolded. Payload is accepted by API contract;"
+            " async execution wiring is a next step in MCP layer."
+        ),
     }

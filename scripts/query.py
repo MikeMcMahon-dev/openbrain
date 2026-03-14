@@ -85,8 +85,10 @@ def search_brain(query: str, n_results: int = 3):
 
 def render_mode_output(mode: str, query_text: str, results: list[dict[str, Any]], attempt: str | None = None):
     packet = build_tutor_packet(mode, query_text, results, attempt)
+    print("\nQuery:", packet["question"])
+    print("Mode:", packet["mode"])
+    print("\nTutor prompt:")
     print("\nTutor guidance packet:\n")
-    print(f"Mode: {packet['mode']}")
     print(packet["tutor_prompt"])
     print(packet["instructions"])
     if packet["rules"]:
@@ -94,6 +96,7 @@ def render_mode_output(mode: str, query_text: str, results: list[dict[str, Any]]
         for rule in packet["rules"]:
             print("-", rule)
     print("\nContext previews:")
+    print("Context used:", len(packet["context_used"]))
     for result in results:
         print("\nSOURCE:", result["source"])
         print(result["text"][:280])
