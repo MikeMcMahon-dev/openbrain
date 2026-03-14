@@ -1,11 +1,13 @@
 import hashlib
 import re
+import sys
 import threading
 from pathlib import Path
 from typing import Any
 
 import chromadb
 from fastapi import FastAPI
+from pydantic import BaseModel
 from rank_bm25 import BM25Okapi
 from sentence_transformers import SentenceTransformer
 from watchdog.events import FileSystemEventHandler
@@ -20,6 +22,13 @@ project_root = Path(__file__).resolve().parent.parent
 # resolve key directories
 brain_index_path = project_root / "brain_index"
 vault_path = project_root / "vault"
+sys.path.append(str(project_root / "scripts"))
+
+try:
+    from tutor import build_tutor_packet
+except Exception:  # pragma: no cover
+    build_tutor_packet = None
+
 
 print("\nStarting OpenBrain server...")
 print(f"Project root: {project_root}")
@@ -51,6 +60,20 @@ tokenized_corpus = [
 
 bm25 = BM25Okapi(tokenized_corpus)
 print(f"Keyword index ready ({len(documents)} chunks)")
+
+
+class TutorQueryRequest(BaseModel):
+    query: str
+    mode: str = "explain"
+    n_results: int = 5
+    student_attempt: str | None = None
+
+
+class IngestRequest(BaseModel):
+    source_type: str
+    source: str
+    subject: str | None = None
+    topic: str | None = None
 
 
 def as_python_list(value: Any) -> list[float]:
@@ -157,6 +180,7 @@ def reindex_file(filepath):
             "section": section,
             "heading": chunk["heading"],
             "chunk": chunk_index,
+            "content_type": "markdown",
         }
 
         collection.upsert(
@@ -176,12 +200,90 @@ observer.start()
 print("Vault watcher started")
 
 
+def _normalize_mode(mode: str) -> str:
+    value = (mode or "explain").lower().strip()
+    return value if value in {"explain", "quiz", "flashcards"} else "explain"
+
+
+def _keyword_fallback(query: str, n_results: int):
+    query_tokens = re.findall(r"\b\w+\b", query.lower())
+    if not query_tokens:
+        return []
+
+    scores = [
+        (idx, sum(1 for term in query_tokens if term in (doc or "").lower()))
+        for idx, doc in enumerate(documents)
+    ]
+    scores.sort(key=lambda item: item[1], reverse=True)
+
+    results = []
+    for idx, score in scores[:n_results]:
+        if score <= 0:
+            break
+        meta = metadatas[idx]
+        text = documents[idx]
+        context = expand_context(meta, text)
+        results.append(
+            {
+                "score": float(score),
+                "file": meta.get("file"),
+                "section": meta.get("section"),
+                "heading": meta.get("heading"),
+                "content_type": meta.get("content_type"),
+                "text": context,
+            }
+        )
+    return results
+
+
+def search_with_tutor(request: TutorQueryRequest):
+    results = search_brain(request.query, request.n_results)
+    if not results:
+        results = _keyword_fallback(request.query, request.n_results)
+
+    context_chunks = [
+        {
+            "source": result.get("file"),
+            "file": result.get("file"),
+            "section": result.get("section"),
+            "heading": result.get("heading"),
+            "text": result.get("text", ""),
+        }
+        for result in results
+    ]
+
+    if build_tutor_packet is None:
+        tutor_payload = {
+            "mode": _normalize_mode(request.mode),
+            "status": "tutor_module_unavailable",
+            "message": "Tutor prompt module not importable from server process.",
+        }
+    else:
+        tutor_payload = build_tutor_packet(
+            _normalize_mode(request.mode),
+            request.query,
+            context_chunks,
+            request.student_attempt,
+        )
+
+    return {
+        "query": request.query,
+        "mode": tutor_payload.get("mode"),
+        "results": results,
+        "tutor": tutor_payload,
+    }
+
+
 @app.get("/")
 def health():
     return {"status": "openbrain online"}
 
 
 @app.post("/search")
+def search_brain_endpoint(query: str, n_results: int = 5):
+    return search_brain(query, n_results)
+
+
 def search_brain(query: str, n_results: int = 5):
     embedding = as_python_list(model.encode(query, convert_to_numpy=True))
     tokenized_query = re.findall(r"\b\w+\b", query.lower())
@@ -192,10 +294,7 @@ def search_brain(query: str, n_results: int = 5):
     distances_by_query = results.get("distances") or []
 
     if not documents_by_query or not metadatas_by_query or not distances_by_query:
-        return {
-            "query": query,
-            "results": [],
-        }
+        return []
 
     seen = set()
     structured_results = []
@@ -230,6 +329,7 @@ def search_brain(query: str, n_results: int = 5):
                 "file": meta.get("file"),
                 "section": meta.get("section"),
                 "heading": meta.get("heading"),
+                "content_type": meta.get("content_type"),
                 "text": context,
             }
         )
@@ -252,6 +352,7 @@ def search_brain(query: str, n_results: int = 5):
                 "file": meta.get("file"),
                 "section": meta.get("section"),
                 "heading": meta.get("heading"),
+                "content_type": meta.get("content_type"),
                 "text": context,
             }
         )
@@ -259,9 +360,36 @@ def search_brain(query: str, n_results: int = 5):
         if len(structured_results) >= n_results * 2:
             break
 
-    structured_results.sort(key=lambda item: item["score"], reverse=True)
+    return structured_results
 
+
+@app.post("/query")
+def query_endpoint(request: TutorQueryRequest):
+    return search_with_tutor(request)
+
+
+@app.post("/generate_quiz")
+def generate_quiz(request: TutorQueryRequest):
+    request.mode = "quiz"
+    return search_with_tutor(request)
+
+
+@app.post("/generate_flashcards")
+def generate_flashcards(request: TutorQueryRequest):
+    request.mode = "flashcards"
+    return search_with_tutor(request)
+
+
+@app.post("/ingest")
+def ingest_endpoint(request: IngestRequest):
     return {
-        "query": query,
-        "results": structured_results,
+        "status": "planned",
+        "message": (
+            "Ingest endpoint scaffolded only. Use scripts/ingest.py now, then bind this endpoint "
+            "to an async worker queue in the MCP layer."
+        ),
+        "source_type": request.source_type,
+        "source": request.source,
+        "subject": request.subject,
+        "topic": request.topic,
     }

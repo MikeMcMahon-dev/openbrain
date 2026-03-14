@@ -3,3 +3,7 @@
 [data_sources]
 
 obsidian = "vault"
+# Optional additional sources for student study materials.
+# pdf = "materials/pdf"
+# docx = "materials/docx"
+# urls = ["https://example.com/study/guide"]

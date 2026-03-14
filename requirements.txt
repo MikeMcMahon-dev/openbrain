@@ -111,6 +111,7 @@ regex==2026.2.28
 requests==2.32.5
 requests-oauthlib==2.0.0
 rich==14.3.3
+python-docx==1.2.0
 rpds-py==0.30.0
 safetensors==0.7.0
 scikit-learn==1.8.0

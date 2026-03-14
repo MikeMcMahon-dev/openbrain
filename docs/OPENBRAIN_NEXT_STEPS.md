@@ -4,89 +4,99 @@ This document tracks planned improvements for the OpenBrain system.
 
 ---
 
-# Phase 1 – Retrieval Quality
+# Step 1 – Retrieval and Storage Baseline (kept)
 
-Improve search accuracy.
+Keep the current vector pipeline:
 
-Planned improvements:
-
-- stronger keyword boosting
-- heading match bonuses
-- filename match bonuses
-- better chunk ranking
+- ChromaDB persistent collection `openbrain`
+- Embedding model `BAAI/bge-small-en`
+- Markdown ingestion + heading chunking
+- Existing metadata keys: `source`, `file`, `section`, `heading`, `chunk`
 
 ---
 
-# Phase 2 – AI Tool Integration
+# Step 2 – Tutor-First Query Modes
 
-Expose OpenBrain as a tool for AI agents.
+Add learner-focused tutor behavior in addition to retrieval:
 
-Options:
-    FastAPI tool
-    MCP server
+- explain
+- quiz
+- flashcards
 
+Socratic rules:
 
-Capabilities:
-    search_brain(query)
-    read_note(file)
-    list_sections()
+- Ask students to attempt answers first.
+- Use simple middle-school language.
+- Explain step-by-step.
+- Encourage effort.
 
+Implementation:
 
-Goal:
-
-Allow ChatGPT/Codex to automatically query the knowledge base.
-
----
-
-# Phase 3 – Agent Memory
-
-Allow AI tools to **write new knowledge**.
-
-Examples:
-    store_learning()
-    store_decision()
-    store_fix()
-
-
-This enables:
-
-- persistent learning
-- engineering notes from AI sessions
+- `scripts/tutor.py` contains tutor policy and prompt payload generation.
+- `scripts/query.py` supports all modes and keeps vector search first.
+- Keyword fallback is used when semantic results are weak.
 
 ---
 
-# Phase 4 – Retrieval Enhancements
+# Step 3 – Multi-format Ingestion Extension
 
-Future improvements:
+Add additional ingestion inputs while preserving current embedding model and collection:
 
-- document graph linking
-- semantic topic clustering
-- section-aware ranking
-- cross-note reference expansion
+- PDF
+- DOCX
+- Website URL
+
+Implementation locations:
+
+- `scripts/ingestors/markdown.py`
+- `scripts/ingestors/pdf.py`
+- `scripts/ingestors/docx.py`
+- `scripts/ingestors/url.py`
+- `scripts/chunking/markdown.py`
+- `scripts/chunking/text.py`
+- `scripts/ingest.py` (coordinates all content types)
+
+Metadata:
+
+- Preserve existing keys.
+- Add `content_type` everywhere.
+- Add `subject` and `topic` where known.
 
 ---
 
-# Phase 5 – Infrastructure
+# Step 4 – MCP Layer Design
 
-Deployment options:
-    Docker container
-    Kubernetes service
+Target endpoints to expose:
 
-Possible architecture:
-    AI agents
-    ↓
-    OpenBrain API
-    ↓
-    Vector DB
+- `POST /ingest` (interface scaffold)
+- `POST /query`
+- `POST /generate_quiz`
+- `POST /generate_flashcards`
 
+Current status:
+
+- API routes are scaffolded in `brain_server/server.py`.
+- Full ingestion orchestration through MCP transport is planned next.
 
 ---
 
-# Long-Term Vision
+# Future Considerations
 
-OpenBrain becomes the **central knowledge memory** for:
+- Keep vector-first retrieval priority.
+- Add richer hybrid scoring in a later pass.
+- Move metadata routing into shared retrieval abstractions.
+- Evaluate Supabase as a managed Vector DB candidate if scale requires:
+  - built-in auth
+  - managed hosting
+  - easier multi-device sharing
+  - migration overhead vs current local-first simplicity
 
-- homelab design
-- infrastructure automation
-- AI experimentation
-- engineering learning
+---
+
+# Long-Term Direction
+
+OpenBrain becomes the central student learning memory with:
+
+- material ingestion (notes, PDFs, DOCX, URLs)
+- retrieval and Socratic guidance
+- future quiz/flashcard generation quality improvements
