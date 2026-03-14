@@ -73,6 +73,12 @@ Target endpoints to expose:
 - `POST /generate_quiz`
 - `POST /generate_flashcards`
 
+Detailed contracts are now tracked in:
+
+- `docs/MCP_CONTRACT.md`
+- `docs/CHUNK_METADATA_MODEL.md`
+- `docs/TUTOR_BEHAVIOR_CONTRACT.md`
+
 Current status:
 
 - API routes are scaffolded in `brain_server/server.py`.
