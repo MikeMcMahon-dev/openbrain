@@ -1,8 +1,9 @@
+# ruff: noqa: E402
 from __future__ import annotations
 
 import sys
-from urllib.parse import urlparse
 from pathlib import Path
+from urllib.parse import urlparse
 
 API_DIR = Path(__file__).resolve().parent
 if str(API_DIR) not in sys.path:
