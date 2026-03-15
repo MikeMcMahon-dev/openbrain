@@ -8,6 +8,10 @@
   ],
   "routes": [
     {
+      "src": "^/$",
+      "dest": "api/app.py"
+    },
+    {
       "src": "^/health$",
       "dest": "api/app.py"
     },
