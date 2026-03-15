@@ -24,7 +24,5 @@ def handler(request):
         if not payload:
             payload["query"] = (metadata.get("query") or {}).get("query", "")
             payload["n_results"] = (metadata.get("query") or {}).get("n_results")
-            payload["owner"] = (metadata.get("query") or {}).get("owner")
-            payload["tenant_id"] = (metadata.get("query") or {}).get("tenant_id")
     status, body = search_payload(payload, metadata)
     return response_payload(status, body)

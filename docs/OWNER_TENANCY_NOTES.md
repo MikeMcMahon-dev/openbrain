@@ -11,9 +11,9 @@
 ## MCP `/ingest` owner rule
 
 - `owner` should always be resolved in this precedence order:
-  - explicit `request.owner`
+  - request context header (`x-openbrain-owner`, `x-openbrain-user-login`, `x-openbrain-user-id`, `x-slack-user-id`, `x-user-id`)
   - configured default from deployment env (`OPENBRAIN_DEFAULT_OWNER`)
-  - fallback environment/default `mmcmahon` (`OPENBRAIN_DEFAULT_OWNER`)
+  - fallback environment/default `OPENBRAIN_DEFAULT_OWNER` (`mmcmahon`)
 - Stored per chunk as metadata so retrieval and future re-query are
   owner-aware.
 - Owner is also included in deterministic ingest id generation for
@@ -21,14 +21,15 @@
 
 ## MCP `/query` owner rule
 
-- `/query`, `/generate_quiz`, `/generate_flashcards` read owner from
-  request.
-- If caller omits owner:
-  - fallback to server default.
-- If caller supplies owner, query path filters vectors using metadata
-  owner first.
-- If owner-filtered vector query errors, endpoint can fallback without
-  owner filter (current behavior), but this is temporary.
+## MCP `/query`, `/search`, `/generate_*`
+
+- `/query`, `/search`, `/generate_quiz`, and `/generate_flashcards` now
+  resolve owner/tenant from request context headers first.
+- Explicit `owner` / `tenant_id` in request body is currently treated as
+  legacy input and is ignored for scope resolution unless a future
+  allowlist enables client override.
+- Query behavior uses tenant-filtered retrieval so the response set stays
+  within the resolved tenant/context.
 
 ## User-specific metadata strategy
 

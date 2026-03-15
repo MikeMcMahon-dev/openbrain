@@ -19,5 +19,5 @@ def handler(request):
             },
         )
 
-    status, body = query_payload(payload)
+    status, body = query_payload(payload, metadata)
     return response_payload(status, body)

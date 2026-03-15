@@ -49,7 +49,6 @@ EMBEDDING_URL = (
     )
 )
 
-
 def cors_headers() -> dict[str, str]:
     return {
         "Content-Type": "application/json",
@@ -145,6 +144,32 @@ def validate_method(method: str) -> bool:
     return method.upper() in {"GET", "POST", "OPTIONS"}
 
 
+def _stringify_headers(headers: Any) -> dict[str, str]:
+    if not isinstance(headers, Mapping):
+        return {}
+
+    normalized: dict[str, str] = {}
+    for key, value in headers.items():
+        if not isinstance(key, str):
+            continue
+        normalized[key.lower()] = str(value) if value is not None else ""
+    return normalized
+
+
+def _coalesce(*values: Any) -> str:
+    for value in values:
+        if isinstance(value, str):
+            value = value.strip()
+            if value:
+                return value
+    return ""
+
+
+def normalize_tenant(tenant_id: str | None) -> str:
+    normalized = (tenant_id or DEFAULT_TENANT).strip()
+    return normalized if normalized else DEFAULT_TENANT
+
+
 def normalize_owner(owner: str | None) -> str:
     normalized = (owner or DEFAULT_OWNER).strip()
     return normalized if normalized else DEFAULT_OWNER
@@ -165,6 +190,36 @@ def normalize_results_count(
     except Exception:
         return default
     return min(max(parsed, 1), max_value)
+
+
+def request_context(
+    payload: Mapping[str, Any] | None = None,
+    metadata: Mapping[str, Any] | None = None,
+    *,
+    allow_client_override: bool = False,
+) -> tuple[str, str]:
+    headers = _stringify_headers(metadata.get("headers") if isinstance(metadata, Mapping) else None)
+
+    owner = _coalesce(
+        headers.get("x-openbrain-owner"),
+        headers.get("x-openbrain-user-login"),
+        headers.get("x-openbrain-user-id"),
+        headers.get("x-slack-user-id"),
+        headers.get("x-user-id"),
+        os.getenv("OPENBRAIN_DEFAULT_OWNER"),
+    )
+    tenant_id = _coalesce(
+        headers.get("x-openbrain-tenant-id"),
+        headers.get("x-tenant-id"),
+        headers.get("x-family-id"),
+        os.getenv("OPENBRAIN_DEFAULT_TENANT_ID"),
+    )
+
+    if isinstance(payload, Mapping) and allow_client_override:
+        owner = _coalesce(owner, payload.get("owner"))
+        tenant_id = _coalesce(tenant_id, payload.get("tenant_id"))
+
+    return normalize_owner(owner), normalize_tenant(tenant_id)
 
 
 def compute_ingest_id(source_type: str, source: str, owner: str, subject: str, topic: str) -> str:
@@ -457,7 +512,10 @@ def run_tutor_payload(
     )
 
 
-def query_payload(payload: Mapping[str, Any]) -> tuple[int, dict[str, Any]]:
+def query_payload(
+    payload: Mapping[str, Any],
+    method_metadata: Mapping[str, Any] | None = None,
+) -> tuple[int, dict[str, Any]]:
     if not isinstance(payload, Mapping):
         return 400, {
             "error": "validation_error",
@@ -475,8 +533,11 @@ def query_payload(payload: Mapping[str, Any]) -> tuple[int, dict[str, Any]]:
 
     mode = normalize_mode(payload.get("mode"))
     n_results = normalize_results_count(payload.get("n_results"), DEFAULT_RESULTS)
-    owner = normalize_owner(payload.get("owner"))
-    tenant_id = (payload.get("tenant_id") or DEFAULT_TENANT).strip() or DEFAULT_TENANT
+    owner, tenant_id = request_context(
+        payload,
+        method_metadata,
+        allow_client_override=False,
+    )
     student_attempt = payload.get("student_attempt")
     results = retrieve_thoughts(query, n_results, owner, tenant_id)
 
@@ -519,13 +580,15 @@ def search_payload(
         }
 
     n_results = normalize_results_count(payload.get("n_results"), DEFAULT_RESULTS)
-    owner = normalize_owner(payload.get("owner"))
-    tenant_id = (payload.get("tenant_id") or DEFAULT_TENANT).strip() or DEFAULT_TENANT
+    owner, tenant_id = request_context(payload, method_metadata, allow_client_override=False)
     results = retrieve_thoughts(query, n_results, owner, tenant_id)
     return 200, {"results": results, "count": len(results)}
 
 
-def ingest_payload(payload: Mapping[str, Any]) -> tuple[int, dict[str, Any]]:
+def ingest_payload(
+    payload: Mapping[str, Any],
+    method_metadata: Mapping[str, Any] | None = None,
+) -> tuple[int, dict[str, Any]]:
     if not isinstance(payload, Mapping):
         return 400, {
             "error": "validation_error",
@@ -535,7 +598,7 @@ def ingest_payload(payload: Mapping[str, Any]) -> tuple[int, dict[str, Any]]:
 
     source_type = (payload.get("source_type") or "").strip().lower()
     source = (payload.get("source") or "").strip()
-    owner = normalize_owner(payload.get("owner"))
+    owner, _tenant_id = request_context(payload, method_metadata, allow_client_override=False)
     subject, topic = derive_subject_topic(source, payload.get("subject"), payload.get("topic"))
 
     allowed = {"obsidian", "pdf", "docx", "url"}

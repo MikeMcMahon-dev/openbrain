@@ -20,10 +20,10 @@ def handler(request):
         )
 
     if metadata["method"] == "GET":
-        status, body = query_payload(payload)
+        status, body = query_payload(payload, metadata)
     else:
         payload = dict(payload)
         payload["mode"] = "flashcards"
-        status, body = query_payload(payload)
+        status, body = query_payload(payload, metadata)
 
     return response_payload(status, body)

@@ -31,7 +31,11 @@ def _make_result(name: str, status: int, payload: Any, expected: int) -> tuple[b
     return True, f"{name}: ok ({status})"
 
 
-def _validate_payload_shape(payload: Any, path: str) -> tuple[bool, str]:
+def _validate_payload_shape(
+    payload: Any,
+    path: str,
+    expected_owner: str | None = None,
+) -> tuple[bool, str]:
     if path not in {"/api/ingest", "/ingest"}:
         return True, "ok"
 
@@ -56,6 +60,9 @@ def _validate_payload_shape(payload: Any, path: str) -> tuple[bool, str]:
     if payload.get("status") not in {"accepted", "queued"}:
         return False, f"{path}: unexpected status '{payload.get('status')}'"
 
+    if expected_owner is not None and payload.get("owner") != expected_owner:
+        return False, f"{path}: owner={payload.get('owner')} expected_owner={expected_owner}"
+
     return True, f"{path}: ok ({payload.get('status')})"
 
 
@@ -63,6 +70,7 @@ def run_case(
     request: dict[str, Any],
     expected: int,
     validate_payload: bool = False,
+    expected_owner: str | None = None,
 ) -> tuple[bool, str]:
     try:
         from api.app import handler
@@ -88,7 +96,11 @@ def run_case(
         return False, message
 
     if validate_payload:
-        ok_payload, detail = _validate_payload_shape(body_payload, route)
+        ok_payload, detail = _validate_payload_shape(
+            body_payload,
+            route,
+            expected_owner=expected_owner,
+        )
         if not ok_payload:
             return False, detail
         return True, detail
@@ -193,18 +205,38 @@ def smoke_local() -> int:
             200,
             True,
         ),
+        (
+            {
+                "path": "/api/ingest",
+                "method": "POST",
+                "body": json.dumps(
+                    {"source_type": "obsidian", "source": "/tmp", "owner": "evil-user"}
+                ),
+                "headers": {
+                    "Content-Type": "application/json",
+                    "x-openbrain-owner": "tenant-a-owner",
+                },
+            },
+            200,
+            True,
+            "tenant-a-owner",
+        ),
         ({"path": "/bogus-path", "method": "GET"}, 404),
     ]
 
     failed = 0
     for case in cases:
-        if len(case) == 3:
+        if len(case) == 4:
+            request, expected, validate_payload, expected_owner = case
+        elif len(case) == 3:
             request, expected, validate_payload = case
+            expected_owner = None
         else:
             request, expected = case
             validate_payload = False
+            expected_owner = None
 
-        ok, message = run_case(request, expected, validate_payload)
+        ok, message = run_case(request, expected, validate_payload, expected_owner)
         print(message)
         if not ok:
             failed += 1
@@ -217,17 +249,20 @@ def _call_live(
     method: str,
     path: str,
     body: dict[str, Any] | None = None,
+    headers: dict[str, Any] | None = None,
 ) -> tuple[int, Any]:
     target = urllib.parse.urljoin(url.rstrip("/") + "/", path.lstrip("/"))
     payload = json.dumps(body or {}).encode("utf-8") if body is not None else None
-    headers = {}
+    req_headers = {"x-openbrain-owner": "tenant-a-owner"}
     if payload is not None:
-        headers["Content-Type"] = "application/json"
+        req_headers["Content-Type"] = "application/json"
+    if headers:
+        req_headers.update(headers)
 
     req = urllib.request.Request(
         target,
         data=payload,
-        headers=headers,
+        headers=req_headers,
         method=method,
     )
     context = ssl.create_default_context()
@@ -254,21 +289,40 @@ def smoke_live(base_url: str) -> int:
         ("/generate_flashcards", {"query": "test"}, 200),
         ("/api/generate_flashcards", {"query": "test"}, 200),
         ("/ingest", {"source_type": "obsidian", "source": "/tmp"}, 200),
-        ("/api/ingest", {"source_type": "obsidian", "source": "/tmp"}, 200),
+        (
+            "/api/ingest",
+            {"source_type": "obsidian", "source": "/tmp", "owner": "evil-user"},
+            200,
+            {"x-openbrain-owner": "tenant-a-owner"},
+            "tenant-a-owner",
+        ),
     ]
 
     failed = 0
-    for path, payload, expected in cases:
+    for case in cases:
+        expected_owner = None
+        req_headers = None
+        if len(case) == 5:
+            path, payload, expected, req_headers, expected_owner = case
+        elif len(case) == 4:
+            path, payload, expected, req_headers = case
+        else:
+            path, payload, expected = case
         try:
             status, body = _call_live(
                 base_url,
                 "POST" if payload is not None else "GET",
                 path,
                 payload,
+                req_headers,
             )
             ok, message = _make_result(path, status, body, expected)
             if ok:
-                ok, detail = _validate_payload_shape(body, path)
+                ok, detail = _validate_payload_shape(
+                    body,
+                    path,
+                    expected_owner=expected_owner,
+                )
                 if not ok:
                     message = detail
         except urllib.error.HTTPError as exc:
