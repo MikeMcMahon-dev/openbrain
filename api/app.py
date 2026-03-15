@@ -6,6 +6,7 @@ from api.health import handler as health_handler
 from api.ingest import handler as ingest_handler
 from api.query import handler as query_handler
 from api.search import handler as search_handler
+from api.chatgpt import handler as chatgpt_handler
 
 
 def _extract_path(request) -> str:
@@ -45,6 +46,14 @@ def handler(request):
         return flashcards_handler(request)
     if path in {"/ingest", "/api/ingest"}:
         return ingest_handler(request)
+    if path in {"/openbrain_query", "/tools/openbrain_query"}:
+        return chatgpt_handler(request, tool_mode="query")
+    if path in {"/openbrain_generate_quiz", "/tools/openbrain_generate_quiz"}:
+        return chatgpt_handler(request, tool_mode="generate_quiz")
+    if path in {"/openbrain_generate_flashcards", "/tools/openbrain_generate_flashcards"}:
+        return chatgpt_handler(request, tool_mode="generate_flashcards")
+    if path in {"/openbrain_ingest", "/tools/openbrain_ingest"}:
+        return chatgpt_handler(request, tool_mode="ingest")
 
     return {
         "statusCode": 404,

@@ -21,6 +21,17 @@ Expose a small stable action base URL in front of Vercel, for example:
 - `https://openbrain-rouge.vercel.app/api/generate_flashcards`
 - `https://openbrain-rouge.vercel.app/api/ingest`
 
+Connector route aliases:
+
+- `https://openbrain-rouge.vercel.app/openbrain_query`
+- `https://openbrain-rouge.vercel.app/openbrain_generate_quiz`
+- `https://openbrain-rouge.vercel.app/openbrain_generate_flashcards`
+- `https://openbrain-rouge.vercel.app/openbrain_ingest`
+- `https://openbrain-rouge.vercel.app/tools/openbrain_query`
+- `https://openbrain-rouge.vercel.app/tools/openbrain_generate_quiz`
+- `https://openbrain-rouge.vercel.app/tools/openbrain_generate_flashcards`
+- `https://openbrain-rouge.vercel.app/tools/openbrain_ingest`
+
 Recommended tools (Custom GPT/function style):
 
 - `openbrain_query`
@@ -39,6 +50,36 @@ Recommended tools (Custom GPT/function style):
   - Required args: `source_type`, `source`
   - Optional args: `subject`, `topic`, `sources`
 
+### Example request bodies
+
+`openbrain_query`:
+
+```json
+{
+  "query": "What is Terraform?"
+}
+```
+
+`openbrain_generate_quiz` (tool_input style):
+
+```json
+{
+  "tool_input": {
+    "query": "What is Terraform?"
+  }
+}
+```
+
+`openbrain_generate_flashcards` (arguments style):
+
+```json
+{
+  "arguments": {
+    "query": "How does a VPC work?"
+  }
+}
+```
+
 ## Identity Mapping (Required)
 
 When a chat call arrives, map chat identity into stable headers:
@@ -48,6 +89,13 @@ When a chat call arrives, map chat identity into stable headers:
 - `x-openbrain-user-id` (optional, when available)
 
 Do not trust body fields like `owner` for scope enforcement.
+
+Optional token gate:
+
+- Set `OPENBRAIN_TOOL_ACCESS_TOKEN` in Vercel env.
+- Send token in:
+  - `Authorization: Bearer <token>`
+  - `X-OpenBrain-Tool-Token: <token>`
 
 ## Error Hygiene for Chat
 

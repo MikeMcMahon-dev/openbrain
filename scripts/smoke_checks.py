@@ -221,6 +221,57 @@ def smoke_local() -> int:
             True,
             "tenant-a-owner",
         ),
+        (
+            {
+                "path": "/openbrain_query",
+                "method": "POST",
+                "body": json.dumps({"query": "test"}),
+                "headers": {},
+            },
+            200,
+        ),
+        (
+            {
+                "path": "/openbrain_generate_quiz",
+                "method": "POST",
+                "body": json.dumps(
+                    {"tool_input": {"query": "test"}, "tool_name": "openbrain_generate_quiz"}
+                ),
+                "headers": {"Content-Type": "application/json"},
+            },
+            200,
+        ),
+        (
+            {
+                "path": "/openbrain_generate_flashcards",
+                "method": "POST",
+                "body": json.dumps(
+                    {
+                        "arguments": {"query": "test"},
+                        "name": "openbrain_generate_flashcards",
+                    }
+                ),
+                "headers": {"Content-Type": "application/json"},
+            },
+            200,
+        ),
+        (
+            {
+                "path": "/openbrain_ingest",
+                "method": "POST",
+                "body": json.dumps(
+                    {
+                        "tool_input": {
+                            "source_type": "obsidian",
+                            "source": "/tmp",
+                        }
+                    }
+                ),
+                "headers": {"Content-Type": "application/json"},
+            },
+            200,
+            True,
+        ),
         ({"path": "/bogus-path", "method": "GET"}, 404),
     ]
 
@@ -295,6 +346,22 @@ def smoke_live(base_url: str) -> int:
             200,
             {"x-openbrain-owner": "tenant-a-owner"},
             "tenant-a-owner",
+        ),
+        ("/openbrain_query", {"query": "test"}, 200),
+        (
+            "/openbrain_generate_quiz",
+            {"tool_input": {"query": "test"}, "tool_name": "openbrain_generate_quiz"},
+            200,
+        ),
+        (
+            "/openbrain_generate_flashcards",
+            {"arguments": {"query": "test"}, "name": "openbrain_generate_flashcards"},
+            200,
+        ),
+        (
+            "/openbrain_ingest",
+            {"tool_input": {"source_type": "obsidian", "source": "/tmp"}},
+            200,
         ),
     ]
 

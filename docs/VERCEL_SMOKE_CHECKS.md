@@ -51,6 +51,8 @@ Current status:
 - `POST /search`, `/api/search` return valid result envelope.
 - `POST /generate_quiz`, `/api/generate_quiz` works.
 - `POST /generate_flashcards`, `/api/generate_flashcards` works.
+- `POST /openbrain_query`, `/openbrain_generate_quiz`,
+  `/openbrain_generate_flashcards` work.
 - `GET` responses remain method-restricted (`405`) where not supported.
 
 ### 5) Vercel App Surface
