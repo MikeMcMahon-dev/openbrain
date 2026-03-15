@@ -4,77 +4,82 @@ This document tracks planned improvements for the OpenBrain system.
 
 ---
 
-## Step 1 – Retrieval and Storage Baseline (kept)
+## Step 1 – Supabase as Primary Storage (Complete)
 
-Keep the current vector pipeline:
+Primary storage now targets Supabase with pgvector:
 
-- ChromaDB persistent collection `openbrain`
-- Embedding model `BAAI/bge-small-en`
-- Markdown ingestion + heading chunking
-- Existing metadata keys: `source`, `file`, `section`, `heading`, `chunk`
-
----
-
-## Step 2 – Tutor-First Query Modes
-
-Add learner-focused tutor behavior in addition to retrieval:
-
-- explain
-- quiz
-- flashcards
-
-Socratic rules:
-
-- Ask students to attempt answers first.
-- Use simple middle-school language.
-- Explain step-by-step.
-- Encourage effort.
-
-Implementation:
-
-- `scripts/tutor.py` contains tutor policy and prompt payload generation.
-- `scripts/query.py` supports all modes and surfaces
-  keyword matches before vector-only hits.
+- `thoughts` is the canonical source for Slack capture
+- `openai/text-embedding-3-small` is the single embedding model for all canonical writes
+- ChromaDB remains as legacy/local reference only
 
 ---
 
-## Step 3 – Multi-format Ingestion Extension
+## Step 2 – Retrieval and Tutor Baseline (Kept)
 
-Add additional ingestion inputs while preserving
-current embedding model and collection:
+Keep existing retrieval capabilities while routing to Supabase source:
 
-- PDF
-- DOCX
-- Website URL
-
-Implementation locations:
-
-- `scripts/ingestors/markdown.py`
-- `scripts/ingestors/pdf.py`
-- `scripts/ingestors/docx.py`
-- `scripts/ingestors/url.py`
-- `scripts/chunking/markdown.py`
-- `scripts/chunking/text.py`
-- `scripts/ingest.py` (coordinates all content types)
-
-Metadata:
-
-- Preserve existing keys.
-- Add `content_type` everywhere.
-- Add `subject` and `topic` where known.
+- retrieval API contracts in `brain_server/server.py`
+- tutor endpoints (`/query`, `/generate_quiz`, `/generate_flashcards`) remain the local target for behavior tuning
+- keyword-first ranking will be reintroduced on top of vector search in Supabase
 
 ---
 
-## Step 4 – MCP Layer Design
+## Step 3 – Tenant & Ownership Groundwork
+
+Stand up schema-level tenancy before Vercel rollout:
+
+- tenant and durable identity fields have been added for row ownership and isolation.
+- shared/private/public intent fields and deterministic source IDs are in place for policy + re-import idempotence.
+- tenancy tables and RLS scaffolding are in place and migration-applied.
+
+Files:
+
+- `20260315193000_supabase_primary_schema_and_tenancy.sql`
+- `20260315195000_add_user_identity_tenancy_fields.sql`
+- `20260315200000_enable_thoughts_rls.sql`
+
+Planned follow-up:
+
+- validate and enforce tenant-aware auth context mapping (`supabase_user_id`, `email`, or `slack_user_id`)
+- add tenancy-aware query filters in API handlers
+
+---
+
+## Step 4 – Slack Ingestion (Complete)
+
+Slack message ingestion now works end-to-end in Supabase:
+
+- `supabase/functions/ingest-thought/index.ts` receives events
+- signature verification is enforced for Slack callbacks
+- startup guards block slash commands and non-user message events
+- `slack_username` is captured and persisted
+- `slack_user_id` and tenant metadata are now written on ingest
+- inserts to `thoughts` table are confirmed
+- function returns confirmation back in the Slack thread
+
+Current operational state:
+
+- Project: `edljijurbmcupawnjpfx`
+- Function endpoint:
+  - `https://edljijurbmcupawnjpfx.supabase.co/functions/v1/ingest-thought`
+- Migration artifacts added:
+  - `20260314193123_add_slack_username.sql`
+  - `20260315193000_supabase_primary_schema_and_tenancy.sql`
+  - `20260315195000_add_user_identity_tenancy_fields.sql`
+  - `20260315200000_enable_thoughts_rls.sql`
+
+---
+
+## Step 5 – MCP Layer Design
 
 Target endpoints to expose:
 
-- `POST /ingest` (interface scaffold)
+- `POST /ingest`
 - `POST /query`
 - `POST /generate_quiz`
 - `POST /generate_flashcards`
 
-Detailed contracts are now tracked in:
+Detailed contracts are tracked in:
 
 - `docs/MCP_CONTRACT.md`
 - `docs/API_CONTRACT_EXAMPLES.md`
@@ -87,30 +92,45 @@ Detailed contracts are now tracked in:
 Current status:
 
 - API routes are scaffolded in `brain_server/server.py`.
-- Full ingestion orchestration through MCP transport is planned next.
+- Ingestion orchestration through MCP transport is next after tenancy and Supabase read integration.
 - Decision log tracked in `docs/MCP_DECISION_LOG.md`
   for unresolved implementation questions.
 
 ---
 
+## Step 6 – Vercel App Implementation (In progress)
+
+- build the web interface for thought review/retrieval
+- connect app flows to `edljijurbmcupawnjpfx` Supabase data
+- implement tenancy-aware view/route controls
+- wire secure auth for user-level data visibility
+
+---
+
+## Step 7 – Vercel Rollout + Obsidian Backfill (Execution)
+
+Before defaulting reads to Supabase:
+
+- Re-import Obsidian markdown corpus into Supabase with deterministic `source_chunk_id`
+- Verify row/document counts and coverage against baseline
+- Run rollout smoke checks in `docs/VERCEL_SMOKE_CHECKS.md`
+- Gate default source flip on parity results and rollback readiness
+
+---
+
 ## Future Considerations
 
-- Keep keyword-first retrieval surfacing, then vector fallback until
-  hybrid ranking is built.
-- Add richer hybrid scoring in a later pass.
+- Add richer hybrid ranking and re-rankers in production query path.
 - Move metadata routing into shared retrieval abstractions.
-- Evaluate Supabase as a managed Vector DB candidate if scale requires:
-  - built-in auth
-  - managed hosting
-  - easier multi-device sharing
-  - migration overhead vs current local-first simplicity
+- Remove legacy-only assumptions once Vercel + Supabase parity is proven.
 
 ---
 
 ## Long-Term Direction
 
-OpenBrain becomes the central student learning memory with:
+OpenBrain becomes the family-facing, multi-user knowledge memory with:
 
 - material ingestion (notes, PDFs, DOCX, URLs)
-- retrieval and Socratic guidance
-- future quiz/flashcard generation quality improvements
+- retrieval and tutor support
+- strong tenancy and privacy boundaries
+- production-friendly maintenance and operations

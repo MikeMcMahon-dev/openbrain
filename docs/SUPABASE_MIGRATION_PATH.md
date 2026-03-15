@@ -1,65 +1,74 @@
-# Supabase Migration Path (No Immediate Commit)
+# Supabase Migration Path (Current State)
 
-## Why this is a later-phase task
+## Migration run protocol (required)
 
-- Current architecture is local-first and already works with Chroma.
-- Migration should happen after vector and ingestion behavior are stable in
-  multi-source tests.
-- Current goal is not broad multi-user support yet, so local vector store
-  remains optimal for speed.
+- Before every migration apply, run:
+  - `supabase db push --linked --dry-run`
+- Only after a clean dry-run, apply with:
+  - `supabase db push --linked`
+- Use `--include-all` only if you are intentionally reconciling migration history drift.
 
-## Current state snapshot
+## What is already complete
 
-- Storage: `brain_index/` (local Chroma persistent directory)
-- Collection: `openbrain`
-- Vector engine: Chroma + local HNSW/index state in sqlite + binary files
-- Embeddings: `BAAI/bge-small-en`
-- Metadata used: `source`, `file`, `section`, `heading`, `chunk`,
-  `owner`, plus planned `content_type`, `subject`, `topic`
+The migration has moved to Supabase-first storage and retrieval readiness:
 
-## Target Supabase state
+- `supabase/functions/ingest-thought/index.ts` writes Slack messages into `thoughts` with embeddings, metadata, and captured usernames.
+- migration `20260314193123_add_slack_username.sql` added Slack attribution fields.
+- migration `20260315193000_supabase_primary_schema_and_tenancy.sql` added tenant/source metadata, deterministic import keys, and search indexes.
+- migration `20260315195000_add_user_identity_tenancy_fields.sql` added `open_brain_users`, `open_brain_tenants`, `open_brain_tenant_memberships` and added durable identity columns to `thoughts`.
+- migration `20260315200000_enable_thoughts_rls.sql` added tenant-aware RLS helpers and policy scaffolding for authenticated access.
+- signature verification and startup guards for Slack callbacks are active.
+- migration application state is in sync between local files and remote project for `edljijurbmcupawnjpfx`.
 
-- Managed Postgres with pgvector extension
-- Table design candidate:
-  - `id` UUID
-  - `document_id` text (compatibility with current chunk ids)
-  - `vector` vector(384 or model-compatible dims)
-  - `text` text
-  - `metadata` jsonb
-  - `tenant_owner` text
-  - `content_type` text
-  - `subject` text
-- `tenant_owner` maps from current `owner`.
+Current canonical storage now is:
 
-## Migration staging approach
+- `SUPABASE -> public.thoughts`
+- `ChromaDB -> legacy/local` only
 
-- Keep Chroma as source of truth during validation.
-- Add an export layer:
-  - read all rows from Chroma collection
-  - map metadata to `metadata` jsonb and normalized columns
-  - write vectors to pgvector table
-- Build dual-write mode temporarily:
-  - new ingests write to Chroma and Supabase in parallel
-  - reads compare vector deltas until parity is validated
-- Cutover:
-  - `/query` search path switches from Chroma to Supabase
-  - rollback path remains by re-pointing collection provider only
+## Groundwork completed for multi-user and tenancy
 
-## Risk and effort estimate
+The schema now includes tenancy-oriented fields intended for policy enforcement:
 
-- Moderate effort with careful parity testing.
-- Main work: schema migration, index build, query fallback semantics,
-  auth context threading, and deployment credentials.
-- Lower-risk if performed in phases:
-  - schema + writer migration
-  - side-by-side retrieval validation
-  - production read cutover
-  - observability and cleanup
+- `tenant_id`
+- `visibility`
+- `source_type`
+- `source_team_id`, `source_workspace_id`, `source_channel_id`
+- `created_by_user_id`, `created_by_user_login`
+- `slack_user_id`
+- `open_brain_users` / `open_brain_tenants` / `open_brain_tenant_memberships`
+- deterministic identifiers: `document_id`, `chunk_id`, `source_chunk_id`
+- optional `content_hash` for dedupe/replay-safe imports
 
-## Compatibility rules during migration
+Indexing added for:
 
-- Do not change:
-  - chunking behavior yet
-  - embedding model
-  - `owner`-first filtering semantics
-- Preserve existing metadata keys to avoid tutor/retrieval code churn.
+- tenant-scoped queries
+- ownership lookups
+- deterministic source chunk de-duplication
+- pgvector retrieval (`ivfflat` when supported by environment, with fallback handling)
+- PostgreSQL full-text search (`GIN` on `to_tsvector`)
+
+Recent migration outcome:
+
+- 20260315195000 and 20260315200000 are now applied remotely.
+- ANN index creation now avoids hard-fail on environments lacking `vector_cosine_ops`.
+
+## What remains before production query cutover
+
+- Add Vercel auth + tenancy context in API layer and switch writes/reads to user context values.
+- Ensure Vercel/auth JWT values map to `open_brain_users` (`supabase_user_id`, `email`, or `slack_user_id`) before harden-gating `tenant_id`.
+- Re-import Obsidian markdown into Supabase with deterministic IDs (overwrite-safe/idempotent).
+- Stand up query parity checks (recall/latency) between legacy + Supabase for representative prompts.
+
+## Suggested rollout
+
+1. Keep Chroma reads disabled by default, but available as a debug fallback.
+2. Deliver Vercel read path using Supabase source with `visibility` and `tenant_id` filters.
+3. Run Vercel smoke checks in [docs/VERCEL_SMOKE_CHECKS.md](/Users/mmcmahon/src/home-lab/open-brain/docs/VERCEL_SMOKE_CHECKS.md).
+4. Verify ingestion + query stability for family demo flows.
+5. Enable formal RLS policy layer after auth + tenancy wiring is in place.
+6. Retire legacy dependency only after accepted stability gates are met.
+
+## Notes
+
+- This is now a storage-direction migration rather than a dual-write prototype.
+- Chroma remains useful for local experimentation but is no longer the production source of truth.
