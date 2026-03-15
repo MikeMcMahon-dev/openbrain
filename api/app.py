@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
 _API_DIR = Path(__file__).resolve().parent
 if str(_API_DIR) not in sys.path:
@@ -13,6 +14,7 @@ from generate_quiz import handler as quiz_handler
 from ingest import handler as ingest_handler
 from query import handler as query_handler
 from search import handler as search_handler
+from _openbrain_api import response_payload
 
 
 def _extract_path(request) -> str:
@@ -23,7 +25,7 @@ def _extract_path(request) -> str:
 
         raw_url = request.get("url")
         if isinstance(raw_url, str):
-            return raw_url
+            return urlparse(raw_url).path
 
     if hasattr(request, "path"):
         value = getattr(request, "path")
@@ -33,7 +35,7 @@ def _extract_path(request) -> str:
     if hasattr(request, "url"):
         value = getattr(request, "url")
         if isinstance(value, str):
-            return value
+            return urlparse(value).path
 
     return "/"
 
@@ -53,5 +55,24 @@ def handler(request):
     if path in {"/ingest", "/api/ingest"}:
         return ingest_handler(request)
 
-    # Preserve a simple legacy fallback for local checks.
-    return query_handler(request)
+    return response_payload(
+        404,
+        {
+            "error": "not_found",
+            "message": f"No route configured for {path}",
+            "routes": [
+                "/health",
+                "/api/health",
+                "/search",
+                "/api/search",
+                "/query",
+                "/api/query",
+                "/generate_quiz",
+                "/api/generate_quiz",
+                "/generate_flashcards",
+                "/api/generate_flashcards",
+                "/ingest",
+                "/api/ingest",
+            ],
+        },
+    )
