@@ -1,9 +1,6 @@
-from __future__ import annotations
-
-
-def handler(_request):
+def handler(request, _context=None):
     return {
         "statusCode": 200,
-        "headers": {"Content-Type": "text/plain"},
+        "headers": {"content-type": "text/plain"},
         "body": "openbrain probe",
     }
