@@ -39,6 +39,10 @@ Current status:
   - `message`
   - `details`
 
+- In Vercel, `/api/ingest` can validate and queue remote/local paths only if that path is reachable by the Vercel runtime.
+  - Local filesystem paths from your laptop (for example `/tmp` or `/Users/...`) are not reachable from Vercel.
+  - For local Obsidian imports, run the ingest command from the local machine or use a temporary public source plus bulk `sources` list.
+
 ### 3) Corpus and Tenant Handling
 
 - Manual Obsidian re-import can be run and produces deterministic `source_chunk_id` values.
