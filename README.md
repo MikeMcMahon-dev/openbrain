@@ -60,12 +60,12 @@ make smoke-live-log SMOKE_URL=https://<project-domain>.vercel.app
 
 ## Repository hygiene
 
-- `brain_index/` stores local Chroma persistent vector data and should be treated as generated environment state.
-- Do not commit database artifacts (`brain_index/data_level0.bin`, `brain_index/chroma.sqlite3`) to git.
-- If these files are modified by ingestion or local testing, run:
+- `requirements-full.txt` includes optional tooling for local ingestion experiments.
+- If generated local artifacts are created during manual experiments, do not commit them to git.
+- If local artifacts are modified by ingestion or CLI testing, restore from HEAD:
 
 ```bash
-git restore -- brain_index
+git restore -- <artifact_path>
 ```
 
 ## Dependency profile for deployment vs local use

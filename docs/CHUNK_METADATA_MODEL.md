@@ -1,6 +1,6 @@
 # Chunk Metadata Model (Ingestion + Retrieval)
 
-This model extends the existing Chroma metadata schema while preserving current fields.
+This model defines the Supabase metadata contract used by `public.thoughts` and preserves the legacy ingestion field conventions.
 
 ## Existing required metadata (current)
 

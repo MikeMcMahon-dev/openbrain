@@ -23,7 +23,7 @@ The migration has moved to Supabase-first storage and retrieval readiness:
 Current canonical storage now is:
 
 - `SUPABASE -> public.thoughts`
-- `ChromaDB -> legacy/local` only
+- `ChromaDB -> legacy/retired` only
 
 ## Groundwork completed for multi-user and tenancy
 
@@ -62,7 +62,7 @@ Recent migration outcome:
 
 ## Suggested rollout
 
-1. Keep Chroma reads disabled by default, but available as a debug fallback.
+1. Keep legacy Chroma-based reads retired; Supabase is the only production read/write path.
 2. Deliver Vercel read path using Supabase source with `visibility` and `tenant_id` filters.
 3. Run Vercel smoke checks in [docs/VERCEL_SMOKE_CHECKS.md](/Users/mmcmahon/src/home-lab/open-brain/docs/VERCEL_SMOKE_CHECKS.md).
 4. Verify ingestion + query stability for family demo flows.
@@ -72,4 +72,4 @@ Recent migration outcome:
 ## Notes
 
 - This is now a storage-direction migration rather than a dual-write prototype.
-- Chroma remains useful for local experimentation but is no longer the production source of truth.
+- Chroma is retired from production and retained only for historical reference if needed.

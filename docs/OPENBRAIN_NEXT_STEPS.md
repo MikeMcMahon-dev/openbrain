@@ -10,7 +10,7 @@ Primary storage now targets Supabase with pgvector:
 
 - `thoughts` is the canonical source for Slack capture
 - `openai/text-embedding-3-small` is the single embedding model for all canonical writes
-- ChromaDB remains as legacy/local reference only
+- ChromaDB references are retired from runtime; Supabase is canonical.
 
 ---
 

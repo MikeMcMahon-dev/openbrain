@@ -16,13 +16,10 @@
 
 ## Ingestion flow
 
-- Run `scripts/ingest.py` to build/update Chroma index from configured
-  sources.
-- Expected Chroma behavior:
-  - Existing chunks in same IDs are upserted.
-  - New docs generate new chunk vectors and metadata.
-- If server process is watching source changes, it may trigger reindex
-  actions in the same environment.
+- Run `scripts/ingest.py` to write/import chunks into Supabase (`public.thoughts`).
+- Expected behavior:
+  - Existing chunks with matching deterministic IDs are upserted/skipped via primary keys.
+  - New docs generate new chunk records and metadata.
 
 ## MCP endpoint runtime flow
 
@@ -40,9 +37,8 @@
 - Query route:
   - Request goes to `/query` (or mode-specific wrapper).
   - Server normalizes `mode`.
-  - Embedding generated via existing model.
-  - Keyword matches are surfaced first.
-  - Vector matches fill remaining slots.
+  - Embedding generated via configured model path.
+  - Keyword and vector candidates are merged by the query handler.
   - Tutor layer receives context and returns prompt payload.
 
 ## Vercel app post-deploy flow
@@ -69,14 +65,13 @@
 
 ## Index persistence flow
 
-- `brain_index/` is local generated vector state.
-- Re-run ingestion to reproduce.
-- If accidentally mutated before commit, restore from HEAD:
-  - `git restore -- brain_index`
+- There is no runtime dependency on local Chroma persistence for production.
+- Re-run ingestion to reproduce from source material.
+- If accidental generated artifacts are created locally, clean them before commit.
 
 ## Safe commit gates
 
 - Do not include generated artifacts:
-  - `brain_index/`
   - bytecode artifacts (`__pycache__`)
+  - temporary local vector cache/state generated during experiments
 - Review `git diff --cached` before every commit.

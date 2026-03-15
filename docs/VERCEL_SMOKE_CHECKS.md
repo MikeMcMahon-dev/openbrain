@@ -6,8 +6,8 @@ Use this file as the final checklist before any family-facing demo handoff.
 
 ## Rollout model
 
-- `phase 1`: Vercel is wired to Supabase for primary reads/writes with legacy Chroma retained for reference only.
-- `phase 2`: RLS + strict tenancy auth mapping is added after identity plumbing is complete.
+- `phase 1` (complete): Vercel is wired to Supabase for primary reads/writes.
+- `phase 2` (in progress): strict tenant-aware auth mapping and RLS policy hardening.
 
 Current status:
 - `phase 1` checks are green in smoke testing.
@@ -55,8 +55,8 @@ Current status:
 - `POST /search`, `/api/search` return valid result envelope.
 - `POST /generate_quiz`, `/api/generate_quiz` works.
 - `POST /generate_flashcards`, `/api/generate_flashcards` works.
-- `POST /openbrain_query`, `/openbrain_generate_quiz`,
-  `/openbrain_generate_flashcards` work.
+- Planned `/openbrain_query`, `/openbrain_generate_quiz`,
+  `/openbrain_generate_flashcards` routes are not currently deployed in the active runtime.
 - `GET` responses remain method-restricted (`405`) where not supported.
 
 ### 5) Vercel App Surface

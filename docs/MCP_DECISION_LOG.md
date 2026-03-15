@@ -5,8 +5,8 @@ should be confirmed before code changes.
 
 ## Decisions already made
 
-- Keep ChromaDB for now.
-- Reuse embedding model `BAAI/bge-small-en`.
+- Keep Supabase (pgvector) as the canonical store.
+- Reuse embedding model `openai/text-embedding-3-small` for canonical writes.
 - Preserve current metadata shape and add fields progressively:
   - `content_type`
   - `subject`

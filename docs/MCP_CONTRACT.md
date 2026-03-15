@@ -6,8 +6,8 @@ endpoints planned in Step 4.
 ## Goals
 
 - Keep transport simple and predictable.
-- Preserve keyword-first retrieval prioritization with vector fallback for
-  remaining slots.
+- Preserve keyword/full-text retrieval plus vector retrieval merge for
+  completion and precision.
 - Defer background orchestration until MCP layer implementation is complete.
 - Maintain compatibility with current server field names and metadata model.
 
@@ -32,7 +32,7 @@ These map to future `where` filters and UI context.
 
 ### Ingest purpose
 
-Ingest a new study material source into the same Chroma collection used
+Ingest a new study material source into the canonical `public.thoughts` Supabase
 by markdown ingestion.
 
 ### Ingest request body
@@ -216,7 +216,7 @@ Retrieve semantically relevant context and return tutor-ready payload.
 ### Query result metadata
 
 - `source_channel` indicates how each hit was surfaced:
-  - `keyword`: match came from BM25/term-based retrieval.
+  - `keyword`: match came from full-text/keyword retrieval.
   - `vector`: match came from semantic/vector similarity.
 
 ---
@@ -274,9 +274,8 @@ For all endpoints, use a consistent failure shape:
    - `message` and optional `details`
 4. Client sends query with logical context and mode.
 5. Server normalizes mode and builds query embedding with the configured model (default: `openai/text-embedding-3-small`).
-6. Server applies BM25 keyword retrieval and vector retrieval.
-7. Keyword-matching hits are surfaced first when present;
-   vector hits fill remaining results.
+6. Server applies keyword/full-text retrieval and vector retrieval and merges both result streams.
+7. Result ranking preserves keyword recall while vector similarity fills remaining slots.
 8. Tutor layer maps results into one of:
    - explain
    - quiz

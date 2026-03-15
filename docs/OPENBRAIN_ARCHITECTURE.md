@@ -4,7 +4,7 @@ OpenBrain is now Supabase-first for persistence and retrieval.
 
 - Primary web path: Vercel + Supabase
 - Primary database: Supabase Postgres with pgvector
-- Legacy/local reference path: ChromaDB (`brain_index/`) and local ingestion scripts
+- Local scripts are retained for source processing and experimentation; production reads/writes flow through Supabase only.
 
 It functions as a **personal and family RAG engine** with a unified web surface.
 
@@ -24,17 +24,16 @@ Contents:
 
 ---
 
-## 2. Legacy Local Ingestion Pipeline
+## 2. Ingestion Pipeline
 
 `scripts/ingest.py`
 
-Current legacy responsibility:
+Current responsibility:
 
 - reading markdown files
 - heading-based chunking
 - filtering small chunks
-- local experimental embeddings/chunks
-- local Chroma vector persistence for migration/testing only
+- writing chunks/embeddings to Supabase `public.thoughts`
 
 ---
 
@@ -89,15 +88,11 @@ the deployed serverless entrypoint.
 
 ---
 
-## 6. Legacy Local Indexing
-
-Uses:
-
-- watchdog
+## 6. Ingestion Triggering
 
 Current intent:
 
-`vault change -> chunk/index -> local toolchain -> Supabase upsert (legacy Chroma refresh remains available)`
+`vault change -> chunk/index -> local toolchain -> Supabase upsert`
 
 ---
 
