@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+_API_DIR = Path(__file__).resolve().parent
+if str(_API_DIR) not in sys.path:
+    sys.path.append(str(_API_DIR))
+
 from health import handler as health_handler
 from generate_flashcards import handler as flashcards_handler
 from generate_quiz import handler as quiz_handler
