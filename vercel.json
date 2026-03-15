@@ -1,0 +1,58 @@
+{
+  "version": 2,
+  "functions": {
+    "api/*.py": {
+      "runtime": "python3.11"
+    }
+  },
+  "routes": [
+    {
+      "src": "^/api/health$",
+      "dest": "api/health.py"
+    },
+    {
+      "src": "^/api/search$",
+      "dest": "api/search.py"
+    },
+    {
+      "src": "^/api/query$",
+      "dest": "api/query.py"
+    },
+    {
+      "src": "^/api/generate_quiz$",
+      "dest": "api/generate_quiz.py"
+    },
+    {
+      "src": "^/api/generate_flashcards$",
+      "dest": "api/generate_flashcards.py"
+    },
+    {
+      "src": "^/api/ingest$",
+      "dest": "api/ingest.py"
+    },
+    {
+      "src": "^/health$",
+      "dest": "api/health.py"
+    },
+    {
+      "src": "^/search$",
+      "dest": "api/search.py"
+    },
+    {
+      "src": "^/query$",
+      "dest": "api/query.py"
+    },
+    {
+      "src": "^/generate_quiz$",
+      "dest": "api/generate_quiz.py"
+    },
+    {
+      "src": "^/generate_flashcards$",
+      "dest": "api/generate_flashcards.py"
+    },
+    {
+      "src": "^/ingest$",
+      "dest": "api/ingest.py"
+    }
+  ]
+}

@@ -3,3 +3,6 @@
 __pycache__/
 brain_server/__pycache__/
 brain_index/
+.vercel/
+.python-version
+*.log
