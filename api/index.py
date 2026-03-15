@@ -1,4 +1,4 @@
-def handler(request, _context=None):
+def handler(event, context):
     return {
         "statusCode": 200,
         "headers": {"content-type": "text/plain"},
