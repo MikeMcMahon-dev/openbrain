@@ -25,5 +25,5 @@ password = ""
 connect_timeout_seconds = 10
 connection_autocommit = true
 
-# Optional: table planned for vector/metadata writes (future dual-write phase)
-target_table = "openbrain_chunks"
+# Primary write table for migration-phase and production reads/writes.
+target_table = "thoughts"
