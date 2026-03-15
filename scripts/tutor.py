@@ -60,6 +60,7 @@ def build_tutor_packet(
         "question": question,
         "student_attempt": student_attempt or "",
         "context": compact_context,
+        "context_used": compact_context,
         "instructions": (
             "Do not reveal the direct answer yet. Ask the student to attempt first, "
             "then provide feedback and a step-by-step explanation."

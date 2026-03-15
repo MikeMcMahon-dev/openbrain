@@ -100,6 +100,7 @@ pygame==2.5.2
 Pygments==2.19.2
 pypdf==6.7.5
 PyPika==0.51.1
+psycopg[binary]==3.2.10
 pyproject_hooks==1.2.0
 python-dateutil==2.9.0.post0
 python-dotenv==1.2.2

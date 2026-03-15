@@ -1,7 +1,12 @@
 import hashlib
+import os
 import re
 import sys
 import threading
+import urllib.error
+import urllib.parse
+import urllib.request
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +27,7 @@ project_root = Path(__file__).resolve().parent.parent
 # resolve key directories
 brain_index_path = project_root / "brain_index"
 vault_path = project_root / "vault"
+
 sys.path.append(str(project_root / "scripts"))
 
 try:
@@ -33,7 +39,6 @@ except Exception:  # pragma: no cover
 print("\nStarting OpenBrain server...")
 print(f"Project root: {project_root}")
 
-# validate required directories
 if not brain_index_path.exists():
     raise RuntimeError("brain_index directory not found. Run ingestion first.")
 
@@ -48,7 +53,6 @@ client = chromadb.PersistentClient(path=str(project_root / "brain_index"))
 collection = client.get_collection("openbrain")
 
 print("Building keyword index...")
-
 all_docs = collection.get()
 documents = all_docs.get("documents") or []
 metadatas = all_docs.get("metadatas") or []
@@ -67,6 +71,7 @@ class TutorQueryRequest(BaseModel):
     mode: str = "explain"
     n_results: int = 5
     student_attempt: str | None = None
+    owner: str = "mmcmahon"
 
 
 class IngestRequest(BaseModel):
@@ -74,6 +79,90 @@ class IngestRequest(BaseModel):
     source: str
     subject: str | None = None
     topic: str | None = None
+    owner: str = "mmcmahon"
+
+
+DEFAULT_OWNER = os.getenv("OPENBRAIN_DEFAULT_OWNER", os.getenv("USER", "mmcmahon"))
+
+
+def _normalize_owner(owner: str) -> str:
+    return (owner or DEFAULT_OWNER).strip() or DEFAULT_OWNER
+
+
+def _source_is_reachable(source_type: str, source: str) -> tuple[bool, str | None]:
+    if source_type == "url":
+        parsed = urllib.parse.urlparse(source)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            return False, "invalid URL format"
+
+        request = urllib.request.Request(source, method="HEAD")
+        try:
+            with urllib.request.urlopen(request, timeout=5) as response:
+                status_code = response.status
+        except urllib.error.HTTPError as exc:
+            status_code = exc.code
+            if status_code == 405:
+                # Retry with GET for servers that reject HEAD.
+                request = urllib.request.Request(source, method="GET")
+                try:
+                    with urllib.request.urlopen(request, timeout=5) as response:
+                        status_code = response.status
+                except Exception as nested_exc:
+                    return False, f"url is not reachable: {nested_exc}"
+            else:
+                return False, f"url returned HTTP {status_code}"
+        except Exception as exc:
+            return False, f"url is not reachable: {exc}"
+
+        if status_code >= 400:
+            return False, f"url returned HTTP {status_code}"
+        return True, None
+
+    source_path = Path(source)
+    if not source_path.exists():
+        return False, f"{source_type} source not found at path"
+
+    if source_type in {"pdf", "docx"} and not source_path.is_file():
+        return False, f"{source_type} source must be a file"
+
+    try:
+        if source_path.is_file():
+            with source_path.open("rb"):
+                pass
+    except Exception as exc:
+        return False, f"{source_type} source is not readable: {exc}"
+
+    return True, None
+
+
+def _normalize_source_type(source_type: str) -> str:
+    return (source_type or "").strip().lower()
+
+
+def _normalize_source(source: str) -> str:
+    return (source or "").strip()
+
+
+def _derive_subject_topic(source: str, subject: str | None, topic: str | None) -> tuple[str, str]:
+    derived_subject = (subject or "").strip()
+    derived_topic = (topic or "").strip()
+
+    if not derived_subject:
+        try:
+            parsed = Path(source)
+            derived_subject = parsed.stem or source
+        except Exception:
+            derived_subject = "Imported Study Material"
+
+    if not derived_topic:
+        derived_topic = datetime.now().strftime("%Y-%m-%d")
+
+    return derived_subject, derived_topic
+
+
+def _build_ingest_id(source_type: str, source: str, owner: str, subject: str, topic: str) -> str:
+    fingerprint = f"{owner}|{source_type}|{source}|{subject}|{topic}"
+    return hashlib.md5(fingerprint.encode("utf-8")).hexdigest()
 
 
 def as_python_list(value: Any) -> list[float]:
@@ -120,6 +209,11 @@ def doc_id_from_meta(meta):
 # load embedding model once
 print("Loading embedding model...")
 model = SentenceTransformer("BAAI/bge-small-en")
+
+
+def _normalize_mode(mode: str) -> str:
+    value = (mode or "explain").lower().strip()
+    return value if value in {"explain", "quiz", "flashcards"} else "explain"
 
 
 class VaultChangeHandler(FileSystemEventHandler):
@@ -181,6 +275,8 @@ def reindex_file(filepath):
             "heading": chunk["heading"],
             "chunk": chunk_index,
             "content_type": "markdown",
+            "owner": _normalize_owner(""),
+            "user_id": _normalize_owner(""),
         }
 
         collection.upsert(
@@ -200,50 +296,13 @@ observer.start()
 print("Vault watcher started")
 
 
-def _normalize_mode(mode: str) -> str:
-    value = (mode or "explain").lower().strip()
-    return value if value in {"explain", "quiz", "flashcards"} else "explain"
-
-
-def _keyword_fallback(query: str, n_results: int):
-    query_tokens = re.findall(r"\b\w+\b", query.lower())
-    if not query_tokens:
-        return []
-
-    scores = [
-        (idx, sum(1 for term in query_tokens if term in (doc or "").lower()))
-        for idx, doc in enumerate(documents)
-    ]
-    scores.sort(key=lambda item: item[1], reverse=True)
-
-    results = []
-    for idx, score in scores[:n_results]:
-        if score <= 0:
-            break
-        meta = metadatas[idx]
-        text = documents[idx]
-        context = expand_context(meta, text)
-        results.append(
-            {
-                "score": float(score),
-                "file": meta.get("file"),
-                "section": meta.get("section"),
-                "heading": meta.get("heading"),
-                "content_type": meta.get("content_type"),
-                "text": context,
-            }
-        )
-    return results
-
-
 def search_with_tutor(request: TutorQueryRequest):
-    results = search_brain(request.query, request.n_results)
-    if not results:
-        results = _keyword_fallback(request.query, request.n_results)
+    owner = _normalize_owner(request.owner)
+    results = search_brain(request.query, request.n_results, owner)
 
     context_chunks = [
         {
-            "source": result.get("file"),
+            "source": result.get("source") or result.get("file"),
             "file": result.get("file"),
             "section": result.get("section"),
             "heading": result.get("heading"),
@@ -255,8 +314,14 @@ def search_with_tutor(request: TutorQueryRequest):
     if build_tutor_packet is None:
         tutor_payload = {
             "mode": _normalize_mode(request.mode),
-            "status": "tutor_module_unavailable",
-            "message": "Tutor prompt module not importable from server process.",
+            "rules": [
+                "Ask the student to try first.",
+                "Use short, simple language for a middle school learner.",
+                "Explain ideas step by step.",
+                "Encourage effort and curiosity before confirming answers.",
+            ],
+            "tutor_prompt": "Tutor module unavailable in this runtime.",
+            "context_used": context_chunks,
         }
     else:
         tutor_payload = build_tutor_packet(
@@ -267,10 +332,12 @@ def search_with_tutor(request: TutorQueryRequest):
         )
 
     return {
-        "query": request.query,
-        "mode": tutor_payload.get("mode"),
+        "mode": tutor_payload.get("mode", _normalize_mode(request.mode)),
+        "question": request.query,
+        "rules": tutor_payload.get("rules", []),
+        "tutor_prompt": tutor_payload.get("tutor_prompt", ""),
+        "context_used": tutor_payload.get("context_used", []),
         "results": results,
-        "tutor": tutor_payload,
     }
 
 
@@ -281,86 +348,137 @@ def health():
 
 @app.post("/search")
 def search_brain_endpoint(query: str, n_results: int = 5):
-    return search_brain(query, n_results)
+    return search_brain(query, n_results, owner=DEFAULT_OWNER)
 
 
-def search_brain(query: str, n_results: int = 5):
+def search_brain(query: str, n_results: int = 5, owner: str = DEFAULT_OWNER):
+    normalized_owner = _normalize_owner(owner)
     embedding = as_python_list(model.encode(query, convert_to_numpy=True))
     tokenized_query = re.findall(r"\b\w+\b", query.lower())
 
-    results = collection.query(query_embeddings=[embedding], n_results=n_results)
-    documents_by_query = results.get("documents") or []
-    metadatas_by_query = results.get("metadatas") or []
-    distances_by_query = results.get("distances") or []
+    where_clause = {"owner": normalized_owner}
+
+    try:
+        results = collection.query(
+            query_embeddings=[embedding],
+            n_results=n_results,
+            where=where_clause,
+        )
+        documents_by_query = results.get("documents") or []
+        metadatas_by_query = results.get("metadatas") or []
+        distances_by_query = results.get("distances") or []
+    except Exception as exc:
+        print(f"Owner-filtered vector query failed: {exc}. Falling back without owner filter.")
+        results = collection.query(
+            query_embeddings=[embedding],
+            n_results=n_results,
+        )
+        documents_by_query = results.get("documents") or []
+        metadatas_by_query = results.get("metadatas") or []
+        distances_by_query = results.get("distances") or []
 
     if not documents_by_query or not metadatas_by_query or not distances_by_query:
         return []
 
-    seen = set()
-    structured_results = []
+    vector_results: list[tuple[tuple[str, int] | None, dict[str, object]]] = []
+    keyword_results: list[tuple[tuple[str, int] | None, dict[str, object]]] = []
+    keyword_seen = set()
 
     docs = documents_by_query[0] or []
     metas = metadatas_by_query[0] or []
     distances = distances_by_query[0] or []
+
+    for doc, meta, dist in zip(docs, metas, distances):
+        if meta.get("owner") and meta.get("owner") != normalized_owner:
+            continue
+
+        result_id = doc_id_from_meta(meta)
+        doc_text = (doc or "").lower()
+        query_words = query.lower().split()
+        keyword_hits = sum(1 for word in query_words if word in doc_text)
+        score = (1 - dist) + (keyword_hits * 0.5)
+        context = expand_context(meta, doc)
+
+        vector_results.append(
+            (
+                result_id,
+                {
+                    "score": score,
+                    "file": meta.get("file"),
+                    "source": meta.get("source"),
+                    "section": meta.get("section"),
+                    "heading": meta.get("heading"),
+                    "content_type": meta.get("content_type"),
+                    "owner": meta.get("owner"),
+                    "source_channel": "vector",
+                    "text": context,
+                },
+            )
+        )
 
     keyword_scores = bm25.get_scores(tokenized_query)
     top_keyword_indices = sorted(
         range(len(keyword_scores)),
         key=lambda i: keyword_scores[i],
         reverse=True,
-    )[:n_results]
-
-    for doc, meta, dist in zip(docs, metas, distances):
-        identifier = doc_id_from_meta(meta)
-        if identifier in seen:
-            continue
-
-        seen.add(identifier)
-
-        doc_text = doc.lower()
-        query_words = query.lower().split()
-        keyword_hits = sum(1 for word in query_words if word in doc_text)
-        score = (1 - dist) + (keyword_hits * 0.5)
-        context = expand_context(meta, doc)
-
-        structured_results.append(
-            {
-                "score": score,
-                "file": meta.get("file"),
-                "section": meta.get("section"),
-                "heading": meta.get("heading"),
-                "content_type": meta.get("content_type"),
-                "text": context,
-            }
-        )
+    )[: max(1, n_results)]
 
     for idx in top_keyword_indices:
-        doc = documents[idx]
-        meta = metadatas[idx]
-        identifier = doc_id_from_meta(meta)
-
-        if identifier in seen:
+        if keyword_scores[idx] <= 0:
             continue
 
-        seen.add(identifier)
+        doc = documents[idx]
+        meta = metadatas[idx]
+        if not doc:
+            continue
+
+        if meta.get("owner") and meta.get("owner") != normalized_owner:
+            continue
+
+        identifier = doc_id_from_meta(meta)
+        if identifier in keyword_seen:
+            continue
 
         context = expand_context(meta, doc)
 
-        structured_results.append(
-            {
-                "score": keyword_scores[idx],
-                "file": meta.get("file"),
-                "section": meta.get("section"),
-                "heading": meta.get("heading"),
-                "content_type": meta.get("content_type"),
-                "text": context,
-            }
+        keyword_results.append(
+            (
+                identifier,
+                {
+                    "score": keyword_scores[idx],
+                    "file": meta.get("file"),
+                    "source": meta.get("source"),
+                    "section": meta.get("section"),
+                    "heading": meta.get("heading"),
+                    "content_type": meta.get("content_type"),
+                    "owner": meta.get("owner"),
+                    "source_channel": "keyword",
+                    "text": context,
+                },
+            )
         )
+        keyword_seen.add(identifier)
 
-        if len(structured_results) >= n_results * 2:
-            break
+    keyword_ids = {result_id for result_id, _ in keyword_results}
+    max_results = n_results * 2
 
-    return structured_results
+    if not keyword_results:
+        return [payload for _, payload in vector_results[:max_results]]
+
+    final_results = []
+    seen = set(keyword_ids)
+    final_results.extend(payload for _, payload in keyword_results)
+
+    if len(final_results) < max_results:
+        for result_id, payload in vector_results:
+            if result_id in seen:
+                continue
+            final_results.append(payload)
+            seen.add(result_id)
+            if len(final_results) >= max_results:
+                break
+
+    return final_results[:max_results]
 
 
 @app.post("/query")
@@ -382,14 +500,51 @@ def generate_flashcards(request: TutorQueryRequest):
 
 @app.post("/ingest")
 def ingest_endpoint(request: IngestRequest):
+    source_type = _normalize_source_type(request.source_type)
+    normalized_source = _normalize_source(request.source)
+    normalized_owner = _normalize_owner(request.owner)
+    subject, topic = _derive_subject_topic(
+        normalized_source, request.subject, request.topic
+    )
+
+    allowed_source_types = {"obsidian", "pdf", "docx", "url"}
+    status = "failed"
+    message = ""
+    details: list[str] = []
+
+    if not normalized_source:
+        message = "Ingest failed: source is required."
+        details.append("source field is missing or empty")
+    elif source_type not in allowed_source_types:
+        message = "Ingest failed: unsupported source_type."
+        details.append(f"source_type '{source_type}' is not supported")
+    else:
+        is_reachable, reachability_error = _source_is_reachable(source_type, normalized_source)
+        if not is_reachable:
+            message = "Ingest failed: source is not reachable."
+            details.append(reachability_error or "unreadable source")
+        elif source_type == "obsidian":
+            status = "accepted"
+            message = "Ingest request accepted."
+        else:
+            status = "queued"
+            message = (
+                "Ingest request accepted. Processing is currently queued in the MCP "
+                "scaffold."
+            )
+
+    ingest_id = _build_ingest_id(
+        source_type, normalized_source, normalized_owner, subject, topic
+    )
+
     return {
-        "status": "planned",
-        "message": (
-            "Ingest endpoint scaffolded only. Use scripts/ingest.py now, then bind this endpoint "
-            "to an async worker queue in the MCP layer."
-        ),
-        "source_type": request.source_type,
-        "source": request.source,
-        "subject": request.subject,
-        "topic": request.topic,
+        "ingest_id": ingest_id,
+        "status": status,
+        "source_type": source_type,
+        "source": normalized_source,
+        "owner": normalized_owner,
+        "subject": subject,
+        "topic": topic,
+        "message": message,
+        "details": details,
     }
