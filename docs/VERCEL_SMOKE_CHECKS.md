@@ -6,10 +6,12 @@ Purpose: verify safety and behavior before exposing the Vercel interface.
 
 ## Rollout model
 
-- `phase 1`: deploy Vercel with Supabase as primary read path and optional Chroma legacy fallback for emergency comparison.
-- `phase 2`: enable RLS + tenancy policy enforcement and lock Chroma to legacy-only.
+- `phase 1`: Vercel is wired to Supabase for primary reads/writes with legacy Chroma retained for reference only.
+- `phase 2`: RLS + tenancy policy enforcement is enabled before user-facing defaults are flipped.
 
-This pattern keeps risk bounded while preserving rollback options early in rollout.
+Current status:
+- `phase 1` checks are green in smoke testing.
+- `phase 2` work remains for policy hardening and user-context mapping.
 
 ---
 
@@ -22,8 +24,8 @@ This pattern keeps risk bounded while preserving rollback options early in rollo
   - `SUPABASE_URL`
   - `SUPABASE_ANON_KEY`
   - `OPENBRAIN_QUERY_SOURCE` (or equivalent switch)
-- Database connectivity check against Supabase succeeds.
-- Required secrets are not exposed in build logs.
+ - Database connectivity check against Supabase succeeds.
+ - Required secrets are not exposed in build logs.
 
 ### 2) Ingestion Integrity
 
@@ -31,6 +33,16 @@ This pattern keeps risk bounded while preserving rollback options early in rollo
 - `slack_username` is populated.
 - Function posts Slack confirmation reply.
 - `thoughts` row includes tenancy and source metadata fields.
+- `/api/ingest` validates response payload:
+  - `ingest_id`
+  - `status` (`accepted` or `queued`)
+  - `source_type`
+  - `source`
+  - `owner`
+  - `subject`
+  - `topic`
+  - `message`
+  - `details`
 
 ### 3) Corpus Backfill Validation
 
@@ -93,6 +105,12 @@ make check
 ```
 
 before marking a release or demo-ready.
+
+Current command for this project:
+
+```bash
+make smoke-live SMOKE_URL=https://openbrain-rouge.vercel.app
+```
 
 ## Sign-off
 

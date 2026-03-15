@@ -43,6 +43,18 @@
   - Vector matches fill remaining slots.
   - Tutor layer receives context and returns prompt payload.
 
+## Vercel app post-deploy flow
+
+- Deploys are validated with:
+  - `make smoke`
+  - `make smoke-live SMOKE_URL=https://openbrain-rouge.vercel.app`
+- Smoke expectations include:
+  - `/health` and `/api/health` return HTTP 200
+  - `/query`, `/api/query`, `/search`, `/api/search` return HTTP 200
+  - `/generate_quiz`, `/api/generate_quiz`, `/generate_flashcards`, `/api/generate_flashcards` return HTTP 200
+  - `/api/ingest` returns a valid payload with expected keys and status.
+- Keep at least one successful log + smoke run in the deployment record before demo or demo-family handoff.
+
 ## Linting flow
 
 - `make lint` runs:

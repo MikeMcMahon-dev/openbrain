@@ -104,6 +104,7 @@ Current status:
 - connect app flows to `edljijurbmcupawnjpfx` Supabase data
 - implement tenancy-aware view/route controls
 - wire secure auth for user-level data visibility
+- current status: API routing and post-deploy smoke checks are live; UI layer still needs user-level tenancy UX and auth enforcement.
 
 ---
 
