@@ -40,4 +40,15 @@ That runs:
 git restore -- brain_index
 ```
 
+## Dependency profile for deployment vs local use
+
+- Vercel API functions use a minimal dependency set in `requirements.txt` to stay within Lambda install limits.
+- Local/CLI development using full model tooling can use:
+
+```bash
+pip install -r requirements-full.txt
+```
+
+- If you need to run the full local ingestion/tuning toolchain after pulling a fresh environment, install from `requirements-full.txt`.
+
 to remove generated changes before committing.
