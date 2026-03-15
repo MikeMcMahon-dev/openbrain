@@ -1,14 +1,20 @@
 from __future__ import annotations
 
+import sys
 from urllib.parse import urlparse
+from pathlib import Path
 
-from ._openbrain_api import response_payload
-from .generate_flashcards import handler as flashcards_handler
-from .generate_quiz import handler as quiz_handler
-from .health import handler as health_handler
-from .ingest import handler as ingest_handler
-from .query import handler as query_handler
-from .search import handler as search_handler
+API_DIR = Path(__file__).resolve().parent
+if str(API_DIR) not in sys.path:
+    sys.path.insert(0, str(API_DIR))
+
+from _openbrain_api import response_payload
+from generate_flashcards import handler as flashcards_handler
+from generate_quiz import handler as quiz_handler
+from health import handler as health_handler
+from ingest import handler as ingest_handler
+from query import handler as query_handler
+from search import handler as search_handler
 
 
 def _extract_path(request) -> str:

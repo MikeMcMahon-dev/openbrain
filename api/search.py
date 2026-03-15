@@ -1,6 +1,13 @@
 from __future__ import annotations
 
-from ._openbrain_api import parse_request, response_payload, search_payload, validate_method
+import sys
+from pathlib import Path
+
+API_DIR = Path(__file__).resolve().parent
+if str(API_DIR) not in sys.path:
+    sys.path.insert(0, str(API_DIR))
+
+from _openbrain_api import parse_request, response_payload, search_payload, validate_method
 
 
 def handler(request):
