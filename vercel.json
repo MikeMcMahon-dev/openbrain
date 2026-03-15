@@ -1,58 +1,59 @@
 {
   "version": 2,
-  "functions": {
-    "api/*.py": {
-      "runtime": "python3.11"
+  "builds": [
+    {
+      "src": "api/app.py",
+      "use": "@vercel/python"
     }
-  },
+  ],
   "routes": [
     {
-      "src": "^/api/health$",
-      "dest": "api/health.py"
-    },
-    {
-      "src": "^/api/search$",
-      "dest": "api/search.py"
-    },
-    {
-      "src": "^/api/query$",
-      "dest": "api/query.py"
-    },
-    {
-      "src": "^/api/generate_quiz$",
-      "dest": "api/generate_quiz.py"
-    },
-    {
-      "src": "^/api/generate_flashcards$",
-      "dest": "api/generate_flashcards.py"
-    },
-    {
-      "src": "^/api/ingest$",
-      "dest": "api/ingest.py"
-    },
-    {
       "src": "^/health$",
-      "dest": "api/health.py"
+      "dest": "api/app.py"
     },
     {
       "src": "^/search$",
-      "dest": "api/search.py"
+      "dest": "api/app.py"
     },
     {
       "src": "^/query$",
-      "dest": "api/query.py"
+      "dest": "api/app.py"
     },
     {
       "src": "^/generate_quiz$",
-      "dest": "api/generate_quiz.py"
+      "dest": "api/app.py"
     },
     {
       "src": "^/generate_flashcards$",
-      "dest": "api/generate_flashcards.py"
+      "dest": "api/app.py"
     },
     {
       "src": "^/ingest$",
-      "dest": "api/ingest.py"
+      "dest": "api/app.py"
+    },
+    {
+      "src": "^/api/health$",
+      "dest": "api/app.py"
+    },
+    {
+      "src": "^/api/search$",
+      "dest": "api/app.py"
+    },
+    {
+      "src": "^/api/query$",
+      "dest": "api/app.py"
+    },
+    {
+      "src": "^/api/generate_quiz$",
+      "dest": "api/app.py"
+    },
+    {
+      "src": "^/api/generate_flashcards$",
+      "dest": "api/app.py"
+    },
+    {
+      "src": "^/api/ingest$",
+      "dest": "api/app.py"
     }
   ]
 }
