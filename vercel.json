@@ -16,6 +16,10 @@
       "dest": "/api/index.py"
     },
     {
+      "src": "/(query|search|generate_quiz|generate_flashcards|ingest)(/)?",
+      "dest": "/api/index.py"
+    },
+    {
       "src": "/(.*)",
       "dest": "/public/index.html"
     }
