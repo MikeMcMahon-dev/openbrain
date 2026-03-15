@@ -574,6 +574,84 @@ def search_payload(
     return 200, {"results": results, "count": len(results)}
 
 
+def _normalize_bulk_items(
+    payload: Mapping[str, Any],
+    allowed: set[str],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    candidate_items = payload.get("sources")
+    if candidate_items is None:
+        candidate_items = payload.get("items")
+    if not isinstance(candidate_items, list):
+        return [], ["payload missing valid 'sources' list"]
+
+    default_source_type = (payload.get("source_type") or "").strip().lower()
+    default_subject = payload.get("subject")
+    default_topic = payload.get("topic")
+    if candidate_items:
+        max_items = len(candidate_items)
+    else:
+        max_items = 0
+    if max_items == 0:
+        return [], ["sources list is empty"]
+
+    normalized_items: list[dict[str, Any]] = []
+    errors: list[str] = []
+
+    for index, item in enumerate(candidate_items):
+        entry_subject, entry_topic = derive_subject_topic(
+            str(item.get("source")) if isinstance(item, Mapping) else str(item),
+            default_subject,
+            default_topic,
+        )
+
+        if isinstance(item, Mapping):
+            source = (item.get("source") or "").strip()
+            source_type = (item.get("source_type") or default_source_type).strip().lower()
+            item_subject = item.get("subject")
+            item_topic = item.get("topic")
+        else:
+            source = str(item).strip()
+            source_type = default_source_type
+            item_subject = None
+            item_topic = None
+
+        if item_subject is not None and str(item_subject).strip():
+            entry_subject = str(item_subject).strip()
+        if item_topic is not None and str(item_topic).strip():
+            entry_topic = str(item_topic).strip()
+
+        if not source_type:
+            errors.append(f"item {index}: missing source_type")
+            continue
+        if source_type not in allowed:
+            errors.append(f"item {index}: source_type '{source_type}' is not supported")
+            continue
+
+        if not source:
+            errors.append(f"item {index}: source field is missing or empty")
+            continue
+
+        if source_type in {"pdf", "docx", "obsidian", "url"}:
+            reachable, reason = _source_reachable(source_type, source)
+            if not reachable:
+                errors.append(f"item {index}: source not reachable: {reason}")
+                continue
+
+        item_owner_status = "queued" if source_type != "obsidian" else "accepted"
+        normalized_items.append(
+            {
+                "source_type": source_type,
+                "source": source,
+                "subject": entry_subject,
+                "topic": entry_topic,
+                "status": item_owner_status,
+                "details": [],
+            }
+        )
+
+    return normalized_items, errors
+
+
 def ingest_payload(
     payload: Mapping[str, Any],
     method_metadata: Mapping[str, Any] | None = None,
@@ -594,6 +672,87 @@ def ingest_payload(
     status = "failed"
     message = ""
     details: list[str] = []
+
+    if "sources" in payload or "items" in payload:
+        normalized_items, item_errors = _normalize_bulk_items(payload, allowed)
+        if not normalized_items:
+            raw_sources = payload.get("sources")
+            raw_signature = []
+            if isinstance(raw_sources, list):
+                raw_signature = [str(item) for item in raw_sources]
+
+            return 200, {
+                "ingest_id": compute_ingest_id(
+                    "bulk",
+                    "|".join(raw_signature),
+                    owner,
+                    subject,
+                    topic,
+                ),
+                "status": "failed",
+                "source_type": "bulk",
+                "source": "",
+                "owner": owner,
+                "subject": subject,
+                "topic": topic,
+                "message": "Ingest failed: no valid bulk items.",
+                "details": item_errors,
+                "items": [],
+                "summary": {
+                    "total": 0,
+                    "accepted": 0,
+                    "failed": 0,
+                    "queued": 0,
+                },
+            }
+
+        accepted = 0
+        queued = 0
+        failed = len(item_errors)
+        for item in normalized_items:
+            item_status = item["status"]
+            item["ingest_id"] = compute_ingest_id(
+                item["source_type"],
+                item["source"],
+                owner,
+                item["subject"],
+                item["topic"],
+            )
+            if item_status == "accepted":
+                accepted += 1
+            else:
+                queued += 1
+
+        status = "accepted"
+        return 200, {
+            "ingest_id": compute_ingest_id(
+                "bulk",
+                "|".join(item["source"] for item in normalized_items),
+                owner,
+                subject,
+                topic,
+            ),
+            "status": status,
+            "source_type": "bulk",
+            "source": normalized_items[0]["source"],
+            "owner": owner,
+            "subject": subject,
+            "topic": topic,
+            "message": (
+                f"Bulk ingest accepted for {len(normalized_items)} source item(s)."
+                if len(normalized_items) > 1
+                else "Ingest request accepted."
+            ),
+            "details": item_errors,
+            "items": normalized_items,
+            "summary": {
+                "total": len(normalized_items) + len(item_errors),
+                "accepted": accepted,
+                "queued": queued,
+                "failed": failed,
+                "errors": len(item_errors),
+            },
+        }
 
     if not source:
         message = "Ingest failed: source is required."
@@ -627,6 +786,11 @@ def ingest_payload(
 
 
 def _source_reachable(source_type: str, source: str) -> tuple[bool, str | None]:
+    if source_type == "obsidian":
+        if not source.strip():
+            return False, "source is required"
+        return True, None
+
     if source_type == "url":
         parsed = urllib.parse.urlparse(source)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:

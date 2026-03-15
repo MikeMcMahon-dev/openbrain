@@ -35,6 +35,8 @@
     - `accepted` (valid obsidian request)
     - `queued` (non-obsidian request accepted but orchestration pending)
     - `failed` (validation errors with `details`)
+  - `sources` can be used for bulk ingest requests so local directory
+    enumeration scripts can send one request for many files.
 - Query route:
   - Request goes to `/query` (or mode-specific wrapper).
   - Server normalizes `mode`.

@@ -44,6 +44,22 @@ Request:
 }
 ```
 
+Batch request:
+
+```json
+{
+  "source_type": "obsidian",
+  "sources": [
+    "/tmp/vault/biology/chapter1.md",
+    "/tmp/vault/biology/chapter2.md",
+    "/tmp/vault/math/algebra.md"
+  ],
+  "subject": "manual-import",
+  "topic": "2026-03-15",
+  "owner": "student_alpha"
+}
+```
+
 Accepted response:
 
 ```json
@@ -56,6 +72,58 @@ Accepted response:
   "subject": "Biology",
   "topic": "Cell respiration",
   "message": "Ingest request accepted."
+}
+```
+
+Accepted bulk response:
+
+```json
+{
+  "ingest_id": "4b7a6d2e9b1a",
+  "status": "accepted",
+  "source_type": "bulk",
+  "source": "/tmp/vault/biology/chapter1.md",
+  "owner": "student_alpha",
+  "subject": "manual-import",
+  "topic": "2026-03-15",
+  "message": "Bulk ingest accepted for 3 source item(s).",
+  "details": [],
+  "items": [
+    {
+      "source_type": "obsidian",
+      "source": "/tmp/vault/biology/chapter1.md",
+      "subject": "manual-import",
+      "topic": "2026-03-15",
+      "status": "accepted",
+      "details": [],
+      "ingest_id": "a1b2c3d4"
+    },
+    {
+      "source_type": "obsidian",
+      "source": "/tmp/vault/biology/chapter2.md",
+      "subject": "manual-import",
+      "topic": "2026-03-13",
+      "status": "accepted",
+      "details": [],
+      "ingest_id": "b2c3d4e5"
+    },
+    {
+      "source_type": "obsidian",
+      "source": "/tmp/vault/math/algebra.md",
+      "subject": "manual-import",
+      "topic": "2026-03-15",
+      "status": "accepted",
+      "details": [],
+      "ingest_id": "c3d4e5f6"
+    }
+  ],
+  "summary": {
+    "total": 3,
+    "accepted": 3,
+    "queued": 0,
+    "failed": 0,
+    "errors": 0
+  }
 }
 ```
 

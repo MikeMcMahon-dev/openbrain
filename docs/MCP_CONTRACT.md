@@ -47,6 +47,33 @@ by markdown ingestion.
 }
 ```
 
+Batch ingest request body (recommended for bulk directory import):
+
+```json
+{
+  "source_type": "obsidian",
+  "sources": [
+    {
+      "source": "/vault/biology/notes/Chapter1.md",
+      "subject": "Biology",
+      "topic": "Chapter 1"
+    },
+    {
+      "source": "/vault/biology/notes/Chapter2.md",
+      "subject": "Biology",
+      "topic": "Chapter 2"
+    },
+    {
+      "source": "/vault/math/notes/Algebra.md",
+      "subject": "Math"
+    }
+  ],
+  "subject": "family-import",
+  "topic": "2026-03-15",
+  "owner": "student_alpha"
+}
+```
+
 ### Ingest response body
 
 ```json
@@ -63,6 +90,49 @@ by markdown ingestion.
 }
 ```
 
+Batch ingest response body:
+
+```json
+{
+  "ingest_id": "a1b2c3d4...",
+  "status": "accepted",
+  "source_type": "bulk",
+  "source": "/vault/biology/notes/Chapter1.md",
+  "owner": "student_alpha",
+  "subject": "family-import",
+  "topic": "2026-03-15",
+  "message": "Bulk ingest accepted for 3 source item(s).",
+  "details": [],
+  "items": [
+    {
+      "source_type": "obsidian",
+      "source": "/vault/biology/notes/Chapter1.md",
+      "subject": "Biology",
+      "topic": "Chapter 1",
+      "status": "accepted",
+      "details": [],
+      "ingest_id": "b7c6..."
+    },
+    {
+      "source_type": "obsidian",
+      "source": "/vault/math/notes/Algebra.md",
+      "subject": "Math",
+      "topic": "2026-03-15",
+      "status": "accepted",
+      "details": [],
+      "ingest_id": "c8d7..."
+    }
+  ],
+  "summary": {
+    "total": 3,
+    "accepted": 2,
+    "queued": 1,
+    "failed": 0,
+    "errors": 0
+  }
+}
+```
+
 ### Ingest contract rules
 
 - Validate `source_type` is one of the supported ingestion sources.
@@ -71,6 +141,9 @@ by markdown ingestion.
   - `queued`: accepted request is waiting for MCP orchestration (for
     non-obsidian sources).
   - `failed`: request is rejected due to invalid payload.
+- `source_type: "bulk"` is used when `sources` is present.
+- Batch mode supports `sources` as either strings (`"/vault/a.md"`) or
+  objects with optional per-item overrides.
 - `subject` and `topic` defaults:
   - `subject`: source filename or import label if not provided.
   - `topic`: ingest date `YYYY-MM-DD` if not provided.
