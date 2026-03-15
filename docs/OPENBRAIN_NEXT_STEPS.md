@@ -14,17 +14,17 @@ Primary storage now targets Supabase with pgvector:
 
 ---
 
-## Step 2 – Retrieval and Tutor Baseline (Kept)
+## Step 2 – Retrieval and Tutor Baseline (Complete)
 
 Keep existing retrieval capabilities while routing to Supabase source:
 
-- retrieval API contracts in `brain_server/server.py`
-- tutor endpoints (`/query`, `/generate_quiz`, `/generate_flashcards`) remain the local target for behavior tuning
-- keyword-first ranking will be reintroduced on top of vector search in Supabase
+- retrieval API contracts are now exercised through Vercel serverless handlers in `api/`
+- tutor endpoints (`/query`, `/generate_quiz`, `/generate_flashcards`) are live on both legacy and `/api` routes
+- keyword + vector hybrid ranking remains active in current query path.
 
 ---
 
-## Step 3 – Tenant & Ownership Groundwork
+## Step 3 – Tenant & Ownership Groundwork (Complete)
 
 Stand up schema-level tenancy before Vercel rollout:
 
@@ -41,7 +41,7 @@ Files:
 Planned follow-up:
 
 - validate and enforce tenant-aware auth context mapping (`supabase_user_id`, `email`, or `slack_user_id`)
-- add tenancy-aware query filters in API handlers
+- add tenancy-aware query filters in API handlers (deployed)
 
 ---
 
@@ -98,13 +98,12 @@ Current status:
 
 ---
 
-## Step 6 – Vercel App Implementation (In progress)
+## Step 6 – Vercel App Implementation (Complete, hardening ongoing)
 
-- build the web interface for thought review/retrieval
-- connect app flows to `edljijurbmcupawnjpfx` Supabase data
-- implement tenancy-aware view/route controls
-- wire secure auth for user-level data visibility
-- current status: API routing and post-deploy smoke checks are live; UI layer still needs user-level tenancy UX and auth enforcement.
+- web interface for thought capture, query, and generation is deployed at `https://openbrain-rouge.vercel.app/`
+- app routes now support both legacy and `/api` endpoints
+- tenancy context is resolved from request headers (`x-openbrain-owner`, `x-openbrain-tenant-id`) for user separation
+- next work: secure auth binding and production-grade tenancy enforcement
 
 ---
 
@@ -115,6 +114,7 @@ Before defaulting reads to Supabase:
 - Re-import Obsidian markdown corpus into Supabase with deterministic `source_chunk_id`
 - Verify row/document counts and coverage against baseline
 - Run rollout smoke checks in `docs/VERCEL_SMOKE_CHECKS.md`
+- Proceed to manual filesystem import test as your next operational validation
 - Gate default source flip on parity results and rollback readiness
 
 ---

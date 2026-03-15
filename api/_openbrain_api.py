@@ -193,10 +193,7 @@ def normalize_results_count(
 
 
 def request_context(
-    payload: Mapping[str, Any] | None = None,
     metadata: Mapping[str, Any] | None = None,
-    *,
-    allow_client_override: bool = False,
 ) -> tuple[str, str]:
     headers = _stringify_headers(metadata.get("headers") if isinstance(metadata, Mapping) else None)
 
@@ -214,10 +211,6 @@ def request_context(
         headers.get("x-family-id"),
         os.getenv("OPENBRAIN_DEFAULT_TENANT_ID"),
     )
-
-    if isinstance(payload, Mapping) and allow_client_override:
-        owner = _coalesce(owner, payload.get("owner"))
-        tenant_id = _coalesce(tenant_id, payload.get("tenant_id"))
 
     return normalize_owner(owner), normalize_tenant(tenant_id)
 
@@ -533,11 +526,7 @@ def query_payload(
 
     mode = normalize_mode(payload.get("mode"))
     n_results = normalize_results_count(payload.get("n_results"), DEFAULT_RESULTS)
-    owner, tenant_id = request_context(
-        payload,
-        method_metadata,
-        allow_client_override=False,
-    )
+    owner, tenant_id = request_context(method_metadata)
     student_attempt = payload.get("student_attempt")
     results = retrieve_thoughts(query, n_results, owner, tenant_id)
 
@@ -580,7 +569,7 @@ def search_payload(
         }
 
     n_results = normalize_results_count(payload.get("n_results"), DEFAULT_RESULTS)
-    owner, tenant_id = request_context(payload, method_metadata, allow_client_override=False)
+    owner, tenant_id = request_context(method_metadata)
     results = retrieve_thoughts(query, n_results, owner, tenant_id)
     return 200, {"results": results, "count": len(results)}
 
@@ -598,7 +587,7 @@ def ingest_payload(
 
     source_type = (payload.get("source_type") or "").strip().lower()
     source = (payload.get("source") or "").strip()
-    owner, _tenant_id = request_context(payload, method_metadata, allow_client_override=False)
+    owner, _tenant_id = request_context(method_metadata)
     subject, topic = derive_subject_topic(source, payload.get("subject"), payload.get("topic"))
 
     allowed = {"obsidian", "pdf", "docx", "url"}

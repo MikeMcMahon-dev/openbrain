@@ -1,39 +1,34 @@
 # Vercel Smoke Checks (Pre-Production + Demo)
 
-Purpose: verify safety and behavior before exposing the Vercel interface.
+Use this file as the final checklist before any family-facing demo handoff.
 
 ---
 
 ## Rollout model
 
 - `phase 1`: Vercel is wired to Supabase for primary reads/writes with legacy Chroma retained for reference only.
-- `phase 2`: RLS + tenancy policy enforcement is enabled before user-facing defaults are flipped.
+- `phase 2`: RLS + strict tenancy auth mapping is added after identity plumbing is complete.
 
 Current status:
 - `phase 1` checks are green in smoke testing.
-- `phase 2` work remains for policy hardening and user-context mapping.
+- `phase 2` is in progress; API context resolution is now header-first.
 
 ---
 
-## Smoke Check Categories
+## Smoke check categories
 
 ### 1) Deployment and Connectivity
 
-- Vercel deploy succeeds.
-- Environment variables are present:
+- Vercel deployment is current on `main`.
+- The URL responds and serves the demo page at `/`.
+- Environment includes required values for this stack:
   - `SUPABASE_URL`
-  - `SUPABASE_ANON_KEY`
-  - `OPENBRAIN_QUERY_SOURCE` (or equivalent switch)
- - Database connectivity check against Supabase succeeds.
- - Required secrets are not exposed in build logs.
+  - `SUPABASE_ANON_KEY` or compatible service key
+  - embedding key for configured model path
 
 ### 2) Ingestion Integrity
 
-- Manual Slack message in capture channel creates expected DB row.
-- `slack_username` is populated.
-- Function posts Slack confirmation reply.
-- `thoughts` row includes tenancy and source metadata fields.
-- `/api/ingest` validates response payload:
+- `/api/ingest` and `/ingest` return a valid response shape:
   - `ingest_id`
   - `status` (`accepted` or `queued`)
   - `source_type`
@@ -44,58 +39,64 @@ Current status:
   - `message`
   - `details`
 
-### 3) Corpus Backfill Validation
+### 3) Corpus and Tenant Handling
 
-- Obsidian markdown re-import is rerun for full corpus.
-- Re-import produces deterministic IDs and matches expected counts.
-- Re-import completes without duplicate-spike regressions.
+- Manual Obsidian re-import can be run and produces deterministic `source_chunk_id` values.
+- Re-import does not create duplicate spikes for unchanged files.
+- Owner/tenant context is consistently resolved from request headers.
 
-### 4) Retrieval Parity and Ranking
+### 4) Query/Generation behavior
 
-- Sample queries return required payload fields.
-- Hybrid path returns stable behavior between cached/local control queries and Supabase production path.
-- Relevance regressions remain within agreed tolerance.
+- `POST /query`, `/api/query` return valid tutor payload.
+- `POST /search`, `/api/search` return valid result envelope.
+- `POST /generate_quiz`, `/api/generate_quiz` works.
+- `POST /generate_flashcards`, `/api/generate_flashcards` works.
+- `GET` responses remain method-restricted (`405`) where not supported.
 
-### 5) Vercel UI Behavior
+### 5) Vercel App Surface
 
-- Thought list renders for seeded corpus.
-- New query returns quickly and deterministically.
-- Supabase-first feature flags behave as expected:
-  - `supabase` mode works
-  - optional `legacy` mode still returns for admin fallback only
+- `GET /` loads the web UI.
+- Core UI actions hit header-scoped API endpoints.
+- Legacy paths remain routed and functionally equivalent to `/api/*` versions:
+  - `/query`, `/search`, `/generate_quiz`, `/generate_flashcards`, `/ingest`.
 
 ### 6) Error and Recovery
 
-- Corrupt/missing query input returns graceful error response.
-- Supabase timeout/failure fails safe (clear UI message, no crash).
-- Admin fallback to legacy path can be toggled when enabled.
+- Bad input returns a JSON error payload and non-200 status.
+- 500 cases are visible in Vercel logs with clear traces.
+- No serverless init-time runtime panics in smoke window.
 
 ---
 
-## Phase 1 acceptance
+## Acceptance gates
 
-- Supabase query path is functional and stable.
-- Ingestion loop remains reliable in Slack.
-- Legacy fallback behavior is available but not default.
+### Phase 1
 
-## Phase 2 acceptance
+- Supabase path is stable for read/write and ingest.
+- Smoke checks run clean in staging/production URL.
+- No regressions in `/api/health` and `/health`.
 
-- RLS + tenancy filters are active and tested.
-- No unresolved critical errors for representative family-demo queries.
-- Data ownership boundaries behave as expected.
+### Phase 2
 
-## Operational preflight (every deploy, local first)
+- RLS migration objects applied.
+- Header-driven tenant context validated in integration checks.
+- No cross-tenant leakage in representative demo paths.
+- Manual import path documented and successfully tested.
 
-Run locally:
+---
+
+## Required preflight
+
+Run first locally:
 
 ```bash
 make smoke
 ```
 
-Run the same checks against the deployment URL:
+Then run against deploy:
 
 ```bash
-make smoke-live SMOKE_URL=https://<project-domain>.vercel.app
+make smoke-live SMOKE_URL=https://openbrain-rouge.vercel.app
 ```
 
 Then run:
@@ -104,20 +105,12 @@ Then run:
 make check
 ```
 
-before marking a release or demo-ready.
-
-Current command for this project:
-
-```bash
-make smoke-live SMOKE_URL=https://openbrain-rouge.vercel.app
-```
-
 ## Sign-off
 
 Primary reviewer confirms:
 
 - ingestion health
-- corpus parity
+- context scoping
 - query stability
-- error handling
-- rollback behavior
+- generation output
+- rollback readiness

@@ -18,6 +18,8 @@
   owner-aware.
 - Owner is also included in deterministic ingest id generation for
   idempotent retries.
+ - Header values are authoritative for tenancy-scoped reads and writes.
+   Client body fields are ignored unless explicit override mode is re-enabled.
 
 ## MCP `/query` owner rule
 
@@ -33,10 +35,11 @@
 
 ## User-specific metadata strategy
 
-- Keep owner as a mandatory metadata field in future ingestion
-  contracts.
+- `owner` is the required effective tenant discriminator for current API behavior.
+- For production hardening, bind `x-openbrain-owner` / `x-openbrain-tenant-id`
+  to an authenticated identity and remove defaults from family-facing flows.
 - Treat `user_id` as a potential second identifier only if auth
-  integration adds strong identity.
+  integration adds strong identity mapping.
 - Avoid using free-text owner values in automated ingestion scripts
   unless validated upstream.
 

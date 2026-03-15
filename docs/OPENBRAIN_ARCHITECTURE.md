@@ -34,7 +34,7 @@ Current legacy responsibility:
 - heading-based chunking
 - filtering small chunks
 - local experimental embeddings/chunks
-- local Chroma vector persistence for historical compatibility
+- local Chroma vector persistence for migration/testing only
 
 ---
 
@@ -71,9 +71,9 @@ This is now the standard across Slack ingest and Obsidian/DB import paths to kee
 
 ---
 
-## 5. FastAPI / API Layer
+## 5. Vercel API Layer
 
-`brain_server/server.py`
+`api/app.py`, `api/index.py`, and route handlers in `api/*.py`
 
 Provides:
 
@@ -82,8 +82,10 @@ Provides:
   - `POST /query`
   - `POST /generate_quiz`
   - `POST /generate_flashcards`
+  - legacy-compatible `GET/POST /query`, `/search`, `/generate_quiz`, `/generate_flashcards`, `/ingest`
 
-The current focus is the Vercel web surface, with MCP contracts tracking the API evolution.
+The primary web surface is Vercel, with these API contracts now exercised through
+the deployed serverless entrypoint.
 
 ---
 
@@ -95,7 +97,7 @@ Uses:
 
 Current intent:
 
-`vault change -> debounce timer -> chunk/index -> legacy vector upsert`
+`vault change -> chunk/index -> local toolchain -> Supabase upsert (legacy Chroma refresh remains available)`
 
 ---
 
@@ -137,8 +139,14 @@ Primary web entrypoint for:
 - user controls for channel/channel-scoped settings and tenancy boundaries
 
 Status:
-- Slack ingestion is stable in production
-- Vercel app implementation is in-progress
+- Slack ingestion is stable in production.
+- Vercel app implementation is live and smoke-validated at:
+  - `/`
+  - `/query`, `/api/query`
+  - `/search`, `/api/search`
+  - `/generate_quiz`, `/api/generate_quiz`
+  - `/generate_flashcards`, `/api/generate_flashcards`
+  - `/ingest`, `/api/ingest`
 
 ---
 

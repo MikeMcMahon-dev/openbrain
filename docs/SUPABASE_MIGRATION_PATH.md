@@ -57,6 +57,7 @@ Recent migration outcome:
 - Add Vercel auth + tenancy context in API layer and switch writes/reads to user context values.
 - Ensure Vercel/auth JWT values map to `open_brain_users` (`supabase_user_id`, `email`, or `slack_user_id`) before harden-gating `tenant_id`.
 - Re-import Obsidian markdown into Supabase with deterministic IDs (overwrite-safe/idempotent).
+- Vercel API layer now resolves tenancy context from request headers and keeps legacy body fields advisory.
 - Stand up query parity checks (recall/latency) between legacy + Supabase for representative prompts.
 
 ## Suggested rollout

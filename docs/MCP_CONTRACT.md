@@ -17,9 +17,9 @@ endpoints planned in Step 4.
 
 The following fields are common across ingest and query-like operations:
 
-- `owner` (string, required in payload examples, defaults to environment
-  or `mmcmahon`)
-  - Logical tenant/user namespace for future multi-user separation.
+- `owner` (optional compatibility field)
+  - Effective tenant/user scope is resolved from request headers (`x-openbrain-owner`, `x-openbrain-user-login`, `x-openbrain-user-id`) with `OPENBRAIN_DEFAULT_OWNER` fallback.
+- `tenant_id` is resolved from headers when provided.
 
 - `subject` (string, optional)
 - `topic` (string, optional)
@@ -199,9 +199,8 @@ For all endpoints, use a consistent failure shape:
    - `status` (`accepted`, `queued`, or `failed`)
    - normalized payload echo fields
    - `message` and optional `details`
-4. Client sends query with `owner` and mode.
-5. Server normalizes mode and builds query embedding with
-   `BAAI/bge-small-en`.
+4. Client sends query with logical context and mode.
+5. Server normalizes mode and builds query embedding with the configured model (default: `openai/text-embedding-3-small`).
 6. Server applies BM25 keyword retrieval and vector retrieval.
 7. Keyword-matching hits are surfaced first when present;
    vector hits fill remaining results.

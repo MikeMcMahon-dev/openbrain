@@ -19,8 +19,14 @@ in the server scaffold.
 
 Notes:
 
-- `owner` is optional in payload and defaults to `mmcmahon` (or
-  `OPENBRAIN_DEFAULT_OWNER`) when omitted.
+- `owner` may be present for compatibility but is not authoritative for scope.
+- Effective tenant context is resolved from request headers first:
+  - `x-openbrain-owner`
+  - `x-openbrain-user-login`
+  - `x-openbrain-user-id`
+  - `x-openbrain-tenant-id`
+- If no valid header context is present, `OPENBRAIN_DEFAULT_OWNER` and
+  `OPENBRAIN_DEFAULT_TENANT_ID` are used as safe fallback values.
 - `subject` and `topic` are currently documented fields and are optional.
 - `student_attempt` is used by tutor formatting logic but not required.
 

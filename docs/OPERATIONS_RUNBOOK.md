@@ -53,6 +53,8 @@
   - `/query`, `/api/query`, `/search`, `/api/search` return HTTP 200
   - `/generate_quiz`, `/api/generate_quiz`, `/generate_flashcards`, `/api/generate_flashcards` return HTTP 200
   - `/api/ingest` returns a valid payload with expected keys and status.
+- `GET /` loads the Vercel demo page and static assets.
+- `/query`, `/search`, `/generate_quiz`, `/generate_flashcards`, `/ingest` are routed through API handler for compatibility.
 - Keep at least one successful log + smoke run in the deployment record before demo or demo-family handoff.
 
 ## Linting flow
