@@ -16,6 +16,14 @@
       "dest": "/api/index.py"
     },
     {
+      "src": "/openbrain_(query|generate_quiz|generate_flashcards|ingest)(/)?",
+      "dest": "/api/index.py"
+    },
+    {
+      "src": "/tools/openbrain_(query|generate_quiz|generate_flashcards|ingest)(/)?",
+      "dest": "/api/index.py"
+    },
+    {
       "src": "/(query|search|generate_quiz|generate_flashcards|ingest)(/)?",
       "dest": "/api/index.py"
     },
