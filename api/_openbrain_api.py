@@ -5,17 +5,20 @@ import hashlib
 import json
 import os
 import re
-from datetime import datetime
 import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Mapping
-from typing import Any
+from datetime import datetime
 from pathlib import Path
+from typing import Any
 
-from psycopg import connect
-from psycopg.rows import dict_row
-
+try:
+    from psycopg import connect
+    from psycopg.rows import dict_row
+except Exception:  # pragma: no cover
+    connect = None
+    dict_row = None
 
 try:
     import sys
@@ -33,15 +36,17 @@ DEFAULT_RESULTS = 5
 MAX_RESULTS = 50
 EMBEDDING_MODEL = os.getenv("OPENBRAIN_EMBEDDING_MODEL", "text-embedding-3-small")
 DB_URL = (
-    os.getenv("SUPABASE_DB_URL")
-    or os.getenv("SUPABASE_DATABASE_URL")
-    or os.getenv("DATABASE_URL")
+    os.getenv("SUPABASE_DB_URL") or os.getenv("SUPABASE_DATABASE_URL") or os.getenv("DATABASE_URL")
 )
 EMBEDDING_KEY = os.getenv("OPENAI_API_KEY") or os.getenv("OPENROUTER_API_KEY")
 EMBEDDING_URL = (
     os.getenv("OPENAI_EMBEDDING_URL")
     or os.getenv("OPENROUTER_BASE_URL")
-    or ("https://openrouter.ai/api/v1" if os.getenv("OPENROUTER_API_KEY") else "https://api.openai.com/v1")
+    or (
+        "https://openrouter.ai/api/v1"
+        if os.getenv("OPENROUTER_API_KEY")
+        else "https://api.openai.com/v1"
+    )
 )
 
 
@@ -104,7 +109,14 @@ def parse_request(request: Any) -> tuple[dict[str, Any], dict[str, Any]]:
 
         if hasattr(request, "get_json"):
             try:
-                return request.get_json(silent=True) or {}, {"method": method, "headers": headers, "query": dict(query or {})}
+                return (
+                    request.get_json(silent=True) or {},
+                    {
+                        "method": method,
+                        "headers": headers,
+                        "query": dict(query or {}),
+                    },
+                )
             except Exception:
                 pass
 
@@ -143,7 +155,11 @@ def normalize_mode(mode: str | None) -> str:
     return normalized if normalized in ALLOWED_QUERY_MODES else "explain"
 
 
-def normalize_results_count(value: Any, default: int = DEFAULT_RESULTS, max_value: int = MAX_RESULTS) -> int:
+def normalize_results_count(
+    value: Any,
+    default: int = DEFAULT_RESULTS,
+    max_value: int = MAX_RESULTS,
+) -> int:
     try:
         parsed = int(value)
     except Exception:
@@ -211,6 +227,8 @@ def source_reference(row: Mapping[str, Any]) -> str:
 def get_db_conn():
     if not DB_URL:
         raise RuntimeError("SUPABASE_DB_URL is not configured.")
+    if connect is None:
+        raise RuntimeError("psycopg is not installed in this runtime.")
     return connect(DB_URL, row_factory=dict_row)
 
 
@@ -261,7 +279,10 @@ def search_vector_candidates(
     owner_condition = ""
     params: list[Any] = [vector_param, tenant_id]
     if owner:
-        owner_condition = " AND (COALESCE(created_by_user_login, created_by_user_id, slack_username, '') = %s OR metadata ->> 'owner' = %s)"
+        owner_condition = (
+            " AND (COALESCE(created_by_user_login, created_by_user_id, "
+            "slack_username, '') = %s OR metadata ->> 'owner' = %s)"
+        )
         params.extend([owner, owner])
     params.extend([vector_param, max_results])
 
@@ -302,7 +323,10 @@ def search_keyword_candidates(
     ts_query = _ts_query(query)
     params: list[Any] = [ts_query, tenant_id, ts_query]
     if owner:
-        owner_condition = " AND (COALESCE(created_by_user_login, created_by_user_id, slack_username, '') = %s OR metadata ->> 'owner' = %s)"
+        owner_condition = (
+            " AND (COALESCE(created_by_user_login, created_by_user_id, "
+            "slack_username, '') = %s OR metadata ->> 'owner' = %s)"
+        )
         params.extend([owner, owner])
     params.append(max_results)
 
@@ -319,7 +343,10 @@ def search_keyword_candidates(
       created_by_user_login,
       slack_username,
       metadata,
-      ts_rank(to_tsvector('english', coalesce(content, '')), websearch_to_tsquery('english', %s)) AS score
+      ts_rank(
+        to_tsvector('english', coalesce(content, '')),
+        websearch_to_tsquery('english', %s)
+      ) AS score
     FROM public.thoughts
     WHERE COALESCE(tenant_id, 'family') = %s
       AND to_tsvector('english', coalesce(content, '')) @@ websearch_to_tsquery('english', %s)
@@ -451,9 +478,13 @@ def query_payload(payload: Mapping[str, Any]) -> tuple[int, dict[str, Any]]:
     owner = normalize_owner(payload.get("owner"))
     tenant_id = (payload.get("tenant_id") or DEFAULT_TENANT).strip() or DEFAULT_TENANT
     student_attempt = payload.get("student_attempt")
-
     results = retrieve_thoughts(query, n_results, owner, tenant_id)
-    normalized_mode, context_chunks, tutor_packet = run_tutor_payload(query, mode, results, student_attempt)
+
+    (
+        normalized_mode,
+        context_chunks,
+        tutor_packet,
+    ) = run_tutor_payload(query, mode, results, student_attempt)
 
     return 200, {
         "mode": normalized_mode,
@@ -465,7 +496,10 @@ def query_payload(payload: Mapping[str, Any]) -> tuple[int, dict[str, Any]]:
     }
 
 
-def search_payload(payload: Mapping[str, Any], method_metadata: Mapping[str, Any]) -> tuple[int, Any]:
+def search_payload(
+    payload: Mapping[str, Any],
+    method_metadata: Mapping[str, Any],
+) -> tuple[int, Any]:
     if not isinstance(payload, Mapping):
         return 400, {
             "error": "validation_error",
@@ -525,9 +559,7 @@ def ingest_payload(payload: Mapping[str, Any]) -> tuple[int, dict[str, Any]]:
             message = "Ingest request accepted."
         else:
             status = "queued"
-            message = (
-                "Ingest request accepted. Processing is currently queued in the MCP scaffold."
-            )
+            message = "Ingest request accepted. Processing is currently queued in the MCP scaffold."
 
     return 200, {
         "ingest_id": compute_ingest_id(source_type, source, owner, subject, topic),

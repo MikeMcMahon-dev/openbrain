@@ -3,7 +3,11 @@ from pathlib import Path
 from typing import Any
 
 
-def load_docx_documents(docx_root: Path, subject: str | None = None, topic: str | None = None) -> list[dict[str, Any]]:
+def load_docx_documents(
+    docx_root: Path,
+    subject: str | None = None,
+    topic: str | None = None,
+) -> list[dict[str, Any]]:
     try:
         from docx import Document
     except Exception as exc:
@@ -17,7 +21,11 @@ def load_docx_documents(docx_root: Path, subject: str | None = None, topic: str 
     for file in sorted(docx_root.rglob("*.docx")):
         try:
             doc = Document(str(file))
-            text = "\n".join((para.text or "").strip() for para in doc.paragraphs if para.text and para.text.strip())
+            text = "\n".join(
+                (para.text or "").strip()
+                for para in doc.paragraphs
+                if para.text and para.text.strip()
+            )
         except Exception as exc:
             print(f"Error reading DOCX {file}: {exc}")
             continue

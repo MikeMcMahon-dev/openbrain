@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from _openbrain_api import response_payload
+from ._openbrain_api import response_payload
 
 
 def handler(request):
     return response_payload(200, {"status": "openbrain vercel api online"})
-

@@ -1,15 +1,18 @@
-import hashlib
 import os
 import tomllib
 from pathlib import Path
 from typing import Any
 
 import chromadb
+from chunking import chunk_markdown, chunk_text_by_tokens
+from ingestors import (
+    load_docx_documents,
+    load_markdown_documents,
+    load_pdf_documents,
+    load_url_documents,
+)
 from sentence_transformers import SentenceTransformer
 from transformers import logging
-
-from chunking import chunk_markdown, chunk_text_by_tokens
-from ingestors import load_docx_documents, load_markdown_documents, load_pdf_documents, load_url_documents
 
 logging.set_verbosity_error()
 

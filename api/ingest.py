@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from _openbrain_api import ingest_payload, parse_request, response_payload, validate_method
+from ._openbrain_api import ingest_payload, parse_request, response_payload
 
 
 def handler(request):
@@ -21,4 +21,3 @@ def handler(request):
 
     status, body = ingest_payload(payload)
     return response_payload(status, body)
-

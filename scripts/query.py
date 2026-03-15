@@ -1,11 +1,10 @@
-import chromadb
 import re
-from sentence_transformers import SentenceTransformer
 from pathlib import Path
 from typing import Any
 
+import chromadb
+from sentence_transformers import SentenceTransformer
 from tutor import build_tutor_packet
-
 
 MODE_OPTIONS = {"explain", "quiz", "flashcards"}
 
@@ -39,10 +38,7 @@ def build_fallback_hits(
 def search_brain(query: str, n_results: int = 3):
     print(f"\nSearching for: {query}")
     query_embedding = model.encode(query, convert_to_numpy=True)
-    results = collection.query(
-        query_embeddings=[query_embedding],
-        n_results=n_results
-    )
+    results = collection.query(query_embeddings=[query_embedding], n_results=n_results)
 
     docs = results.get("documents") or [[]]
     metas = results.get("metadatas") or [[]]
@@ -50,16 +46,18 @@ def search_brain(query: str, n_results: int = 3):
 
     retrieval = []
     for doc, meta, distance in zip(docs[0], metas[0], distances[0]):
-        retrieval.append({
-            "source": meta.get("source"),
-            "file": meta.get("file"),
-            "section": meta.get("section"),
-            "heading": meta.get("heading"),
-            "content_type": meta.get("content_type"),
-            "chunk": meta.get("chunk"),
-            "text": doc,
-            "score": float(distance),
-        })
+        retrieval.append(
+            {
+                "source": meta.get("source"),
+                "file": meta.get("file"),
+                "section": meta.get("section"),
+                "heading": meta.get("heading"),
+                "content_type": meta.get("content_type"),
+                "chunk": meta.get("chunk"),
+                "text": doc,
+                "score": float(distance),
+            }
+        )
 
     if retrieval:
         return retrieval
@@ -69,21 +67,28 @@ def search_brain(query: str, n_results: int = 3):
     documents = all_docs.get("documents") or []
     all_metas = all_docs.get("metadatas") or []
     for doc, meta, score in build_fallback_hits(query, n_results, documents, all_metas):
-        retrieval.append({
-            "source": meta.get("source"),
-            "file": meta.get("file"),
-            "section": meta.get("section"),
-            "heading": meta.get("heading"),
-            "content_type": meta.get("content_type"),
-            "chunk": meta.get("chunk"),
-            "text": doc,
-            "score": score,
-        })
+        retrieval.append(
+            {
+                "source": meta.get("source"),
+                "file": meta.get("file"),
+                "section": meta.get("section"),
+                "heading": meta.get("heading"),
+                "content_type": meta.get("content_type"),
+                "chunk": meta.get("chunk"),
+                "text": doc,
+                "score": score,
+            }
+        )
 
     return retrieval
 
 
-def render_mode_output(mode: str, query_text: str, results: list[dict[str, Any]], attempt: str | None = None):
+def render_mode_output(
+    mode: str,
+    query_text: str,
+    results: list[dict[str, Any]],
+    attempt: str | None = None,
+):
     packet = build_tutor_packet(mode, query_text, results, attempt)
     print("\nQuery:", packet["question"])
     print("Mode:", packet["mode"])

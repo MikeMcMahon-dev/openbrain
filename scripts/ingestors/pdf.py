@@ -5,7 +5,11 @@ from typing import Any
 from pypdf import PdfReader
 
 
-def load_pdf_documents(pdf_root: Path, subject: str | None = None, topic: str | None = None) -> list[dict[str, Any]]:
+def load_pdf_documents(
+    pdf_root: Path,
+    subject: str | None = None,
+    topic: str | None = None,
+) -> list[dict[str, Any]]:
     documents = []
 
     for file in sorted(pdf_root.rglob("*.pdf")):

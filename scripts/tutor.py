@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-
 SOCrATIC_RULES = [
     "Ask the student to try first.",
     "Use short, simple language for a middle school learner.",
@@ -26,7 +25,8 @@ MODE_PROMPTS = {
     ),
     "flashcards": (
         "You are a friendly middle-school flashcard coach.\n"
-        "- Build 3 study prompts from the context with one-side prompts and simple back-side checks.\n"
+        "- Build 3 study prompts from the context with one-side prompts\n"
+        " and simple back-side checks.\n"
         "- Encourage the student to answer before seeing the check."
     ),
 }

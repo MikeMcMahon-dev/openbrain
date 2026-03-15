@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from _openbrain_api import (
+from ._openbrain_api import (
     parse_request,
     query_payload,
     response_payload,

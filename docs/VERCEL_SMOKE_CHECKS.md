@@ -72,6 +72,28 @@ This pattern keeps risk bounded while preserving rollback options early in rollo
 - No unresolved critical errors for representative family-demo queries.
 - Data ownership boundaries behave as expected.
 
+## Operational preflight (every deploy, local first)
+
+Run locally:
+
+```bash
+make smoke
+```
+
+Run the same checks against the deployment URL:
+
+```bash
+make smoke-live SMOKE_URL=https://<project-domain>.vercel.app
+```
+
+Then run:
+
+```bash
+make check
+```
+
+before marking a release or demo-ready.
+
 ## Sign-off
 
 Primary reviewer confirms:

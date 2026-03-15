@@ -30,6 +30,34 @@ That runs:
 - Ruff Python lint + formatting check
 - Markdown lint via `pymarkdown` using `.pymarkdownlnt.json`
 
+3) Run preflight smoke checks:
+
+```bash
+make smoke
+```
+
+This validates handler import and core API routes locally before pushing. For a live deployment smoke pass:
+
+```bash
+make smoke-live SMOKE_URL=https://<project-domain>.vercel.app
+```
+
+Run both lint and smoke together before deployment:
+
+```bash
+make check
+```
+
+Capture logs for easy review:
+
+```bash
+make check-log
+```
+
+```bash
+make smoke-live-log SMOKE_URL=https://<project-domain>.vercel.app
+```
+
 ## Repository hygiene
 
 - `brain_index/` stores local Chroma persistent vector data and should be treated as generated environment state.

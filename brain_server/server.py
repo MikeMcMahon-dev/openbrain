@@ -18,7 +18,6 @@ from sentence_transformers import SentenceTransformer
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
-
 app = FastAPI()
 
 # locate project root
@@ -57,10 +56,7 @@ all_docs = collection.get()
 documents = all_docs.get("documents") or []
 metadatas = all_docs.get("metadatas") or []
 
-tokenized_corpus = [
-    re.findall(r"\b\w+\b", doc.lower())
-    for doc in documents
-]
+tokenized_corpus = [re.findall(r"\b\w+\b", doc.lower()) for doc in documents]
 
 bm25 = BM25Okapi(tokenized_corpus)
 print(f"Keyword index ready ({len(documents)} chunks)")
@@ -503,9 +499,7 @@ def ingest_endpoint(request: IngestRequest):
     source_type = _normalize_source_type(request.source_type)
     normalized_source = _normalize_source(request.source)
     normalized_owner = _normalize_owner(request.owner)
-    subject, topic = _derive_subject_topic(
-        normalized_source, request.subject, request.topic
-    )
+    subject, topic = _derive_subject_topic(normalized_source, request.subject, request.topic)
 
     allowed_source_types = {"obsidian", "pdf", "docx", "url"}
     status = "failed"
@@ -528,14 +522,9 @@ def ingest_endpoint(request: IngestRequest):
             message = "Ingest request accepted."
         else:
             status = "queued"
-            message = (
-                "Ingest request accepted. Processing is currently queued in the MCP "
-                "scaffold."
-            )
+            message = "Ingest request accepted. Processing is currently queued in the MCP scaffold."
 
-    ingest_id = _build_ingest_id(
-        source_type, normalized_source, normalized_owner, subject, topic
-    )
+    ingest_id = _build_ingest_id(source_type, normalized_source, normalized_owner, subject, topic)
 
     return {
         "ingest_id": ingest_id,

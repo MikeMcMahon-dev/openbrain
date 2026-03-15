@@ -3,7 +3,11 @@ from pathlib import Path
 from typing import Any
 
 
-def load_markdown_documents(vault_path: Path, subject: str | None = None, topic: str | None = None) -> list[dict[str, Any]]:
+def load_markdown_documents(
+    vault_path: Path,
+    subject: str | None = None,
+    topic: str | None = None,
+) -> list[dict[str, Any]]:
     documents = []
     markdown_files = list(vault_path.rglob("*.md"))
 

@@ -1,6 +1,9 @@
-PYTHON_SRCS := scripts brain_server
+PYTHON_SRCS := scripts brain_server api
+LOG_DIR := .logs
+NOW := $(shell date +%Y%m%d-%H%M%S)
 
-.PHONY: lint lint-py lint-md
+.PHONY: lint lint-py lint-md lint-py-fix smoke smoke-local smoke-live check
+.PHONY: check-log smoke-log smoke-live-log
 
 lint: lint-py lint-md
 	@echo "Running lint checks..."
@@ -15,5 +18,40 @@ lint-py:
 	ruff check $(PYTHON_SRCS)
 	ruff format --check $(PYTHON_SRCS)
 
+lint-py-fix:
+	@echo "Auto-fixing Python style issues with Ruff..."
+	ruff check --fix $(PYTHON_SRCS)
+	ruff format $(PYTHON_SRCS)
+
 lint-md:
 	python scripts/lint_markdown.py
+
+smoke: smoke-local
+
+smoke-local:
+	@python scripts/smoke_checks.py
+
+smoke-live:
+	@if [ -z "$(SMOKE_URL)" ]; then \
+		echo "SMOKE_URL is required. Example: make smoke-live SMOKE_URL=https://your-project.vercel.app"; \
+		exit 1; \
+	fi
+	@python scripts/smoke_checks.py --live "$(SMOKE_URL)"
+
+check: lint smoke
+
+check-log:
+	@mkdir -p "$(LOG_DIR)"
+	@$(MAKE) check 2>&1 | tee "$(LOG_DIR)/check-$(NOW).log"
+
+smoke-log:
+	@mkdir -p "$(LOG_DIR)"
+	@$(MAKE) smoke 2>&1 | tee "$(LOG_DIR)/smoke-$(NOW).log"
+
+smoke-live-log:
+	@if [ -z "$(SMOKE_URL)" ]; then \
+		echo "SMOKE_URL is required. Example: make smoke-live-log SMOKE_URL=https://your-project.vercel.app"; \
+		exit 1; \
+	fi
+	@mkdir -p "$(LOG_DIR)"
+	@$(MAKE) smoke-live SMOKE_URL="$(SMOKE_URL)" 2>&1 | tee "$(LOG_DIR)/smoke-live-$(NOW).log"

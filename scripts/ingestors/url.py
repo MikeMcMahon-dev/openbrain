@@ -1,12 +1,16 @@
 import hashlib
 from typing import Any
+from urllib.parse import urlparse
 
 import requests
 from bs4 import BeautifulSoup
-from urllib.parse import urlparse
 
 
-def load_url_documents(url_or_urls, subject: str | None = None, topic: str | None = None) -> list[dict[str, Any]]:
+def load_url_documents(
+    url_or_urls,
+    subject: str | None = None,
+    topic: str | None = None,
+) -> list[dict[str, Any]]:
     urls = [url_or_urls] if isinstance(url_or_urls, str) else list(url_or_urls or [])
     documents = []
 

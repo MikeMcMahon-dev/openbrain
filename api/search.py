@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from _openbrain_api import parse_request, response_payload, search_payload, validate_method
+from ._openbrain_api import parse_request, response_payload, search_payload, validate_method
 
 
 def handler(request):
@@ -28,4 +28,3 @@ def handler(request):
             payload["tenant_id"] = (metadata.get("query") or {}).get("tenant_id")
     status, body = search_payload(payload, metadata)
     return response_payload(status, body)
-

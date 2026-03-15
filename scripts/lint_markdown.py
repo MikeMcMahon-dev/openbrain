@@ -2,7 +2,6 @@
 import subprocess
 from pathlib import Path
 
-
 MARKDOWN_FILES = [
     Path("README.md"),
     Path("docs/AGENTS.md"),
@@ -88,9 +87,7 @@ def fallback_markdown_checks() -> int:
 
         for i in range(1, len(headings)):
             if headings[i][1] > headings[i - 1][1] + 1:
-                issues.append(
-                    (path.as_posix(), headings[i][0], "Heading level jump detected")
-                )
+                issues.append((path.as_posix(), headings[i][0], "Heading level jump detected"))
 
     for path, line_no, message in issues:
         if line_no == 0:

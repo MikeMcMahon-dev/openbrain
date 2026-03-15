@@ -22,10 +22,12 @@ def chunk_text_by_tokens(text, max_tokens=500, overlap=100, min_tokens=80):
         if len(chunk_tokens) < min_tokens and start > 0:
             break
 
-        chunks.append({
-            "heading": "root",
-            "text": " ".join(chunk_tokens),
-        })
+        chunks.append(
+            {
+                "heading": "root",
+                "text": " ".join(chunk_tokens),
+            }
+        )
 
         if end >= len(tokens):
             break
