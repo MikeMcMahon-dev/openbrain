@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OpenBrain Demo</title>
+    <style>
+      :root {
+        --bg: #f3f7ff;
+        --panel: #ffffff;
+        --muted: #52607a;
+        --text: #162238;
+        --accent: #4f46e5;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+        color: var(--text);
+        background: linear-gradient(140deg, #f3f7ff 0%, #eff2ff 45%, #f9f5ff 100%);
+      }
+
+      .page {
+        max-width: 1080px;
+        margin: 0 auto;
+        padding: 24px 18px 40px;
+      }
+
+      header {
+        margin-bottom: 16px;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 34px;
+      }
+
+      p {
+        margin: 6px 0 0;
+        color: var(--muted);
+      }
+
+      .cards {
+        display: grid;
+        gap: 14px;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      }
+
+      .card {
+        background: var(--panel);
+        border-radius: 16px;
+        border: 1px solid #e2e8f0;
+        box-shadow: 0 12px 22px rgba(14, 42, 90, 0.06);
+        padding: 14px;
+      }
+
+      .card h2 {
+        margin-top: 0;
+        font-size: 20px;
+      }
+
+      label {
+        display: block;
+        margin-top: 10px;
+        font-size: 13px;
+        color: var(--muted);
+      }
+
+      input,
+      textarea,
+      select,
+      button {
+        width: 100%;
+        margin-top: 6px;
+        font: inherit;
+      }
+
+      input,
+      textarea,
+      select {
+        border: 1px solid #cfd8ee;
+        border-radius: 10px;
+        padding: 10px;
+        background: #fff;
+      }
+
+      textarea {
+        min-height: 110px;
+        resize: vertical;
+      }
+
+      button {
+        margin-top: 12px;
+        border: 0;
+        border-radius: 10px;
+        color: #fff;
+        background: var(--accent);
+        padding: 10px 14px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      button:hover {
+        opacity: 0.92;
+      }
+
+      .muted {
+        color: var(--muted);
+        margin: 8px 0 0;
+      }
+
+      .section-label {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+      }
+
+      .result {
+        white-space: pre-wrap;
+        background: #0f172a;
+        color: #f8fafc;
+        border-radius: 10px;
+        padding: 12px;
+        margin-top: 10px;
+        min-height: 90px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      }
+
+      .hint {
+        margin-top: 12px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <header>
+        <h1>OpenBrain Family Demo</h1>
+        <p>Use this page to ingest content, run query/search, and test quiz/flashcards generation.</p>
+      </header>
+
+      <div class="cards">
+        <section class="card">
+          <h2>Context Header (for tenancy)</h2>
+          <label for="owner">Owner / User login</label>
+          <input id="owner" type="text" value="tenant-a-owner" />
+          <label for="tenantId">Tenant ID</label>
+          <input id="tenantId" type="text" value="family" />
+          <p class="muted">These values are passed as <code>x-openbrain-owner</code> and <code>x-openbrain-tenant-id</code>.</p>
+        </section>
+
+        <section class="card">
+          <h2>Ingest</h2>
+          <label for="sourceType">Source type</label>
+          <select id="sourceType">
+            <option value="obsidian" selected>obsidian</option>
+            <option value="pdf">pdf</option>
+            <option value="docx">docx</option>
+            <option value="url">url</option>
+          </select>
+          <label for="sourceValue">Source</label>
+          <input id="sourceValue" type="text" value="/tmp" />
+          <label for="subject">Subject (optional)</label>
+          <input id="subject" type="text" placeholder="science" />
+          <label for="topic">Topic (optional)</label>
+          <input id="topic" type="text" placeholder="2026-03-15" />
+          <button type="button" onclick="submitIngest()">Run ingest</button>
+          <div class="section-label">
+            <strong>Status</strong>
+            <span class="muted" id="ingestStatus">idle</span>
+          </div>
+          <pre id="ingestResult" class="result"></pre>
+        </section>
+
+        <section class="card">
+          <h2>Query / Tutor</h2>
+          <label for="queryText">Query</label>
+          <textarea id="queryText">test</textarea>
+          <label for="queryN">Results</label>
+          <input id="queryN" type="number" value="3" min="1" max="20" />
+          <button type="button" onclick="submitQuery('/api/query')">Run /api/query</button>
+          <div class="section-label">
+            <strong>Context</strong>
+            <span class="muted" id="queryStatus">idle</span>
+          </div>
+          <pre id="queryResult" class="result"></pre>
+        </section>
+
+        <section class="card">
+          <h2>Search</h2>
+          <label for="searchText">Search</label>
+          <textarea id="searchText">test</textarea>
+          <label for="searchN">Results</label>
+          <input id="searchN" type="number" value="3" min="1" max="20" />
+          <button type="button" onclick="submitQuery('/api/search')">Run /api/search</button>
+          <div class="section-label">
+            <strong>Context</strong>
+            <span class="muted" id="searchStatus">idle</span>
+          </div>
+          <pre id="searchResult" class="result"></pre>
+        </section>
+
+        <section class="card">
+          <h2>Generate Quiz</h2>
+          <label for="quizText">Prompt</label>
+          <textarea id="quizText">What is mitosis?</textarea>
+          <button type="button" onclick="submitQuiz()">Generate quiz</button>
+          <div class="section-label">
+            <strong>Context</strong>
+            <span class="muted" id="quizStatus">idle</span>
+          </div>
+          <pre id="quizResult" class="result"></pre>
+        </section>
+
+        <section class="card">
+          <h2>Generate Flashcards</h2>
+          <label for="flashText">Prompt</label>
+          <textarea id="flashText">Cell division basics</textarea>
+          <button type="button" onclick="submitFlashcards()">Generate flashcards</button>
+          <div class="section-label">
+            <strong>Context</strong>
+            <span class="muted" id="flashStatus">idle</span>
+          </div>
+          <pre id="flashResult" class="result"></pre>
+        </section>
+      </div>
+
+      <p class="hint">Tip: keep query text simple while data is small; the UI sends owner/tenant as headers for tenancy-aware scoping.</p>
+    </main>
+
+    <script>
+      function headersForRequest() {
+        const owner = document.getElementById("owner").value.trim();
+        const tenantId = document.getElementById("tenantId").value.trim();
+        const headers = {
+          "Content-Type": "application/json",
+        };
+        if (owner) {
+          headers["x-openbrain-owner"] = owner;
+        }
+        if (tenantId) {
+          headers["x-openbrain-tenant-id"] = tenantId;
+        }
+        return headers;
+      }
+
+      function setStatus(id, text) {
+        document.getElementById(id).textContent = text;
+      }
+
+      async function requestJson(url, method, payload, statusId, resultId) {
+        setStatus(statusId, "requesting");
+        try {
+          const response = await fetch(url, {
+            method,
+            headers: headersForRequest(),
+            body: payload ? JSON.stringify(payload) : undefined,
+          });
+          const body = await response.text();
+          let parsed;
+          try {
+            parsed = JSON.parse(body);
+          } catch {
+            parsed = { raw: body };
+          }
+          setStatus(statusId, `status: ${response.status}`);
+          document.getElementById(resultId).textContent = JSON.stringify(parsed, null, 2);
+        } catch (error) {
+          setStatus(statusId, "error");
+          document.getElementById(resultId).textContent = String(error);
+        }
+      }
+
+      function submitIngest() {
+        const payload = {
+          source_type: document.getElementById("sourceType").value,
+          source: document.getElementById("sourceValue").value,
+          subject: document.getElementById("subject").value || undefined,
+          topic: document.getElementById("topic").value || undefined,
+          owner: document.getElementById("owner").value.trim(),
+        };
+        requestJson(
+          "/api/ingest",
+          "POST",
+          payload,
+          "ingestStatus",
+          "ingestResult"
+        );
+      }
+
+      function submitQuery(path) {
+        const payload = {
+          query: (path === "/api/search" ? document.getElementById("searchText") : document.getElementById("queryText")).value,
+          n_results: Number(
+            path === "/api/search"
+              ? document.getElementById("searchN").value
+              : document.getElementById("queryN").value
+          ),
+          mode: "explain",
+        };
+        requestJson(
+          path,
+          "POST",
+          payload,
+          path === "/api/search" ? "searchStatus" : "queryStatus",
+          path === "/api/search" ? "searchResult" : "queryResult"
+        );
+      }
+
+      function submitQuiz() {
+        requestJson(
+          "/api/generate_quiz",
+          "POST",
+          {
+            query: document.getElementById("quizText").value,
+          },
+          "quizStatus",
+          "quizResult"
+        );
+      }
+
+      function submitFlashcards() {
+        requestJson(
+          "/api/generate_flashcards",
+          "POST",
+          {
+            query: document.getElementById("flashText").value,
+          },
+          "flashStatus",
+          "flashResult"
+        );
+      }
+    </script>
+  </body>
+</html>
