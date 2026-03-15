@@ -6,3 +6,5 @@ brain_index/
 .vercel/
 .python-version
 *.log
+.vercel
+.env*.local
