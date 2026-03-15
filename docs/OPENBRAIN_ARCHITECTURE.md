@@ -179,6 +179,35 @@ OpenBrain prioritizes:
 
 ---
 
+## 11. ChatGPT Integration Layer (Planned)
+
+OpenBrain currently exposes API routes that can be consumed by a ChatGPT
+personalization layer, but no direct connector is active yet.
+
+Planned connector architecture:
+
+- Chat entrypoint invokes OpenBrain tool calls:
+  - `POST /api/query`
+  - `POST /api/search`
+  - `POST /api/generate_quiz`
+  - `POST /api/generate_flashcards`
+  - `POST /api/ingest` (admin/import tooling)
+- A thin identity gateway maps chat user context into:
+  - `x-openbrain-owner`
+  - tenant context headers
+- Tool output stays in OpenBrain schema:
+  - query `results`
+  - `context_used`
+  - `tutor_prompt` and `rules`
+
+Current gap:
+
+- Define Custom GPT action/tool schema and auth strategy.
+- Add request/response transforms and error envelopes for chat-friendly responses.
+- Add explicit tenant/user binding from chat identity to DB identities.
+
+---
+
 ## Long-Term Direction
 
 OpenBrain will support:

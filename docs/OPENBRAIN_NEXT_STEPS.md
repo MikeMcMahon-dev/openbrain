@@ -117,6 +117,27 @@ Before defaulting reads to Supabase:
 - Proceed to manual filesystem import test as your next operational validation
 - Gate default source flip on parity results and rollback readiness
 
+## Step 8 – ChatGPT Connector Setup (In Progress)
+
+- Publish explicit OpenBrain tool contracts for ChatGPT/custom GPT actions:
+  - `openbrain_query`
+  - `openbrain_generate_quiz`
+  - `openbrain_generate_flashcards`
+  - `openbrain_ingest`
+- Execution details are captured in `docs/CHATGPT_CONNECTOR.md`.
+- Add identity bridge (chat user → owner/tenant headers) to prevent users writing
+  as another identity.
+- Add response shape guards so the chat tool returns deterministic fields and
+  meaningful validation errors.
+- Validate with a manual chat flow:
+  - ask a study question
+  - request flashcards
+  - request quiz
+  - confirm that output references imported family notes.
+
+- Deliverable target: stable Custom GPT action configuration + working family
+  smoke checks for chat tool routes.
+
 ---
 
 ## Future Considerations
