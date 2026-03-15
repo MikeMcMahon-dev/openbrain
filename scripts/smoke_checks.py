@@ -31,7 +31,39 @@ def _make_result(name: str, status: int, payload: Any, expected: int) -> tuple[b
     return True, f"{name}: ok ({status})"
 
 
-def run_case(request: dict[str, Any], expected: int) -> tuple[bool, str]:
+def _validate_payload_shape(payload: Any, path: str) -> tuple[bool, str]:
+    if path not in {"/api/ingest", "/ingest"}:
+        return True, "ok"
+
+    if not isinstance(payload, dict):
+        return False, f"{path}: expected JSON object payload"
+
+    required_keys = {
+        "ingest_id",
+        "status",
+        "source_type",
+        "source",
+        "owner",
+        "subject",
+        "topic",
+        "message",
+        "details",
+    }
+    missing = sorted(required_keys - set(payload.keys()))
+    if missing:
+        return False, f"{path}: missing keys {missing}"
+
+    if payload.get("status") not in {"accepted", "queued"}:
+        return False, f"{path}: unexpected status '{payload.get('status')}'"
+
+    return True, f"{path}: ok ({payload.get('status')})"
+
+
+def run_case(
+    request: dict[str, Any],
+    expected: int,
+    validate_payload: bool = False,
+) -> tuple[bool, str]:
     try:
         from api.app import handler
     except Exception as exc:
@@ -51,7 +83,17 @@ def run_case(request: dict[str, Any], expected: int) -> tuple[bool, str]:
     else:
         body_payload = body
     route = request.get("path") if isinstance(request, dict) else "unknown"
-    return _make_result(route, status, body_payload, expected)
+    ok, message = _make_result(route, status, body_payload, expected)
+    if not ok:
+        return False, message
+
+    if validate_payload:
+        ok_payload, detail = _validate_payload_shape(body_payload, route)
+        if not ok_payload:
+            return False, detail
+        return True, detail
+
+    return ok, message
 
 
 def smoke_local() -> int:
@@ -141,12 +183,28 @@ def smoke_local() -> int:
             },
             200,
         ),
+        (
+            {
+                "path": "/api/ingest",
+                "method": "POST",
+                "body": json.dumps({"source_type": "obsidian", "source": "/tmp"}),
+                "headers": {"Content-Type": "application/json"},
+            },
+            200,
+            True,
+        ),
         ({"path": "/bogus-path", "method": "GET"}, 404),
     ]
 
     failed = 0
-    for request, expected in cases:
-        ok, message = run_case(request, expected)
+    for case in cases:
+        if len(case) == 3:
+            request, expected, validate_payload = case
+        else:
+            request, expected = case
+            validate_payload = False
+
+        ok, message = run_case(request, expected, validate_payload)
         print(message)
         if not ok:
             failed += 1
@@ -196,6 +254,7 @@ def smoke_live(base_url: str) -> int:
         ("/generate_flashcards", {"query": "test"}, 200),
         ("/api/generate_flashcards", {"query": "test"}, 200),
         ("/ingest", {"source_type": "obsidian", "source": "/tmp"}, 200),
+        ("/api/ingest", {"source_type": "obsidian", "source": "/tmp"}, 200),
     ]
 
     failed = 0
@@ -208,6 +267,10 @@ def smoke_live(base_url: str) -> int:
                 payload,
             )
             ok, message = _make_result(path, status, body, expected)
+            if ok:
+                ok, detail = _validate_payload_shape(body, path)
+                if not ok:
+                    message = detail
         except urllib.error.HTTPError as exc:
             body = exc.read().decode("utf-8", errors="replace")
             ok = False
