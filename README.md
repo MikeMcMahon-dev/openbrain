@@ -1,5 +1,14 @@
 # openbrain
 
+## Session handoff
+
+For multi-session continuity, start with:
+
+- [docs/HANDOFF.md](/Users/mmcmahon/src/home-lab/open-brain/docs/HANDOFF.md)
+- [docs/OPENBRAIN_NEXT_STEPS.md](/Users/mmcmahon/src/home-lab/open-brain/docs/OPENBRAIN_NEXT_STEPS.md)
+
+`docs/HANDOFF.md` contains the latest session state, validation results, risks, and the next three actions.
+
 ## Development checks (before review)
 
 Run these commands before code review so Python + Markdown lint issues are surfaced early:
