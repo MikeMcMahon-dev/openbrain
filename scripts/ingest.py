@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import os
+import time
 import tomllib
+import sys
 from pathlib import Path
 from typing import Any
+import urllib.error
 
 from chunking import chunk_markdown, chunk_text_by_tokens
 from ingestors import (
@@ -23,7 +26,10 @@ MIN_CHUNK_LENGTH = 80
 DEFAULT_OWNER = "default_user"
 DEFAULT_USER_ID = "default_user"
 SUPABASE_ENABLED_BY_DEFAULT = False
-TENANT_ID = os.getenv("OPENBRAIN_DEFAULT_TENANT_ID", "family").strip() or "family"
+EXPECTED_EMBEDDING_DIMENSION = int(os.getenv("OPENBRAIN_EMBEDDING_DIMENSION", "1536"))
+EMBEDDING_DEBUG = os.getenv("OPENBRAIN_EMBEDDING_DEBUG", "").strip().lower() in {"1", "true", "yes"}
+_embedding_debug_logged = False
+MAX_EMBEDDING_RETRIES = int(os.getenv("OPENBRAIN_EMBEDDING_RETRIES", "3"))
 
 _MODEL: Any | None = None
 
@@ -31,10 +37,43 @@ _MODEL: Any | None = None
 script_dir = Path(__file__).resolve().parent
 project_root = script_dir.parent
 
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
+def _load_runtime_env() -> None:
+    def _is_set(value: str | None) -> bool:
+        return bool(value and str(value).strip())
+
+    for path in (project_root / ".env", project_root / ".env.local"):
+        if not path.exists():
+            continue
+        try:
+            for line in path.read_text(encoding="utf-8").splitlines():
+                stripped = line.strip()
+                if not stripped or stripped.startswith("#"):
+                    continue
+                if "=" not in stripped:
+                    continue
+                key, value = stripped.split("=", 1)
+                key = key.strip()
+                value = value.strip().strip("'\"")
+                if key and _is_set(value):
+                    if not _is_set(os.getenv(key)):
+                        os.environ[key] = value
+        except Exception:
+            continue
+
+
+_load_runtime_env()
+DEFAULT_OWNER = os.getenv("OPENBRAIN_DEFAULT_OWNER", DEFAULT_OWNER).strip() or DEFAULT_OWNER
+TENANT_ID = os.getenv("OPENBRAIN_DEFAULT_TENANT_ID", "family").strip() or "family"
+
 
 try:
     from api._openbrain_api import embedding_request as _request_embedding
-except Exception:  # pragma: no cover
+except Exception as exc:  # pragma: no cover
+    if EMBEDDING_DEBUG:
+        print(f"Failed to import embedding request helper: {type(exc).__name__}: {exc}")
     _request_embedding = None
 
 
@@ -81,7 +120,7 @@ def _load_toml_file(path: Path) -> dict[str, Any]:
 
 
 def _build_connection_string(database_config: dict[str, Any]) -> str | None:
-    env_connection = os.getenv("OPENBRAIN_SUPABASE_CONNECTION_STRING")
+    env_connection = os.getenv("OPENBRAIN_SUPABASE_CONNECTION_STRING") or os.getenv("SUPABASE_DB_URL")
     if env_connection and env_connection.strip():
         return env_connection.strip()
 
@@ -113,11 +152,28 @@ def _connect_supabase(database_config: dict[str, Any]) -> tuple[Any | None, str 
         return None, "missing connection string"
 
     try:
+        from urllib.parse import urlparse
+        import socket
+
+        parsed = urlparse(connection_string)
+        if parsed.hostname:
+            socket.gethostbyname(parsed.hostname)
+    except ImportError:
+        pass
+    except OSError as exc:
+        return None, (
+            "unable to resolve database host from connection string; "
+            f"check DNS/network access before retrying: {exc}"
+        )
+
+    try:
         import psycopg
     except ImportError:
         return None, (
-            "psycopg is required for Supabase connections; "
-            "add psycopg to requirements and install dependencies."
+            "Missing dependency: psycopg is required for Supabase connections.\n"
+            "Install it in this environment:\n"
+            "  source .venv/bin/activate && python -m pip install -r requirements.txt\n"
+            "and retry."
         )
 
     connect_timeout = int(database_config.get("connect_timeout_seconds", 10))
@@ -176,6 +232,146 @@ def _enrich_document(document: dict[str, Any], owner: str, user_id: str, source:
     document["file"] = document.get("file") or source.split("/")[-1] or source
 
 
+def _count_existing_rows_for_source(
+    connection: Any,
+    tenant_id: str,
+    owner: str,
+    source: str,
+    columns: set[str],
+) -> int | None:
+    if not connection:
+        return None
+    if not source:
+        return None
+    match_parts: list[str] = []
+    params: list[Any] = [tenant_id, owner]
+
+    if "metadata" in columns:
+        match_parts.append("COALESCE(metadata ->> 'source', '') = %s")
+        params.append(source)
+    if "source_uri" in columns:
+        match_parts.append("COALESCE(source_uri, '') = %s")
+        params.append(source)
+
+    if not match_parts:
+        return None
+
+    query = (
+        "SELECT COUNT(*) AS total FROM public.thoughts "
+        "WHERE COALESCE(tenant_id, '') = %s "
+        "  AND COALESCE(created_by_user_login, '') = %s "
+        f"  AND ({' OR '.join(match_parts)})"
+    )
+
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(query, tuple(params))
+            row = cursor.fetchone()
+            if isinstance(row, dict):
+                return int(row["total"])
+            if isinstance(row, tuple):
+                return int(row[0])
+            return None
+    except Exception:
+        return None
+
+
+def _run_preflight_checks(
+    documents: list[dict[str, Any]],
+    owner: str,
+    tenant_id: str,
+    connection: Any,
+    available_columns: set[str],
+) -> bool:
+    ok = True
+    print("Running ingest pre-flight checks...")
+
+    if not owner or owner == "default_user":
+        print("Pre-flight warning: owner is default_user. Confirm OPENBRAIN_DEFAULT_OWNER / config owner is set.")
+    if not tenant_id:
+        print("Pre-flight ERROR: tenant_id is empty.")
+        ok = False
+
+    if not documents:
+        print("Pre-flight ERROR: no documents were prepared from configured inputs.")
+        print("Check config/imports.toml data source paths and restart.")
+        return False
+
+    required_columns = {
+        "id",
+        "content",
+        "metadata",
+        "tenant_id",
+        "created_by_user_login",
+    }
+    missing_required = required_columns - available_columns
+    if missing_required:
+        print(f"Pre-flight ERROR: thoughts table missing required columns: {sorted(missing_required)}.")
+        ok = False
+    if "embedding" not in available_columns:
+        print("Pre-flight ERROR: thoughts table missing embedding column.")
+        ok = False
+
+    if not (os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENAI_API_KEY")):
+        print(
+            "Pre-flight warning: OPENROUTER_API_KEY and OPENAI_API_KEY not set; "
+            "ingest will use local embedding fallback."
+        )
+        model = _load_model()
+        if model is None:
+            print("Pre-flight ERROR: no embedding model available for local fallback.")
+            ok = False
+        else:
+            try:
+                sample = _to_list(model.encode("openbrain preflight test"))
+            except Exception as exc:
+                print(f"Pre-flight ERROR: local embedding test failed: {exc}")
+                ok = False
+            else:
+                if len(sample) != EXPECTED_EMBEDDING_DIMENSION:
+                    print(
+                        f"Pre-flight ERROR: local fallback model produced {len(sample)} dims, "
+                        f"expected {EXPECTED_EMBEDDING_DIMENSION}."
+                    )
+                    ok = False
+
+    source_counts: dict[str, int] = {}
+    for document in documents:
+        source = str(document.get("source") or "").strip()
+        if not source or source in source_counts:
+            continue
+        existing = _count_existing_rows_for_source(
+            connection=connection,
+            tenant_id=tenant_id,
+            owner=owner,
+            source=source,
+            columns=available_columns,
+        )
+        if existing is None:
+            source_counts[source] = -1
+        else:
+            source_counts[source] = existing
+
+    for source, count in sorted(source_counts.items()):
+        if count < 0:
+            print(
+                f"Pre-flight: source '{source}' existing rows in tenant '{tenant_id}', owner '{owner}': unknown"
+            )
+        elif count == 0:
+            print(
+                f"Pre-flight: source '{source}' has no existing rows in tenant '{tenant_id}', owner '{owner}'."
+            )
+        else:
+            print(
+                f"Pre-flight: source '{source}' already has {count} rows in tenant '{tenant_id}', owner '{owner}'. "
+                "Re-ingest should remain idempotent."
+            )
+
+    if ok:
+        print("Pre-flight checks passed.")
+    return ok
+
+
 def _introspect_columns(connection: Any) -> set[str]:
     rows = connection.execute(
         """
@@ -196,23 +392,75 @@ def _introspect_columns(connection: Any) -> set[str]:
 
 
 def _compute_embedding(text: str) -> list[float] | None:
+    global _embedding_debug_logged
     if _request_embedding is not None:
-        try:
-            values = _request_embedding(text)
-            if isinstance(values, list):
-                return [float(x) for x in values]
-        except Exception:
-            print("Embedding request failed, falling back to local model.")
+        if EMBEDDING_DEBUG and not _embedding_debug_logged:
+            print(
+                "Embedding provider status: "
+                f"openrouter_key={'set' if os.getenv('OPENROUTER_API_KEY') else 'missing'}, "
+                f"openai_key={'set' if os.getenv('OPENAI_API_KEY') else 'missing'}, "
+                f"base_url={os.getenv('OPENROUTER_BASE_URL') or os.getenv('OPENAI_EMBEDDING_URL') or ('https://api.openai.com/v1' if not os.getenv('OPENROUTER_API_KEY') else 'https://openrouter.ai/api/v1')}"
+            )
+            _embedding_debug_logged = True
+
+        last_exception: BaseException | None = None
+        for attempt in range(1, MAX_EMBEDDING_RETRIES + 2):
+            try:
+                values = _request_embedding(text)
+                if values is None and EMBEDDING_DEBUG:
+                    print("Embedding provider returned no values (None) for text slice.")
+                if isinstance(values, list):
+                    embedding = [float(x) for x in values]
+                    if len(embedding) != EXPECTED_EMBEDDING_DIMENSION:
+                        print(
+                            f"Embedding provider returned {len(embedding)} dimensions; "
+                            f"expected {EXPECTED_EMBEDDING_DIMENSION}. "
+                            "Check OPENBRAIN_EMBEDDING_MODEL / OPENBRAIN_EMBEDDING_DIMENSION."
+                        )
+                        return None
+                    return embedding
+                if EMBEDDING_DEBUG:
+                    print("Embedding provider returned non-list payload; falling back to local model.")
+                break
+            except urllib.error.HTTPError as exc:
+                last_exception = exc
+                if exc.code in {429, 500, 502, 503, 504} and attempt <= MAX_EMBEDDING_RETRIES:
+                    if EMBEDDING_DEBUG:
+                        print(
+                            f"Transient embedding error (HTTP {exc.code}) on attempt {attempt}, "
+                            f"retrying... ({attempt}/{MAX_EMBEDDING_RETRIES})"
+                        )
+                    time.sleep(min(2 ** attempt, 8))
+                    continue
+                if EMBEDDING_DEBUG:
+                    print(f"Embedding request failed (HTTP {exc.code}), falling back to local model: {exc}")
+                break
+            except Exception as exc:
+                last_exception = exc
+                if EMBEDDING_DEBUG:
+                    print(f"Embedding request failed, falling back to local model: {exc}")
+                break
+        if EMBEDDING_DEBUG and last_exception is not None:
+            print(f"Embedding provider disabled for this chunk; error: {last_exception}")
+    elif EMBEDDING_DEBUG:
+        print("Embedding request function unavailable; falling back to local model.")
 
     model = _load_model()
     if model is None:
         return None
 
     try:
-        return _to_list(model.encode(text))
+        embedding = _to_list(model.encode(text))
     except Exception as exc:
         print(f"Local fallback embedder failed: {exc}")
         return None
+    if len(embedding) != EXPECTED_EMBEDDING_DIMENSION:
+        print(
+            f"Local fallback model '{MODEL_NAME}' produced {len(embedding)} dims, "
+            f"expected {EXPECTED_EMBEDDING_DIMENSION}. Configure embedding service for 1536."
+        )
+        return None
+    return embedding
 
 
 def _build_chunk_identifier(
@@ -232,29 +480,67 @@ def _insert_rows(
     connection: Any,
     rows: list[dict[str, Any]],
     available_columns: set[str],
-) -> tuple[int, int]:
+) -> tuple[int, int, int]:
     if not rows:
-        return 0, 0
+        return 0, 0, 0
 
     inserted = 0
+    updated = 0
     skipped = 0
-    columns = list(rows[0].keys())
+    try:
+        from psycopg.types.json import Json
+    except Exception:
+        Json = None
+
+    def _coerce_value(value: Any) -> Any:
+        if isinstance(value, dict) and Json is not None:
+            return Json(value)
+        if isinstance(value, dict) and Json is None:
+            import json as _json
+
+            return _json.dumps(value)
+        return value
+
+    columns = sorted(set().union(*[set(row.keys()) for row in rows]) & available_columns)
+    if not columns:
+        return 0, 0, len(rows)
     values_sql = ", ".join(["%s"] * len(columns))
+    update_expr = []
+    if len(columns) > 1:
+        for col in columns:
+            if col == "id":
+                continue
+            if col == "embedding":
+                update_expr.append("embedding = COALESCE(EXCLUDED.embedding, public.thoughts.embedding)")
+            else:
+                update_expr.append(f"{col} = EXCLUDED.{col}")
+    update_clause = ", ".join(update_expr) or None
     insert_sql = (
         f"INSERT INTO public.thoughts ({', '.join(columns)}) "
         f"VALUES ({values_sql}) "
-        "ON CONFLICT DO NOTHING"
     )
+    if update_clause:
+        insert_sql += (
+            f"ON CONFLICT (id) DO UPDATE SET {update_clause} "
+            "RETURNING (xmax = 0) as is_inserted"
+        )
+    else:
+        insert_sql += "ON CONFLICT DO NOTHING"
 
     for row in rows:
-        if not set(row.keys()).issubset(available_columns):
-            skipped += 1
-            continue
-
         try:
             cursor = connection.cursor()
-            cursor.execute(insert_sql, [row[column] for column in columns])
-            if cursor.rowcount and cursor.rowcount > 0:
+            cursor.execute(
+                insert_sql,
+                [_coerce_value(row.get(column)) for column in columns],
+            )
+            if update_clause:
+                result = cursor.fetchone()
+                if result is not None and result[0]:
+                    inserted += 1
+                else:
+                    updated += 1
+            elif cursor.rowcount and cursor.rowcount > 0:
                 inserted += 1
             else:
                 skipped += 1
@@ -263,10 +549,11 @@ def _insert_rows(
             print(f"Insert skipped for {row.get('source_chunk_id')}: {exc}")
             skipped += 1
 
-    return inserted, skipped
+    return inserted, updated, skipped
 
 
 print("Loading configuration...")
+_load_runtime_env()
 config_path = project_root / "config" / "imports.toml"
 supabase_config_path = project_root / "config" / "supabase.toml"
 
@@ -345,6 +632,15 @@ try:
         print("ERROR: thoughts table does not have expected columns content/metadata.")
         raise SystemExit(2)
 
+    if not _run_preflight_checks(
+        documents=documents,
+        owner=pipeline_owner,
+        tenant_id=tenant_id,
+        connection=supabase_conn,
+        available_columns=available_columns,
+    ):
+        raise SystemExit(2)
+
     print(f"Writing {len(documents)} docs into Supabase tenant '{tenant_id}'")
 
     rows: list[dict[str, Any]] = []
@@ -400,12 +696,13 @@ try:
 
             rows.append({key: value for key, value in row.items() if key in available_columns})
 
-    inserted, skipped = _insert_rows(supabase_conn, rows, available_columns)
-    print(f"Prepared chunks: {len(rows)}; inserted: {inserted}; skipped: {skipped}.")
+    inserted, updated, skipped = _insert_rows(supabase_conn, rows, available_columns)
+    print(
+        f"Prepared chunks: {len(rows)}; inserted: {inserted}; updated: {updated}; skipped: {skipped}."
+    )
 finally:
     try:
         supabase_conn.close()
         print("Supabase database connection closed.")
     except Exception as exc:
         print(f"Failed to close Supabase connection cleanly: {exc}")
-
