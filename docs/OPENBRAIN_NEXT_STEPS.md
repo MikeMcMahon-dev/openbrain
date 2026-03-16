@@ -138,6 +138,33 @@ Before defaulting reads to Supabase:
 - Deliverable target: stable Custom GPT action configuration + working family
   smoke checks for chat tool routes.
 
+## Night-to-Morning Handoff (Next Session)
+
+What was done:
+
+- Ingestion CLI and Vercel `/api/ingest` now share pre-flight guardrails:
+  - owner/tenant checks
+  - schema readiness checks
+  - source existence checks
+  - existing row count summary for transparency
+  - blocked-on-failure behavior for hard issues
+- End-to-end smoke checks are passing and deployed API returns clean responses at
+  `https://openbrain-rouge.vercel.app`.
+- Idempotency checks for repeated ingests are in place and automated by
+  `scripts/smoke_checks.py --idempotency-source ...`.
+
+Immediate next actions:
+
+- Run a manual one-shot ingest from your chosen Obsidian source and confirm:
+  - response includes `preflight.existing_rows`
+  - `preflight.status` is `ok` when expected
+  - re-running same source does not increase row count
+- Validate manual import flow from UI one more time for family UX.
+- Move into chat connector work:
+  - define the user/tenant identity bridge for each request
+  - align Custom GPT action payloads to API response schema in `docs/CHATGPT_CONNECTOR.md`
+- After connector validation, run a final `make smoke-live SMOKE_URL=https://openbrain-rouge.vercel.app`.
+
 ---
 
 ## Future Considerations
