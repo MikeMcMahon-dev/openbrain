@@ -4,6 +4,20 @@ This document tracks planned improvements for the OpenBrain system.
 
 ---
 
+## Last Successful Checks (2026-03-15)
+
+- Deployment smoke: `https://openbrain-rouge.vercel.app`  
+  - Local smoke checks passed
+  - Live smoke checks passed
+- Ingest pre-flight:
+  - CLI ingest and API `/api/ingest` preflight summary now implemented
+  - Idempotency path validated (before/after counts stable)
+- Git:
+  - Latest pushed commit: `21986df`
+  - Branch: `main`
+
+---
+
 ## Step 1 – Supabase as Primary Storage (Complete)
 
 Primary storage now targets Supabase with pgvector:
