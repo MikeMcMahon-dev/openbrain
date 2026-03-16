@@ -36,7 +36,10 @@ DEFAULT_RESULTS = 5
 MAX_RESULTS = 50
 EMBEDDING_MODEL = os.getenv("OPENBRAIN_EMBEDDING_MODEL", "text-embedding-3-small")
 DB_URL = (
-    os.getenv("SUPABASE_DB_URL") or os.getenv("SUPABASE_DATABASE_URL") or os.getenv("DATABASE_URL")
+    os.getenv("OPENBRAIN_SUPABASE_CONNECTION_STRING")
+    or os.getenv("SUPABASE_DB_URL")
+    or os.getenv("SUPABASE_DATABASE_URL")
+    or os.getenv("DATABASE_URL")
 )
 EMBEDDING_KEY = os.getenv("OPENAI_API_KEY") or os.getenv("OPENROUTER_API_KEY")
 EMBEDDING_URL = (
@@ -154,6 +157,126 @@ def _stringify_headers(headers: Any) -> dict[str, str]:
             continue
         normalized[key.lower()] = str(value) if value is not None else ""
     return normalized
+
+
+def _db_connect() -> tuple[Any | None, str | None]:
+    if not DB_URL:
+        return None, "SUPABASE DB URL is not configured."
+    if connect is None or dict_row is None:
+        return None, "psycopg is not installed in this runtime."
+
+    try:
+        return connect(DB_URL, row_factory=dict_row), None
+    except Exception as exc:
+        return None, f"Database connection failed: {exc}"
+
+
+def _ingest_preflight(
+    owner: str,
+    tenant_id: str,
+    source: str,
+    source_type: str,
+) -> dict[str, Any]:
+    report: dict[str, Any] = {
+        "status": "ok",
+        "warnings": [],
+        "errors": [],
+        "owner": owner,
+        "tenant_id": tenant_id,
+        "source": source,
+        "source_type": source_type,
+        "existing_rows": None,
+    }
+
+    if not owner:
+        report["status"] = "failed"
+        report["errors"].append("owner is empty")
+    elif owner == "default_user":
+        report["warnings"].append("owner is default_user. Confirm OPENBRAIN_DEFAULT_OWNER or request owner header.")
+
+    if not tenant_id:
+        report["status"] = "failed"
+        report["errors"].append("tenant_id is empty")
+
+    if not source:
+        report["status"] = "failed"
+        report["errors"].append("source is empty")
+
+    if not (os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENAI_API_KEY")):
+        report["warnings"].append(
+            "No OPENROUTER_API_KEY or OPENAI_API_KEY set; ingest fallback behavior depends on configured local model."
+        )
+
+    connection, conn_error = _db_connect()
+    if connection is None:
+        report["status"] = "failed"
+        report["errors"].append(conn_error or "Database unavailable")
+        return report
+
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name = 'thoughts';
+                """
+            )
+            db_columns = {str(row["column_name"]) for row in cursor.fetchall()}
+            missing = {
+                "id",
+                "content",
+                "metadata",
+                "tenant_id",
+                "created_by_user_login",
+                "embedding",
+            } - db_columns
+            if missing:
+                report["status"] = "failed"
+                report["errors"].append(f"thoughts table missing columns: {sorted(missing)}")
+                return report
+
+            if "source_uri" in db_columns or "metadata" in db_columns:
+                match_parts: list[str] = []
+                params: list[Any] = [tenant_id, owner]
+                if "source_uri" in db_columns:
+                    match_parts.append("COALESCE(source_uri, '') = %s")
+                    params.append(source)
+                if "metadata" in db_columns:
+                    match_parts.append("COALESCE(metadata ->> 'source', '') = %s")
+                    params.append(source)
+                if match_parts:
+                    query = (
+                        "SELECT COUNT(*) AS total FROM public.thoughts "
+                        "WHERE COALESCE(tenant_id, '') = %s "
+                        "  AND COALESCE(created_by_user_login, '') = %s "
+                        f"  AND ({' OR '.join(match_parts)})"
+                    )
+                    cursor.execute(query, tuple(params))
+                    row = cursor.fetchone()
+                    if isinstance(row, dict):
+                        report["existing_rows"] = int(row["total"])
+                    elif isinstance(row, tuple) and row:
+                        report["existing_rows"] = int(row[0])
+            else:
+                report["warnings"].append("Unable to compute existing row count: schema missing source fields")
+    except Exception as exc:
+        report["warnings"].append(f"Pre-flight row-count check skipped: {exc}")
+    finally:
+        try:
+            connection.close()
+        except Exception:
+            pass
+
+    if report["existing_rows"] is not None:
+        report["message"] = (
+            f"{report['existing_rows']} existing rows found for this source+owner+tenant."
+        )
+    else:
+        report["message"] = "Existing row count unavailable."
+
+    return report
 
 
 def _coalesce(*values: Any) -> str:
@@ -281,14 +404,25 @@ def get_db_conn():
 
 
 def embedding_request(text: str) -> list[float] | None:
-    if not EMBEDDING_KEY:
+    embedding_key = os.getenv("OPENAI_API_KEY") or os.getenv("OPENROUTER_API_KEY")
+    if not embedding_key:
         return None
+
+    embedding_url = (
+        os.getenv("OPENAI_EMBEDDING_URL")
+        or os.getenv("OPENROUTER_BASE_URL")
+        or (
+            "https://openrouter.ai/api/v1"
+            if os.getenv("OPENROUTER_API_KEY")
+            else "https://api.openai.com/v1"
+        )
+    )
 
     headers = {
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {EMBEDDING_KEY}",
+        "Authorization": f"Bearer {embedding_key}",
     }
-    if "openrouter.ai" in EMBEDDING_URL:
+    if "openrouter.ai" in embedding_url:
         headers["HTTP-Referer"] = os.getenv("OPENROUTER_HTTP_REFERER", "https://openbrain.local")
         headers["X-Title"] = os.getenv("OPENROUTER_X_TITLE", "OpenBrain Web")
 
@@ -299,7 +433,7 @@ def embedding_request(text: str) -> list[float] | None:
         }
     ).encode("utf-8")
     request = urllib.request.Request(
-        f"{EMBEDDING_URL.rstrip('/')}/embeddings",
+        f"{embedding_url.rstrip('/')}/embeddings",
         data=payload,
         headers=headers,
         method="POST",
@@ -672,6 +806,8 @@ def ingest_payload(
     status = "failed"
     message = ""
     details: list[str] = []
+    preflight_summary: dict[str, Any] | None = None
+    bulk_preflight: list[dict[str, Any]] = []
 
     if "sources" in payload or "items" in payload:
         normalized_items, item_errors = _normalize_bulk_items(payload, allowed)
@@ -704,12 +840,26 @@ def ingest_payload(
                     "failed": 0,
                     "queued": 0,
                 },
+                "preflight": {"status": "failed", "items": []},
             }
 
         accepted = 0
         queued = 0
         failed = len(item_errors)
         for item in normalized_items:
+            item_preflight = _ingest_preflight(
+                owner,
+                _tenant_id,
+                item["source"],
+                item["source_type"],
+            )
+            item["preflight"] = item_preflight
+            bulk_preflight.append(item_preflight)
+            if item_preflight.get("status") == "failed":
+                item["status"] = "failed"
+                item["details"].append("preflight checks failed")
+                failed += 1
+
             item_status = item["status"]
             item["ingest_id"] = compute_ingest_id(
                 item["source_type"],
@@ -723,7 +873,19 @@ def ingest_payload(
             else:
                 queued += 1
 
-        status = "accepted"
+        status = "failed" if any(item.get("status") == "failed" for item in normalized_items) else "accepted"
+        if status == "failed":
+            message = "Ingest request blocked by pre-flight checks."
+            details.extend(item_errors)
+            details.extend(
+                sorted({error for preflight in bulk_preflight for error in preflight.get("errors", [])})
+            )
+        else:
+            message = (
+                f"Bulk ingest accepted for {len(normalized_items)} source item(s)."
+                if len(normalized_items) > 1
+                else "Ingest request accepted."
+            )
         return 200, {
             "ingest_id": compute_ingest_id(
                 "bulk",
@@ -738,11 +900,7 @@ def ingest_payload(
             "owner": owner,
             "subject": subject,
             "topic": topic,
-            "message": (
-                f"Bulk ingest accepted for {len(normalized_items)} source item(s)."
-                if len(normalized_items) > 1
-                else "Ingest request accepted."
-            ),
+            "message": message,
             "details": item_errors,
             "items": normalized_items,
             "summary": {
@@ -751,6 +909,10 @@ def ingest_payload(
                 "queued": queued,
                 "failed": failed,
                 "errors": len(item_errors),
+            },
+            "preflight": {
+                "status": status,
+                "items": bulk_preflight,
             },
         }
 
@@ -766,11 +928,27 @@ def ingest_payload(
             message = "Ingest failed: source is not reachable."
             details.append(reason)
         elif source_type == "obsidian":
-            status = "accepted"
-            message = "Ingest request accepted."
+            preflight_summary = _ingest_preflight(owner, _tenant_id, source, source_type)
+            if preflight_summary.get("status") == "failed":
+                status = "failed"
+                message = "Ingest blocked by pre-flight checks."
+                details.extend(preflight_summary.get("errors", []))
+            else:
+                status = "accepted"
+                message = "Ingest request accepted."
+                if preflight_summary.get("warnings"):
+                    details.extend(preflight_summary.get("warnings", []))
         else:
-            status = "queued"
-            message = "Ingest request accepted. Processing is currently queued in the MCP scaffold."
+            preflight_summary = _ingest_preflight(owner, _tenant_id, source, source_type)
+            if preflight_summary.get("status") == "failed":
+                status = "failed"
+                message = "Ingest blocked by pre-flight checks."
+                details.extend(preflight_summary.get("errors", []))
+            else:
+                status = "queued"
+                message = "Ingest request accepted. Processing is currently queued in the MCP scaffold."
+                if preflight_summary.get("warnings"):
+                    details.extend(preflight_summary.get("warnings", []))
 
     return 200, {
         "ingest_id": compute_ingest_id(source_type, source, owner, subject, topic),
@@ -782,6 +960,7 @@ def ingest_payload(
         "topic": topic,
         "message": message,
         "details": details,
+        "preflight": preflight_summary,
     }
 
 
