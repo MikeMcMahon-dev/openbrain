@@ -15,6 +15,7 @@ This document tracks planned improvements for the OpenBrain system.
 - Git:
   - Latest pushed commit: `21986df`
   - Branch: `main`
+- Session handoff: use [docs/HANDOFF.md](docs/HANDOFF.md) for next-session startup context.
 
 ---
 
