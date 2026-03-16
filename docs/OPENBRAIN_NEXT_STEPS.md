@@ -131,7 +131,10 @@ Before defaulting reads to Supabase:
 - Proceed to manual filesystem import test as your next operational validation
 - Gate default source flip on parity results and rollback readiness
 
-## Step 8 – ChatGPT Connector Setup (In Progress)
+## Step 8 – Agent Communication Layer (In Progress)
+
+- Build an **agent-agnostic communication layer** first, then map specific platform
+  adapters (ChatGPT/custom GPT, Claude, etc.) on top.
 
 - Publish explicit OpenBrain tool contracts for ChatGPT/custom GPT actions:
   - `openbrain_query`
@@ -139,15 +142,20 @@ Before defaulting reads to Supabase:
   - `openbrain_generate_flashcards`
   - `openbrain_ingest`
 - Execution details are captured in `docs/CHATGPT_CONNECTOR.md`.
+- Keep `api/chatgpt.py` as a light adapter for now, but route it through a shared
+  core protocol so we can swap in other agent runtimes without changing API
+  semantics.
 - Add identity bridge (chat user → owner/tenant headers) to prevent users writing
   as another identity.
-- Add response shape guards so the chat tool returns deterministic fields and
+- Add response shape guards so the tool call returns deterministic fields and
   meaningful validation errors.
 - Validate with a manual chat flow:
   - ask a study question
   - request flashcards
   - request quiz
   - confirm that output references imported family notes.
+- Add request signing / shared secret validation for third-party agents (not just
+  ChatGPT) and rate-limit handling around `/api/ingest` and query calls.
 
 - Deliverable target: stable Custom GPT action configuration + working family
   smoke checks for chat tool routes.
@@ -178,6 +186,12 @@ Immediate next actions:
   - define the user/tenant identity bridge for each request
   - align Custom GPT action payloads to API response schema in `docs/CHATGPT_CONNECTOR.md`
 - After connector validation, run a final `make smoke-live SMOKE_URL=https://openbrain-rouge.vercel.app`.
+- Confirm `api/chatgpt.py` is intentionally a thin platform adapter (not the source of truth) and that new providers can reuse the same shared contract with minimal code.
+- Add "agent handoff hardening" checklist before rollout:
+  - preflight status surfaced in UI/API responses
+  - clear owner/tenant validation errors
+  - explicit idempotency behavior for repeated content pushes
+  - rollback note for failed batch imports.
 
 ---
 
