@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import json
 import ssl
 import sys
@@ -15,6 +16,28 @@ from typing import Any
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+
+
+def _read_runtime_env() -> None:
+    """Load local environment defaults without requiring dotenv."""
+    for path in (PROJECT_ROOT / ".env", PROJECT_ROOT / ".env.local"):
+        if not path.exists():
+            continue
+        try:
+            for line in path.read_text(encoding="utf-8").splitlines():
+                stripped = line.strip()
+                if not stripped or stripped.startswith("#") or "=" not in stripped:
+                    continue
+                key, value = stripped.split("=", 1)
+                key = key.strip()
+                value = value.strip().strip("'\"")
+                if key and value and not os.getenv(key):
+                    os.environ[key] = value
+        except Exception:
+            continue
+
+
+_read_runtime_env()
 
 
 def _make_result(name: str, status: int, payload: Any, expected: int) -> tuple[bool, str]:
@@ -108,7 +131,100 @@ def run_case(
     return ok, message
 
 
-def smoke_local() -> int:
+def _supabase_url() -> str | None:
+    return (
+        os.getenv("OPENBRAIN_SUPABASE_CONNECTION_STRING")
+        or os.getenv("SUPABASE_DB_URL")
+        or os.getenv("SUPABASE_DATABASE_URL")
+        or os.getenv("DATABASE_URL")
+    )
+
+
+def _count_ingest_rows_for_source(source: str, tenant_id: str, owner: str) -> int | None:
+    db_url = _supabase_url()
+    if not db_url:
+        return None
+    try:
+        from psycopg import connect
+        from psycopg.rows import dict_row
+
+        conn = connect(db_url, row_factory=dict_row)
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT COUNT(*) AS total
+            FROM public.thoughts
+            WHERE tenant_id = %s
+              AND COALESCE(created_by_user_login, '') = %s
+              AND COALESCE(metadata ->> 'source', '') = %s
+            """,
+            (tenant_id, owner, source),
+        )
+        total = cur.fetchone()["total"]
+        cur.close()
+        conn.close()
+        return int(total)
+    except Exception as exc:
+        print(f"Skipping idempotency DB check: {type(exc).__name__}: {exc}")
+        return None
+
+
+def _run_local_ingest_call(source: str, owner: str | None, path: str = "/api/ingest") -> tuple[bool, str]:
+    body = {"source_type": "obsidian", "source": source}
+    if owner:
+        body["owner"] = owner
+    return run_case(
+        {
+            "path": path,
+            "method": "POST",
+            "body": json.dumps(body),
+            "headers": {"Content-Type": "application/json"},
+        },
+        200,
+        True,
+        expected_owner=owner,
+    )
+
+
+def _smoke_local_idempotency_check(source: str, owner: str | None) -> int:
+    normalized_owner = (owner or os.getenv("OPENBRAIN_DEFAULT_OWNER") or "mike.mcmahon67").strip()
+    tenant_id = (os.getenv("OPENBRAIN_DEFAULT_TENANT_ID") or "family").strip() or "family"
+
+    before = _count_ingest_rows_for_source(source, tenant_id, normalized_owner)
+    if before is None:
+        print("Idempotency check skipped: DB URL not available or DB query failed.")
+        return 0
+
+    ok1, message1 = _run_local_ingest_call(source, normalized_owner)
+    print(message1)
+    if not ok1:
+        print("Idempotency check failed on first ingest call.")
+        return 1
+    after_first = _count_ingest_rows_for_source(source, tenant_id, normalized_owner)
+    if after_first is None:
+        return 0
+
+    ok2, message2 = _run_local_ingest_call(source, normalized_owner)
+    print(message2)
+    if not ok2:
+        print("Idempotency check failed on second ingest call.")
+        return 1
+    after_second = _count_ingest_rows_for_source(source, tenant_id, normalized_owner)
+    if after_second is None:
+        return 0
+
+    print(f"Idempotency check for source='{source}', owner='{normalized_owner}': before={before}, after_first={after_first}, after_second={after_second}")
+    if after_first < before:
+        print("Idempotency check failed: first call reduced row count.")
+        return 1
+    if after_second != after_first:
+        print("Idempotency check failed: second call changed row count.")
+        return 1
+    print("Idempotency check passed.")
+    return 0
+
+
+def smoke_local(idempotency_source: str | None = None, idempotency_owner: str | None = None) -> int:
     query_body = json.dumps({"query": "test"})
     cases = [
         ({"path": "/", "method": "GET"}, 200),
@@ -292,6 +408,10 @@ def smoke_local() -> int:
         if not ok:
             failed += 1
 
+    if idempotency_source:
+        print(f"\nRunning local ingest idempotency check for source: {idempotency_source}")
+        failed += _smoke_local_idempotency_check(idempotency_source, idempotency_owner)
+
     return failed
 
 
@@ -414,6 +534,14 @@ def parse_args() -> argparse.Namespace:
         "--live",
         help="Run smoke checks against a live deployment URL, e.g. https://example.vercel.app",
     )
+    parser.add_argument(
+        "--idempotency-source",
+        help="Optional source path to run a local /api/ingest idempotency check.",
+    )
+    parser.add_argument(
+        "--idempotency-owner",
+        help="Expected owner for local /api/ingest idempotency check. Defaults to OPENBRAIN_DEFAULT_OWNER.",
+    )
     return parser.parse_args()
 
 
@@ -425,7 +553,7 @@ def main() -> int:
         return smoke_live(args.live)
 
     print("Running local smoke checks against handler in this repository")
-    return smoke_local()
+    return smoke_local(args.idempotency_source, args.idempotency_owner)
 
 
 if __name__ == "__main__":

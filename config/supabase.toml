@@ -6,12 +6,15 @@
 [database]
 
 # Flip to true once credentials are ready.
-enabled = false
+enabled = true
 
 # Preferred: full SQLAlchemy-style PostgreSQL URI.
 # Examples:
 #   postgresql+psycopg://postgres:[PASSWORD]@db.[ref].supabase.co:5432/postgres
 #   postgresql://postgres:[PASSWORD]@db.[ref].supabase.co:5432/postgres
+# The actual secret should be provided at runtime as OPENBRAIN_SUPABASE_CONNECTION_STRING
+# (or by loading .env/.env.local).
+
 connection_string = ""
 
 # Optional fallback fields when connection_string is omitted.
