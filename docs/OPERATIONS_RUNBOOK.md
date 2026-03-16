@@ -17,9 +17,21 @@
 ## Ingestion flow
 
 - Run `scripts/ingest.py` to write/import chunks into Supabase (`public.thoughts`).
+- Local CLI ingestion requires a local `.env.local` or `.env` file at the repository root with:
+  - `OPENBRAIN_SUPABASE_CONNECTION_STRING` (preferred) or `SUPABASE_DB_URL`
+- Local ingestion is for local files only; Vercel env vars are not used by this CLI path.
+- On IPv4-only networks, use a Supabase pooler connection URI from
+  `Settings -> Database -> Connection string` (Session/Transaction Pooler),
+  not the direct `db.<ref>.supabase.co` endpoint.
 - Expected behavior:
   - Existing chunks with matching deterministic IDs are upserted/skipped via primary keys.
   - New docs generate new chunk records and metadata.
+- Ingestion runbook includes pre-flight behavior:
+  - Confirm owner, tenant, and target source are what you expect before approving intake.
+  - Expected warning: `no OPENROUTER_API_KEY` means local embedding fallback may be used.
+  - Expected error: missing required DB schema fields, DB URL, or unresolved DB host must be fixed before continuing.
+  - Pre-flight reports existing row count for the same source/owner/tenant.
+  - If pre-flight returns errors, treat ingest as blocked and do not retry until fixed.
 
 ## MCP endpoint runtime flow
 
@@ -51,6 +63,10 @@
   - `/query`, `/api/query`, `/search`, `/api/search` return HTTP 200
   - `/generate_quiz`, `/api/generate_quiz`, `/generate_flashcards`, `/api/generate_flashcards` return HTTP 200
   - `/api/ingest` returns a valid payload with expected keys and status.
+- Add pre-flight verification to smoke checks if needed:
+  - `python scripts/smoke_checks.py --idempotency-source /tmp/openbrain-single/focus.md --idempotency-owner <owner>`
+  - For production endpoint:
+    - `python scripts/smoke_checks.py --live https://openbrain-rouge.vercel.app --idempotency-source /tmp/openbrain-single/focus.md --idempotency-owner <owner>`
 - `GET /` loads the Vercel demo page and static assets.
 - `/query`, `/search`, `/generate_quiz`, `/generate_flashcards`, `/ingest` are routed through API handler for compatibility.
 - Keep at least one successful log + smoke run in the deployment record before demo or demo-family handoff.

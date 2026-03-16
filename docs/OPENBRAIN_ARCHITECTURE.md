@@ -35,6 +35,15 @@ Current responsibility:
 - filtering small chunks
 - writing chunks/embeddings to Supabase `public.thoughts`
 
+Automated ingest pre-flight safeguards:
+- Validates required fields for safe writes:
+  - owner and tenant values are present
+  - expected `thoughts` columns exist for tenancy (`tenant_id`, `created_by_user_login`, `embedding`, etc.)
+  - source reachability
+- Reports existing row count for each source+owner+tenant before writes so duplicate risk is explicit.
+- Enforces embedding compatibility: missing embedding keys or dimension mismatches block write.
+- Fails fast before mutating DB when environment or schema prerequisites are not met.
+
 ---
 
 ## 3. Primary Vector Database
@@ -86,6 +95,18 @@ Provides:
 The primary web surface is Vercel, with these API contracts now exercised through
 the deployed serverless entrypoint.
 
+The ingest endpoints (`/ingest`, `/api/ingest`) now return a `preflight` object:
+- `preflight.status`: `ok` / `failed`
+- `preflight.warnings`: non-blocking notes (for example local fallback embedding)
+- `preflight.errors`: blocking issues (owner, tenant, DB URL, schema checks)
+- `preflight.existing_rows`: count when available, to make re-ingest behavior transparent
+
+Runtime credential sourcing:
+- **Local CLI** (`python ./scripts/ingest.py`) reads `.env.local` / `.env` from repo root.
+- **Vercel deployment** reads environment variables configured in Vercel project settings.
+- Local `.env.local` changes do **not** affect Vercel runtime unless mirrored into Vercel env.
+- For IPv4-only runtime environments, use Supabase **Session/Transaction Pooler** connection strings in both local and Vercel connectors.
+
 ---
 
 ## 6. Ingestion Triggering
@@ -93,6 +114,9 @@ the deployed serverless entrypoint.
 Current intent:
 
 `vault change -> chunk/index -> local toolchain -> Supabase upsert`
+
+Pre-flight rule:
+- One-click imports should not proceed when `preflight.status` is `failed`, and repeated imports should preserve source idempotency via deterministic IDs.
 
 ---
 
