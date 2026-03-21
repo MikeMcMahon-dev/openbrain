@@ -51,13 +51,26 @@ Three family Custom GPTs confirmed working in ChatGPT:
 
 Registered via `.mcp.json` at project root. Reads token from `.env.local`, calls Vercel over HTTP.
 
+## User Context
+
+Mike's full profile is now in the brain (`topic: personal-history`, `topic: career`, `topic: values`, `topic: life-goals`, `topic: resume`). Key facts for next session:
+
+- Senior infrastructure engineer, 30 years in IT, currently at NVIDIA (SRO, CIS team, GPU-as-a-Service in Slurm clusters across major cloud providers). Started December 2025.
+- Near-term goal: automate NVIDIA ticket workflow (highly automatable, directly improves quality of life and health)
+- K8s fluency is a shared goal: required by NVIDIA, also a 2026 Rockwell goal — "buy one, get one free"
+- Family: wife Beth (knitting, not tech-heavy), daughter Annie (13, 7th grade, Christian school, struggles with Science — brain is her study tool)
+- Location: Star/Boise metro, Idaho
+- Interests: target shooting, overlanding/camping, 2026 F-150 Raptor, movies
+
 ## Open Items
 
-- Annie's school content import (deferred — Spring Break; coordinate with wife)
-- Custom GPT URLs — ingest into brain once all three confirmed working
+- Annie's school content import — in progress (she's started; more to come)
+- Custom GPT URLs — ingest into brain once all three confirmed
+- NVIDIA ticket automation — near-term project, high personal impact
 - DB health automation — planned as K8s CronJob (separate project)
 - RLS enforcement — scaffolded only; Phase 2 hardening not yet applied
-- Slack identity canonicalisation — `slack_user_id` as the durable identity anchor (vs. username strings) is a future architectural goal; current owner strings work but are not tied to Slack auth
+- Slack identity canonicalisation — future architectural goal
+- `upload_target/personal/` created — use for dropping reference docs (resumes, context files) for ingestion via `scripts/ingest.py`. Do NOT use `vault/` — it symlinks into iCloud Obsidian.
 
 ## Environment / Command Notes
 
