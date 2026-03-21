@@ -73,9 +73,11 @@ Primary metadata fields now tracked in DB:
 
 ## 4. Embedding Model (Primary path)
 
-`openai/text-embedding-3-small`
+Model: `text-embedding-3-small` (1536 dimensions)
+Provider: **OpenRouter** (`OPENROUTER_API_KEY` + `OPENROUTER_BASE_URL=https://openrouter.ai/api/v1`)
 
-This is now the standard across Slack ingest and Obsidian/DB import paths to keep vector dimensions consistent.
+This is the standard across Slack ingest and Obsidian/DB import paths to keep vector dimensions consistent.
+No direct OpenAI key is required — all embedding calls route through OpenRouter.
 
 ---
 
@@ -104,8 +106,11 @@ The ingest endpoints (`/ingest`, `/api/ingest`) now return a `preflight` object:
 Runtime credential sourcing:
 - **Local CLI** (`python ./scripts/ingest.py`) reads `.env.local` / `.env` from repo root.
 - **Vercel deployment** reads environment variables configured in Vercel project settings.
-- Local `.env.local` changes do **not** affect Vercel runtime unless mirrored into Vercel env.
-- For IPv4-only runtime environments, use Supabase **Session/Transaction Pooler** connection strings in both local and Vercel connectors.
+- Local `.env.local` is created/synced by `vercel env pull` — keep it in sync when adding Vercel env vars.
+- New Vercel env vars require a **redeploy** to take effect in the Python serverless runtime.
+- **IPv4 requirement**: Vercel serverless is IPv4-only. Use the Supabase **Transaction Pooler**
+  connection string (port `6543`, host `aws-0-us-east-1.pooler.supabase.com`) for `SUPABASE_DB_URL`.
+  The direct DB URL and session pooler may resolve to IPv6 and will fail in Vercel.
 
 ---
 

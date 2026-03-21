@@ -7,6 +7,7 @@ from api.ingest import handler as ingest_handler
 from api.query import handler as query_handler
 from api.search import handler as search_handler
 from api.chatgpt import handler as chatgpt_handler
+from api.claude import handler as claude_handler
 
 
 def _extract_path(request) -> str:
@@ -54,6 +55,14 @@ def handler(request):
         return chatgpt_handler(request, tool_mode="generate_flashcards")
     if path in {"/openbrain_ingest", "/tools/openbrain_ingest"}:
         return chatgpt_handler(request, tool_mode="ingest")
+    if path in {"/claude_query", "/tools/claude_query"}:
+        return claude_handler(request, tool_mode="query")
+    if path in {"/claude_generate_quiz", "/tools/claude_generate_quiz"}:
+        return claude_handler(request, tool_mode="generate_quiz")
+    if path in {"/claude_generate_flashcards", "/tools/claude_generate_flashcards"}:
+        return claude_handler(request, tool_mode="generate_flashcards")
+    if path in {"/claude_ingest", "/tools/claude_ingest"}:
+        return claude_handler(request, tool_mode="ingest")
 
     return {
         "statusCode": 404,

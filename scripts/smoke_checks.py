@@ -388,6 +388,54 @@ def smoke_local(idempotency_source: str | None = None, idempotency_owner: str | 
             200,
             True,
         ),
+        # Claude adapter — native tool_use envelope
+        (
+            {
+                "path": "/claude_query",
+                "method": "POST",
+                "body": json.dumps({"type": "tool_use", "name": "claude_query", "input": {"query": "test"}}),
+                "headers": {"Content-Type": "application/json"},
+            },
+            200,
+        ),
+        (
+            {
+                "path": "/claude_generate_quiz",
+                "method": "POST",
+                "body": json.dumps({"type": "tool_use", "name": "claude_generate_quiz", "input": {"query": "test"}}),
+                "headers": {"Content-Type": "application/json"},
+            },
+            200,
+        ),
+        (
+            {
+                "path": "/claude_generate_flashcards",
+                "method": "POST",
+                "body": json.dumps({"type": "tool_use", "name": "claude_generate_flashcards", "input": {"query": "test"}}),
+                "headers": {"Content-Type": "application/json"},
+            },
+            200,
+        ),
+        (
+            {
+                "path": "/claude_ingest",
+                "method": "POST",
+                "body": json.dumps({"type": "tool_use", "name": "claude_ingest", "input": {"source_type": "text", "source": "smoke test"}}),
+                "headers": {"Content-Type": "application/json"},
+            },
+            200,
+            True,
+        ),
+        # tools/ prefix variants
+        (
+            {
+                "path": "/tools/claude_query",
+                "method": "POST",
+                "body": json.dumps({"input": {"query": "test"}}),
+                "headers": {"Content-Type": "application/json"},
+            },
+            200,
+        ),
         ({"path": "/bogus-path", "method": "GET"}, 404),
     ]
 
@@ -483,6 +531,38 @@ def smoke_live(base_url: str) -> int:
             {"tool_input": {"source_type": "obsidian", "source": "/tmp"}},
             200,
         ),
+        # Claude adapter — live, with auth token
+        (
+            "/claude_query",
+            {"type": "tool_use", "name": "claude_query", "input": {"query": "terraform"}},
+            200,
+            {"Authorization": f"Bearer {os.getenv('OPENBRAIN_TOOL_ACCESS_TOKEN', '')}"},
+        ),
+        (
+            "/claude_generate_quiz",
+            {"type": "tool_use", "name": "claude_generate_quiz", "input": {"query": "terraform"}},
+            200,
+            {"Authorization": f"Bearer {os.getenv('OPENBRAIN_TOOL_ACCESS_TOKEN', '')}"},
+        ),
+        (
+            "/claude_generate_flashcards",
+            {"type": "tool_use", "name": "claude_generate_flashcards", "input": {"query": "terraform"}},
+            200,
+            {"Authorization": f"Bearer {os.getenv('OPENBRAIN_TOOL_ACCESS_TOKEN', '')}"},
+        ),
+        (
+            "/claude_ingest",
+            {"type": "tool_use", "name": "claude_ingest", "input": {"source_type": "text", "source": "live smoke test note"}},
+            200,
+            {"Authorization": f"Bearer {os.getenv('OPENBRAIN_TOOL_ACCESS_TOKEN', '')}"},
+        ),
+        # Auth rejection — wrong token must return 401
+        (
+            "/claude_query",
+            {"input": {"query": "terraform"}},
+            401,
+            {"Authorization": "Bearer invalid-token"},
+        ),
     ]
 
     failed = 0
@@ -514,8 +594,7 @@ def smoke_live(base_url: str) -> int:
                     message = detail
         except urllib.error.HTTPError as exc:
             body = exc.read().decode("utf-8", errors="replace")
-            ok = False
-            message = f"{path}: HTTPError {exc.code} body={body[:320]}"
+            ok, message = _make_result(path, exc.code, body, expected)
         except Exception as exc:
             traceback.print_exc()
             ok = False

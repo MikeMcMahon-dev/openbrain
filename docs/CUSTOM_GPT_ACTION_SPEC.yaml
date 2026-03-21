@@ -1,0 +1,264 @@
+openapi: "3.1.0"
+info:
+  title: OpenBrain Knowledge API
+  description: Personal and family RAG memory system. Query vault notes, generate quizzes and flashcards, and ingest new content.
+  version: "1.0.0"
+
+servers:
+  - url: https://openbrain-rouge.vercel.app
+
+paths:
+  /openbrain_query:
+    post:
+      operationId: openbrain_query
+      summary: Query the knowledge base
+      description: Performs hybrid keyword and vector search over the personal knowledge vault. Returns relevant chunks, tutor guidance rules, and a suggested tutor prompt. Use the rules and tutor_prompt fields to shape your reply to the user.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - query
+              properties:
+                query:
+                  type: string
+                  description: The question or topic to look up in the knowledge base.
+                n_results:
+                  type: integer
+                  description: Maximum number of knowledge chunks to return. Default is 5.
+                mode:
+                  type: string
+                  description: Tutor response mode. One of explain, quiz, flashcards, qa. Default is explain.
+                  enum:
+                    - explain
+                    - quiz
+                    - flashcards
+                    - qa
+                student_attempt:
+                  type: string
+                  description: Optional student answer attempt. When present, the tutor prompt will respond to this attempt rather than presenting the answer directly.
+      responses:
+        "200":
+          description: Query results with tutor context.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  mode:
+                    type: string
+                  question:
+                    type: string
+                  rules:
+                    type: array
+                    description: Tutor behavior rules to follow when presenting this response. Always respect these rules in your reply.
+                    items:
+                      type: string
+                  tutor_prompt:
+                    type: string
+                    description: Suggested opening line to use when responding to the user. Use this as your starting point.
+                  context_used:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        source:
+                          type: string
+                        file:
+                          type: string
+                        heading:
+                          type: string
+                        text:
+                          type: string
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        score:
+                          type: number
+                        file:
+                          type: string
+                        source:
+                          type: string
+                        heading:
+                          type: string
+                        source_channel:
+                          type: string
+                          description: keyword for full-text hits, vector for semantic hits.
+                        text:
+                          type: string
+        "401":
+          description: Missing or invalid bearer token.
+        "500":
+          description: Server or database error.
+
+  /openbrain_generate_quiz:
+    post:
+      operationId: openbrain_generate_quiz
+      summary: Generate quiz questions from vault notes
+      description: Retrieves relevant knowledge chunks and returns tutor context formatted for quiz generation. Use tutor_prompt and rules to present the quiz to the user.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - query
+              properties:
+                query:
+                  type: string
+                  description: The topic to generate quiz questions about.
+                n_results:
+                  type: integer
+                  description: Number of knowledge chunks to draw questions from. Default is 5.
+      responses:
+        "200":
+          description: Quiz tutor packet.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  mode:
+                    type: string
+                  question:
+                    type: string
+                  rules:
+                    type: array
+                    items:
+                      type: string
+                  tutor_prompt:
+                    type: string
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        score:
+                          type: number
+                        file:
+                          type: string
+                        source:
+                          type: string
+                        heading:
+                          type: string
+                        text:
+                          type: string
+        "401":
+          description: Missing or invalid bearer token.
+        "500":
+          description: Server or database error.
+
+  /openbrain_generate_flashcards:
+    post:
+      operationId: openbrain_generate_flashcards
+      summary: Generate flashcards from vault notes
+      description: Retrieves relevant knowledge chunks and returns tutor context formatted for flashcard generation. Use tutor_prompt and rules to present cards in front and back format for spaced repetition.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - query
+              properties:
+                query:
+                  type: string
+                  description: The topic to generate flashcards for.
+                n_results:
+                  type: integer
+                  description: Number of knowledge chunks to draw cards from. Default is 5.
+      responses:
+        "200":
+          description: Flashcard tutor packet.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  mode:
+                    type: string
+                  question:
+                    type: string
+                  rules:
+                    type: array
+                    items:
+                      type: string
+                  tutor_prompt:
+                    type: string
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        score:
+                          type: number
+                        file:
+                          type: string
+                        source:
+                          type: string
+                        heading:
+                          type: string
+                        text:
+                          type: string
+        "401":
+          description: Missing or invalid bearer token.
+        "500":
+          description: Server or database error.
+
+  /openbrain_ingest:
+    post:
+      operationId: openbrain_ingest
+      summary: Ingest new content into the knowledge base
+      description: Adds new content to the personal knowledge vault. Use source_type text to capture a note or learning directly from the conversation. Ingest is idempotent.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - source_type
+                - source
+              properties:
+                source_type:
+                  type: string
+                  description: Type of content being ingested. Supported values are text, url, obsidian, pdf.
+                source:
+                  type: string
+                  description: Raw text content, URL, or file path to ingest. For source_type text, pass the content itself here.
+                subject:
+                  type: string
+                  description: Subject or domain label for the ingested content.
+                topic:
+                  type: string
+                  description: Topic tag for the ingested content.
+      responses:
+        "200":
+          description: Ingest result.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ingest_id:
+                    type: string
+                  status:
+                    type: string
+                    enum:
+                      - accepted
+                      - queued
+                      - failed
+                  message:
+                    type: string
+                  owner:
+                    type: string
+        "401":
+          description: Missing or invalid bearer token.
+        "500":
+          description: Server or database error.
