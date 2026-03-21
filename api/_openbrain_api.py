@@ -171,6 +171,35 @@ def _resolve_ipv4(hostname: str) -> str | None:
     return None
 
 
+def _db_conninfo() -> str:
+    """
+    Build a libpq keyword=value conninfo string from DB_URL.
+    Using keyword format (not URI) lets us inject hostaddr directly,
+    which forces IPv4 and bypasses DNS in IPv4-only environments like Vercel Lambda.
+    """
+    parsed = urllib.parse.urlparse(DB_URL or "")
+    host = parsed.hostname or ""
+    port = str(parsed.port or 5432)
+    dbname = (parsed.path or "/postgres").lstrip("/") or "postgres"
+    user = urllib.parse.unquote(parsed.username or "")
+    password = urllib.parse.unquote(parsed.password or "")
+
+    parts = [
+        f"host={host}",
+        f"port={port}",
+        f"dbname={dbname}",
+        f"user={user}",
+        f"password={password}",
+        "sslmode=require",
+    ]
+
+    ipv4 = _resolve_ipv4(host)
+    if ipv4:
+        parts.append(f"hostaddr={ipv4}")
+
+    return " ".join(parts)
+
+
 def _db_connect() -> tuple[Any | None, str | None]:
     if not DB_URL:
         return None, "SUPABASE DB URL is not configured."
@@ -178,13 +207,7 @@ def _db_connect() -> tuple[Any | None, str | None]:
         return None, "psycopg is not installed in this runtime."
 
     try:
-        kwargs: dict[str, Any] = {"row_factory": dict_row}
-        parsed = urllib.parse.urlparse(DB_URL)
-        if parsed.hostname:
-            ipv4 = _resolve_ipv4(parsed.hostname)
-            if ipv4:
-                kwargs["hostaddr"] = ipv4
-        return connect(DB_URL, **kwargs), None
+        return connect(_db_conninfo(), row_factory=dict_row), None
     except Exception as exc:
         return None, f"Database connection failed: {exc}"
 
@@ -418,13 +441,7 @@ def get_db_conn():
         raise RuntimeError("SUPABASE_DB_URL is not configured.")
     if connect is None:
         raise RuntimeError("psycopg is not installed in this runtime.")
-    kwargs: dict[str, Any] = {"row_factory": dict_row}
-    parsed = urllib.parse.urlparse(DB_URL)
-    if parsed.hostname:
-        ipv4 = _resolve_ipv4(parsed.hostname)
-        if ipv4:
-            kwargs["hostaddr"] = ipv4
-    return connect(DB_URL, **kwargs)
+    return connect(_db_conninfo(), row_factory=dict_row)
 
 
 def embedding_request(text: str) -> list[float] | None:
