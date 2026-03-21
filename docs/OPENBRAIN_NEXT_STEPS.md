@@ -132,67 +132,62 @@ Before defaulting reads to Supabase:
 - Proceed to manual filesystem import test as your next operational validation
 - Gate default source flip on parity results and rollback readiness
 
-## Step 8 – Agent Communication Layer (In Progress)
+## Step 8 – Agent Communication Layer (Partially Complete)
 
-- Build an **agent-agnostic communication layer** first, then map specific platform
-  adapters (ChatGPT/custom GPT, Claude, etc.) on top.
+### What is done
+- `api/_openbrain_api.py` is the agent-agnostic core: query, search, ingest, hybrid
+  retrieval, preflight, tutor packet generation.
+- `api/chatgpt.py` is a thin adapter (~108 lines): handles `tool_input` / `input` /
+  `arguments` payload envelope styles, delegates entirely to `_openbrain_api`.
+- Routes wired and deployed in `vercel.json` + `api/app.py`:
+  - `/openbrain_query`, `/tools/openbrain_query`
+  - `/openbrain_generate_quiz`, `/tools/openbrain_generate_quiz`
+  - `/openbrain_generate_flashcards`, `/tools/openbrain_generate_flashcards`
+  - `/openbrain_ingest`, `/tools/openbrain_ingest`
+- `OPENBRAIN_TOOL_ACCESS_TOKEN` shared secret gate is implemented and active in Vercel.
+  Wrong token → 401. Correct token required in `Authorization: Bearer <token>` or
+  `X-OpenBrain-Tool-Token: <token>`.
 
-- Publish explicit OpenBrain tool contracts for ChatGPT/custom GPT actions:
-  - `openbrain_query`
-  - `openbrain_generate_quiz`
-  - `openbrain_generate_flashcards`
-  - `openbrain_ingest`
-- Execution details are captured in `docs/CHATGPT_CONNECTOR.md`.
-- Keep `api/chatgpt.py` as a light adapter for now, but route it through a shared
-  core protocol so we can swap in other agent runtimes without changing API
-  semantics.
-- Add identity bridge (chat user → owner/tenant headers) to prevent users writing
-  as another identity.
-- Add response shape guards so the tool call returns deterministic fields and
-  meaningful validation errors.
+### Current blocker
+- **Vercel read path returns empty results** due to IPv6/IPv4 DB connection failure.
+  Fix: update `SUPABASE_DB_URL` to Transaction pooler URL (port 6543). See HANDOFF.md.
+
+### Still to do
+- Fix DB connection in Vercel (unblocks everything else).
+- Write Custom GPT action OpenAPI spec and configure in ChatGPT.
 - Validate with a manual chat flow:
-  - ask a study question
-  - request flashcards
-  - request quiz
-  - confirm that output references imported family notes.
-- Add request signing / shared secret validation for third-party agents (not just
-  ChatGPT) and rate-limit handling around `/api/ingest` and query calls.
+  - ask a study question → request flashcards → request quiz
+  - confirm output references imported vault notes
+- Cross-tenant leak test (different owner headers must not bleed results).
+- Identity bridge: Slack user_id as canonical identity; per-user token → owner
+  mapping for multi-user rollout (post-MVP).
 
-- Deliverable target: stable Custom GPT action configuration + working family
-  smoke checks for chat tool routes.
+### Design constraints preserved
+- `api/chatgpt.py` stays a thin platform adapter — all logic stays in `_openbrain_api.py`.
+- Owner/tenant resolved from request headers, not request body.
+- `ingest_id` is deterministic (md5) for idempotent retries.
 
-## Night-to-Morning Handoff (Next Session)
+## Session Handoff (2026-03-20)
 
-What was done:
+What was done this session:
 
-- Ingestion CLI and Vercel `/api/ingest` now share pre-flight guardrails:
-  - owner/tenant checks
-  - schema readiness checks
-  - source existence checks
-  - existing row count summary for transparency
-  - blocked-on-failure behavior for hard issues
-- End-to-end smoke checks are passing and deployed API returns clean responses at
-  `https://openbrain-rouge.vercel.app`.
-- Idempotency checks for repeated ingests are in place and automated by
-  `scripts/smoke_checks.py --idempotency-source ...`.
+- Confirmed 775 rows in Supabase with embeddings; corpus import validated.
+- `OPENBRAIN_TOOL_ACCESS_TOKEN` generated and set in Vercel; auth gate confirmed working
+  (wrong token → 401).
+- Identified and documented root cause of empty Vercel read results: IPv6 DB URL
+  incompatible with Vercel's IPv4-only serverless runtime.
+- Corrected architecture docs: embeddings use OpenRouter, not direct OpenAI.
+- Updated HANDOFF.md, ARCHITECTURE.md, NEXT_STEPS.md to reflect actual state.
 
-Immediate next actions:
+Immediate next actions (start here):
 
-- Run a manual one-shot ingest from your chosen Obsidian source and confirm:
-  - response includes `preflight.existing_rows`
-  - `preflight.status` is `ok` when expected
-  - re-running same source does not increase row count
-- Validate manual import flow from UI one more time for family UX.
-- Move into chat connector work:
-  - define the user/tenant identity bridge for each request
-  - align Custom GPT action payloads to API response schema in `docs/CHATGPT_CONNECTOR.md`
-- After connector validation, run a final `make smoke-live SMOKE_URL=https://openbrain-rouge.vercel.app`.
-- Confirm `api/chatgpt.py` is intentionally a thin platform adapter (not the source of truth) and that new providers can reuse the same shared contract with minimal code.
-- Add "agent handoff hardening" checklist before rollout:
-  - preflight status surfaced in UI/API responses
-  - clear owner/tenant validation errors
-  - explicit idempotency behavior for repeated content pushes
-  - rollback note for failed batch imports.
+1. Get Transaction pooler connection string from Supabase (Settings → Database →
+   Connection string → Transaction mode, port 6543).
+2. Update `SUPABASE_DB_URL` in Vercel env and in `.env.local`.
+3. Redeploy Vercel, then run: `make smoke-live SMOKE_URL=https://openbrain-rouge.vercel.app`
+4. Confirm live query returns vault content (not empty results).
+5. Write Custom GPT action OpenAPI spec (see `docs/CHATGPT_CONNECTOR.md` for tool shapes).
+6. Configure Custom GPT action, run end-to-end study flow, cross-tenant leak test.
 
 ---
 
