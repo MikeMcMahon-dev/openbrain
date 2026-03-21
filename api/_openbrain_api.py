@@ -884,7 +884,7 @@ def _write_text_ingest(
     except Exception:
         meta_value = json.dumps(metadata)
 
-    row: dict[str, Any] = {
+    candidate_row: dict[str, Any] = {
         "id": row_id,
         "content": content,
         "tenant_id": tenant_id,
@@ -903,29 +903,36 @@ def _write_text_ingest(
     }
 
     if embedding is not None:
-        row["embedding"] = "[" + ",".join(f"{float(x):.8f}" for x in embedding) + "]"
-
-    columns = sorted(row.keys())
-    placeholders = ", ".join("%s" for _ in columns)
-    update_exprs = []
-    for col in columns:
-        if col == "id":
-            continue
-        if col == "embedding":
-            update_exprs.append(
-                "embedding = COALESCE(EXCLUDED.embedding, public.thoughts.embedding)"
-            )
-        else:
-            update_exprs.append(f"{col} = EXCLUDED.{col}")
-
-    sql = (
-        f"INSERT INTO public.thoughts ({', '.join(columns)}) "
-        f"VALUES ({placeholders}) "
-        f"ON CONFLICT (id) DO UPDATE SET {', '.join(update_exprs)}"
-    )
+        candidate_row["embedding"] = "[" + ",".join(f"{float(x):.8f}" for x in embedding) + "]"
 
     try:
         with get_db_conn() as conn:
+            available = {
+                r["column_name"]
+                for r in conn.execute(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_schema = 'public' AND table_name = 'thoughts'"
+                ).fetchall()
+            }
+            row = {k: v for k, v in candidate_row.items() if k in available}
+            columns = sorted(row.keys())
+            placeholders = ", ".join("%s" for _ in columns)
+            update_exprs = []
+            for col in columns:
+                if col == "id":
+                    continue
+                if col == "embedding":
+                    update_exprs.append(
+                        "embedding = COALESCE(EXCLUDED.embedding, public.thoughts.embedding)"
+                    )
+                else:
+                    update_exprs.append(f"{col} = EXCLUDED.{col}")
+
+            sql = (
+                f"INSERT INTO public.thoughts ({', '.join(columns)}) "
+                f"VALUES ({placeholders}) "
+                f"ON CONFLICT (id) DO UPDATE SET {', '.join(update_exprs)}"
+            )
             conn.execute(sql, [row[col] for col in columns])
     except Exception as exc:
         return f"Database write failed: {exc}"
