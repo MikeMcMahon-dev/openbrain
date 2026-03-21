@@ -58,3 +58,12 @@ All query responses include:
 - `results` — raw ranked results with scores and source metadata
 
 See `docs/TUTOR_BEHAVIOR_CONTRACT.md` for full contract.
+
+---
+
+## Future Enhancements
+
+- Student progress tracking (weak-topic detection across sessions)
+- Adaptive quizzes that weight toward topics with low recent scores
+- Per-user tutor behaviour tuning beyond system prompt guardrails
+- K8s CronJob daemon for scheduled ingest and DB health evaluation
