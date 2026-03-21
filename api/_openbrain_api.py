@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import re
+import socket
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -159,6 +160,17 @@ def _stringify_headers(headers: Any) -> dict[str, str]:
     return normalized
 
 
+def _resolve_ipv4(hostname: str) -> str | None:
+    """Return an IPv4 address for hostname, or None if unavailable."""
+    try:
+        infos = socket.getaddrinfo(hostname, None, socket.AF_INET)
+        if infos:
+            return infos[0][4][0]
+    except Exception:
+        pass
+    return None
+
+
 def _db_connect() -> tuple[Any | None, str | None]:
     if not DB_URL:
         return None, "SUPABASE DB URL is not configured."
@@ -166,7 +178,13 @@ def _db_connect() -> tuple[Any | None, str | None]:
         return None, "psycopg is not installed in this runtime."
 
     try:
-        return connect(DB_URL, row_factory=dict_row), None
+        kwargs: dict[str, Any] = {"row_factory": dict_row}
+        parsed = urllib.parse.urlparse(DB_URL)
+        if parsed.hostname:
+            ipv4 = _resolve_ipv4(parsed.hostname)
+            if ipv4:
+                kwargs["hostaddr"] = ipv4
+        return connect(DB_URL, **kwargs), None
     except Exception as exc:
         return None, f"Database connection failed: {exc}"
 
@@ -400,7 +418,13 @@ def get_db_conn():
         raise RuntimeError("SUPABASE_DB_URL is not configured.")
     if connect is None:
         raise RuntimeError("psycopg is not installed in this runtime.")
-    return connect(DB_URL, row_factory=dict_row)
+    kwargs: dict[str, Any] = {"row_factory": dict_row}
+    parsed = urllib.parse.urlparse(DB_URL)
+    if parsed.hostname:
+        ipv4 = _resolve_ipv4(parsed.hostname)
+        if ipv4:
+            kwargs["hostaddr"] = ipv4
+    return connect(DB_URL, **kwargs)
 
 
 def embedding_request(text: str) -> list[float] | None:
