@@ -161,13 +161,33 @@ def _stringify_headers(headers: Any) -> dict[str, str]:
 
 
 def _resolve_ipv4(hostname: str) -> str | None:
-    """Return an IPv4 address for hostname, or None if unavailable."""
+    """
+    Return an IPv4 address for hostname.
+    Tries the system resolver first (fast path, works locally).
+    Falls back to Cloudflare DNS-over-HTTPS if the system resolver returns no
+    IPv4 results — this happens in environments like Vercel Lambda where the
+    internal AWS resolver only returns AAAA records for ELB hostnames.
+    """
     try:
         infos = socket.getaddrinfo(hostname, None, socket.AF_INET)
         if infos:
             return infos[0][4][0]
     except Exception:
         pass
+
+    try:
+        req = urllib.request.Request(
+            f"https://cloudflare-dns.com/dns-query?name={hostname}&type=A",
+            headers={"Accept": "application/dns-json"},
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode())
+        for answer in data.get("Answer", []):
+            if answer.get("type") == 1:  # A record
+                return answer["data"]
+    except Exception:
+        pass
+
     return None
 
 
