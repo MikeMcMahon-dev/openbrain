@@ -70,7 +70,7 @@ Mike's full profile is now in the brain (`topic: personal-history`, `topic: care
 - DB health automation — planned as K8s CronJob (separate project)
 - RLS enforcement — scaffolded only; Phase 2 hardening not yet applied
 - Slack identity canonicalisation — future architectural goal
-- vault/Personal/ created — use for dropping reference docs (resumes, context files) for ingestion via `scripts/ingest.py`
+- `upload_target/personal/` created — use for dropping reference docs (resumes, context files) for ingestion via `scripts/ingest.py`. Do NOT use `vault/` — it symlinks into iCloud Obsidian.
 
 ## Environment / Command Notes
 

@@ -129,17 +129,14 @@ gh pr create --title "Update docs for YYYY-MM-DD session close" --body "..."
 git checkout main && git pull && git branch -d docs/session-YYYY-MM-DD-close
 ```
 
-### Vault drop folder
+### Upload/ingest drop folder
 
 To ingest personal reference documents (resumes, context files, notes) into the brain via `scripts/ingest.py`:
 
-1. Drop `.md` files into `vault/Personal/`
+1. Drop `.md` files into `upload_target/personal/` (or a relevant subdirectory)
 2. Run `.venv/bin/python scripts/ingest.py`
 
-The vault symlink points to:
-`/Users/mmcmahon/Library/Mobile Documents/iCloud~md~obsidian/Documents/Shared Vault/`
-
-Files added there are also visible in Obsidian automatically.
+Note: `vault/` is a symlink to the iCloud Obsidian vault — do NOT create subdirectories there for non-Obsidian content. Use `upload_target/` for local staging files that should be ingested but not tracked in Obsidian.
 
 ---
 
