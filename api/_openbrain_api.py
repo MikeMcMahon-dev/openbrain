@@ -847,6 +847,92 @@ def _normalize_bulk_items(
     return normalized_items, errors
 
 
+def _write_text_ingest(
+    content: str,
+    owner: str,
+    tenant_id: str,
+    subject: str,
+    topic: str,
+    ingest_id: str,
+) -> str | None:
+    """Embed and upsert a single text chunk into public.thoughts.
+
+    Returns None on success, or an error message string on failure.
+    """
+    try:
+        embedding = embedding_request(content)
+    except Exception as exc:
+        return f"Embedding failed: {exc}"
+
+    # Deterministic IDs that mirror the ingest.py pattern.
+    content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    source_chunk_id = f"{ingest_id}:0:{tenant_id}"
+    row_id = hashlib.md5(
+        f"{tenant_id}:{owner}:{source_chunk_id}:{content_hash[:12]}".encode("utf-8")
+    ).hexdigest()
+
+    metadata: dict[str, Any] = {
+        "source_type": "text",
+        "owner": owner,
+        "topic": topic,
+        "subject": subject,
+    }
+
+    try:
+        from psycopg.types.json import Json as _Json
+        meta_value: Any = _Json(metadata)
+    except Exception:
+        meta_value = json.dumps(metadata)
+
+    row: dict[str, Any] = {
+        "id": row_id,
+        "content": content,
+        "tenant_id": tenant_id,
+        "source_type": "text",
+        "source_chunk_id": source_chunk_id,
+        "document_id": ingest_id,
+        "chunk_id": 0,
+        "content_hash": content_hash,
+        "metadata": meta_value,
+        "created_by_user_id": owner,
+        "created_by_user_login": owner,
+        "slack_username": owner,
+        "visibility": "private",
+        "subject": subject,
+        "topic": topic,
+    }
+
+    if embedding is not None:
+        row["embedding"] = "[" + ",".join(f"{float(x):.8f}" for x in embedding) + "]"
+
+    columns = sorted(row.keys())
+    placeholders = ", ".join("%s" for _ in columns)
+    update_exprs = []
+    for col in columns:
+        if col == "id":
+            continue
+        if col == "embedding":
+            update_exprs.append(
+                "embedding = COALESCE(EXCLUDED.embedding, public.thoughts.embedding)"
+            )
+        else:
+            update_exprs.append(f"{col} = EXCLUDED.{col}")
+
+    sql = (
+        f"INSERT INTO public.thoughts ({', '.join(columns)}) "
+        f"VALUES ({placeholders}) "
+        f"ON CONFLICT (id) DO UPDATE SET {', '.join(update_exprs)}"
+    )
+
+    try:
+        with get_db_conn() as conn:
+            conn.execute(sql, [row[col] for col in columns])
+    except Exception as exc:
+        return f"Database write failed: {exc}"
+
+    return None
+
+
 def ingest_payload(
     payload: Mapping[str, Any],
     method_metadata: Mapping[str, Any] | None = None,
@@ -997,8 +1083,15 @@ def ingest_payload(
                 "word_count": word_count,
                 "max_words": max_words,
             }
-        status = "accepted"
-        message = "Ingest request accepted."
+        _text_ingest_id = compute_ingest_id(source_type, source, owner, subject, topic)
+        write_error = _write_text_ingest(source, owner, _tenant_id, subject, topic, _text_ingest_id)
+        if write_error:
+            status = "failed"
+            message = f"Ingest failed: {write_error}"
+            details.append(write_error)
+        else:
+            status = "accepted"
+            message = "Ingest request accepted."
     else:
         reachable, reason = _source_reachable(source_type, source)
         if not reachable:
