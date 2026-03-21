@@ -7,7 +7,7 @@ Use this file as the final checklist before any family-facing demo handoff.
 ## Rollout model
 
 - `phase 1` (complete): Vercel is wired to Supabase for primary reads/writes.
-- `phase 2` (in progress): strict tenant-aware auth mapping and RLS policy hardening.
+- `phase 2` (in progress): RLS policy hardening (scaffolded, not enforced).
 
 Current status:
 - `phase 1` checks are green in smoke testing.
@@ -55,8 +55,8 @@ Current status:
 - `POST /search`, `/api/search` return valid result envelope.
 - `POST /generate_quiz`, `/api/generate_quiz` works.
 - `POST /generate_flashcards`, `/api/generate_flashcards` works.
-- Planned `/openbrain_query`, `/openbrain_generate_quiz`,
-  `/openbrain_generate_flashcards` routes are not currently deployed in the active runtime.
+- `/openbrain_query`, `/openbrain_generate_quiz`, `/openbrain_generate_flashcards`, `/openbrain_ingest` are live and auth-gated (Bearer token required).
+- `/claude_query`, `/claude_generate_quiz`, `/claude_generate_flashcards`, `/claude_ingest` are live (Claude tool_use envelope).
 - `GET` responses remain method-restricted (`405`) where not supported.
 
 ### 5) Vercel App Surface
@@ -96,19 +96,13 @@ Current status:
 Run first locally:
 
 ```bash
-make smoke
+.venv/bin/python scripts/smoke_checks.py
 ```
 
 Then run against deploy:
 
 ```bash
-make smoke-live SMOKE_URL=https://openbrain-rouge.vercel.app
-```
-
-Then run:
-
-```bash
-make check
+.venv/bin/python scripts/smoke_checks.py --live https://openbrain-rouge.vercel.app
 ```
 
 ## Sign-off

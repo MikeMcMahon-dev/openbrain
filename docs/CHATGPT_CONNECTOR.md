@@ -1,112 +1,55 @@
-# ChatGPT Connector Plan
+# ChatGPT Connector (Complete)
 
-This document defines the connector layer needed to use OpenBrain from ChatGPT
-personalization (Custom GPT action or actions-like tool flow).
+This document describes the live ChatGPT Custom GPT integration with OpenBrain.
 
-## Objective
+## Live Routes
 
-- Connect user-facing ChatGPT interaction to:
-  - `POST /api/query`
-  - `POST /api/generate_quiz`
-  - `POST /api/generate_flashcards`
-  - `POST /api/ingest` (admin/import workflows only)
-- Preserve tenant/user isolation by mapping chat identity into request headers.
+All routes live at `https://openbrain-rouge.vercel.app`:
 
-## Recommended Tool Layer
+| Route | Purpose |
+|-------|---------|
+| `POST /openbrain_query` | Hybrid keyword + vector search |
+| `POST /openbrain_generate_quiz` | Quiz generation from vault |
+| `POST /openbrain_generate_flashcards` | Flashcard generation from vault |
+| `POST /openbrain_ingest` | Save new content to vault |
 
-Expose a small stable action base URL in front of Vercel, for example:
+`/tools/*` variants of each route also exist for compatibility.
 
-- `https://openbrain-rouge.vercel.app/api/query`
-- `https://openbrain-rouge.vercel.app/api/generate_quiz`
-- `https://openbrain-rouge.vercel.app/api/generate_flashcards`
-- `https://openbrain-rouge.vercel.app/api/ingest`
+## Authentication
 
-Connector route aliases:
+Each Custom GPT sends `Authorization: Bearer <token>` where token is per-user.
+`OPENBRAIN_TOKEN_OWNER_MAP` in Vercel resolves token → owner string, which is injected
+as `x-openbrain-owner` before the request hits core logic.
 
-- `https://openbrain-rouge.vercel.app/openbrain_query`
-- `https://openbrain-rouge.vercel.app/openbrain_generate_quiz`
-- `https://openbrain-rouge.vercel.app/openbrain_generate_flashcards`
-- `https://openbrain-rouge.vercel.app/openbrain_ingest`
-- `https://openbrain-rouge.vercel.app/tools/openbrain_query`
-- `https://openbrain-rouge.vercel.app/tools/openbrain_generate_quiz`
-- `https://openbrain-rouge.vercel.app/tools/openbrain_generate_flashcards`
-- `https://openbrain-rouge.vercel.app/tools/openbrain_ingest`
+| User | Owner | Token source |
+|------|-------|-------------|
+| Mike | `mike.mcmahon67` | `OPENBRAIN_TOOL_ACCESS_TOKEN` (also admin fallback) |
+| Beth | `snapple01` | per-user token in token map |
+| Annie | `anneliesepaige` | per-user token in token map |
 
-Recommended tools (Custom GPT/function style):
+## Action Spec
 
-- `openbrain_query`
-  - Required args: `query`
-  - Optional args: `n_results`, `mode`, `student_attempt`
-  - Returns: same contract as `/api/query`
-- `openbrain_generate_quiz`
-  - Required args: `query`
-  - Optional args: `n_results`
-  - Returns: same contract as `/api/generate_quiz`
-- `openbrain_generate_flashcards`
-  - Required args: `query`
-  - Optional args: `n_results`
-  - Returns: same contract as `/api/generate_flashcards`
-- `openbrain_ingest`
-  - Required args: `source_type`, `source`
-  - Optional args: `subject`, `topic`, `sources`
+OpenAPI 3.1.0 spec: `docs/CUSTOM_GPT_ACTION_SPEC.yaml`
+Paste directly into ChatGPT → Configure → Create new action → Schema.
 
-### Example request bodies
+## System Prompts
 
-`openbrain_query`:
+Per-user system prompts in `docs/gpt_instructions/`:
+- `mike_mcmahon67.md` — technical, direct
+- `snapple01.md` — non-technical adult, friendly
+- `anneliesepaige.md` — study-focused, age-appropriate guardrails
 
-```json
-{
-  "query": "What is Terraform?"
-}
-```
+## Text Ingest Behaviour
 
-`openbrain_generate_quiz` (tool_input style):
+- `source_type: text` — paste content directly as `source` field
+- Content under 6000 words: single call, status `accepted`
+- Content over 6000 words: server returns 413, GPT splits into ≤1500 word sections and re-submits
+- Threshold configurable via `OPENBRAIN_TEXT_INGEST_MAX_WORDS` Vercel env var
 
-```json
-{
-  "tool_input": {
-    "query": "What is Terraform?"
-  }
-}
-```
+## Payload Envelope
 
-`openbrain_generate_flashcards` (arguments style):
-
-```json
-{
-  "arguments": {
-    "query": "How does a VPC work?"
-  }
-}
-```
-
-## Identity Mapping (Required)
-
-When a chat call arrives, map chat identity into stable headers:
-
-- `x-openbrain-owner` (chat user/login or family member handle)
-- `x-openbrain-tenant-id` (family/team namespace)
-- `x-openbrain-user-id` (optional, when available)
-
-Do not trust body fields like `owner` for scope enforcement.
-
-Optional token gate:
-
-- Set `OPENBRAIN_TOOL_ACCESS_TOKEN` in Vercel env.
-- Send token in:
-  - `Authorization: Bearer <token>`
-  - `X-OpenBrain-Tool-Token: <token>`
-
-## Error Hygiene for Chat
-
-- Reject bad payloads with clear `400` errors before downstream calls.
-- Return deterministic JSON shape even on validation failures:
-  - `error`, `message`, `status`
-- Keep verbose error text out of user-facing prompt content.
-
-## Validation Checklist (before rollout)
-
-1. Smoke test each tool from raw API calls.
-2. Verify ChatGPT response rendering shows `status`, `results`, and `rules`.
-3. Verify cross-user calls do not leak tenant data by forcing different owner headers.
-4. Add a small smoke case for `openbrain_ingest` with `sources` batching.
+`api/chatgpt.py` resolves payload from three envelope styles:
+- `tool_input` key (ChatGPT tool_input style)
+- `input` key (generic)
+- `arguments` key (function-call style)
+- Falls back to raw payload if none match

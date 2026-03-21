@@ -4,16 +4,15 @@ This document tracks planned improvements for the OpenBrain system.
 
 ---
 
-## Last Successful Checks (2026-03-15)
+## Last Successful Checks (2026-03-21)
 
-- Deployment smoke: `https://openbrain-rouge.vercel.app`  
-  - Local smoke checks passed
-  - Live smoke checks passed
-- Ingest pre-flight:
-  - CLI ingest and API `/api/ingest` preflight summary now implemented
-  - Idempotency path validated (before/after counts stable)
+- Deployment smoke: `https://openbrain-rouge.vercel.app`
+  - Local smoke checks passed (all routes)
+  - Live smoke checks passed (22/22 cases including 401 rejection)
+- DB state: 519 rows, 3 clean owners (`mike.mcmahon67`, `snapple01`, `anneliesepaige`)
+- MCP server live in Claude Code via `.mcp.json`
 - Git:
-  - Latest pushed commit: `21986df`
+  - Latest pushed commit: `83f0160`
   - Branch: `main`
 - Session handoff: use [docs/HANDOFF.md](docs/HANDOFF.md) for next-session startup context.
 
@@ -85,31 +84,19 @@ Current operational state:
 
 ---
 
-## Step 5 – MCP Layer Design
+## Step 5 – MCP Layer (Complete)
 
-Target endpoints to expose:
+All target endpoints live and auth-gated on Vercel:
 
-- `POST /ingest`
-- `POST /query`
-- `POST /generate_quiz`
-- `POST /generate_flashcards`
+- `POST /openbrain_query` + `/tools/openbrain_query`
+- `POST /openbrain_generate_quiz` + `/tools/openbrain_generate_quiz`
+- `POST /openbrain_generate_flashcards` + `/tools/openbrain_generate_flashcards`
+- `POST /openbrain_ingest` + `/tools/openbrain_ingest`
+- `POST /claude_query`, `/claude_generate_quiz`, `/claude_generate_flashcards`, `/claude_ingest` (Claude tool_use envelope)
 
-Detailed contracts are tracked in:
+Claude Code MCP server: `mcp_server/openbrain.py` — registered via `.mcp.json`, exposes all four tools natively in Claude Code sessions.
 
-- `docs/MCP_CONTRACT.md`
-- `docs/API_CONTRACT_EXAMPLES.md`
-- `docs/CHUNK_METADATA_MODEL.md`
-- `docs/OWNER_TENANCY_NOTES.md`
-- `docs/TUTOR_BEHAVIOR_CONTRACT.md`
-- `docs/OPERATIONS_RUNBOOK.md`
-- `docs/SUPABASE_MIGRATION_PATH.md`
-
-Current status:
-
-- API routes are scaffolded in `brain_server/server.py`.
-- Ingestion orchestration through MCP transport is next after tenancy and Supabase read integration.
-- Decision log tracked in `docs/MCP_DECISION_LOG.md`
-  for unresolved implementation questions.
+Detailed contracts: `docs/MCP_CONTRACT.md`, `docs/API_CONTRACT_EXAMPLES.md`
 
 ---
 
@@ -132,62 +119,43 @@ Before defaulting reads to Supabase:
 - Proceed to manual filesystem import test as your next operational validation
 - Gate default source flip on parity results and rollback readiness
 
-## Step 8 – Agent Communication Layer (Partially Complete)
+## Step 8 – Agent Communication Layer (Complete)
 
 ### What is done
-- `api/_openbrain_api.py` is the agent-agnostic core: query, search, ingest, hybrid
-  retrieval, preflight, tutor packet generation.
-- `api/chatgpt.py` is a thin adapter (~108 lines): handles `tool_input` / `input` /
-  `arguments` payload envelope styles, delegates entirely to `_openbrain_api`.
-- Routes wired and deployed in `vercel.json` + `api/app.py`:
-  - `/openbrain_query`, `/tools/openbrain_query`
-  - `/openbrain_generate_quiz`, `/tools/openbrain_generate_quiz`
-  - `/openbrain_generate_flashcards`, `/tools/openbrain_generate_flashcards`
-  - `/openbrain_ingest`, `/tools/openbrain_ingest`
-- `OPENBRAIN_TOOL_ACCESS_TOKEN` shared secret gate is implemented and active in Vercel.
-  Wrong token → 401. Correct token required in `Authorization: Bearer <token>` or
-  `X-OpenBrain-Tool-Token: <token>`.
-
-### Current blocker
-- **Vercel read path returns empty results** due to IPv6/IPv4 DB connection failure.
-  Fix: update `SUPABASE_DB_URL` to Transaction pooler URL (port 6543). See HANDOFF.md.
-
-### Still to do
-- Fix DB connection in Vercel (unblocks everything else).
-- Write Custom GPT action OpenAPI spec and configure in ChatGPT.
-- Validate with a manual chat flow:
-  - ask a study question → request flashcards → request quiz
-  - confirm output references imported vault notes
-- Cross-tenant leak test (different owner headers must not bleed results).
-- Identity bridge: Slack user_id as canonical identity; per-user token → owner
-  mapping for multi-user rollout (post-MVP).
+- `api/_openbrain_api.py` — agent-agnostic core: query, search, ingest, hybrid retrieval, preflight, tutor packet generation.
+- `api/chatgpt.py` — thin adapter for ChatGPT tool_use envelope (`tool_input` / `input` / `arguments`). Handles per-user token → owner resolution via `OPENBRAIN_TOKEN_OWNER_MAP`.
+- `api/claude.py` — thin adapter for Claude native `tool_use` format (`input` key).
+- All routes live on Vercel, auth-gated, smoke-tested.
+- `OPENBRAIN_TOKEN_OWNER_MAP` — JSON env var mapping per-user bearer tokens to owner strings. Three family members each have an isolated token and data scope.
+- Custom GPT OpenAPI spec: `docs/CUSTOM_GPT_ACTION_SPEC.yaml` (OpenAPI 3.1.0)
+- Three family Custom GPTs configured: Mike, Beth (snapple01), Annie (anneliesepaige)
+- Text ingest (`source_type=text`) live and working. Word-count guard: 413 returned if payload exceeds `OPENBRAIN_TEXT_INGEST_MAX_WORDS` (default 6000).
+- MCP server for Claude Code: `mcp_server/openbrain.py`
 
 ### Design constraints preserved
-- `api/chatgpt.py` stays a thin platform adapter — all logic stays in `_openbrain_api.py`.
+- `api/chatgpt.py` and `api/claude.py` stay thin platform adapters — all logic in `_openbrain_api.py`.
 - Owner/tenant resolved from request headers, not request body.
 - `ingest_id` is deterministic (md5) for idempotent retries.
 
-## Session Handoff (2026-03-20)
+## Session Handoff (2026-03-21)
 
 What was done this session:
 
-- Confirmed 775 rows in Supabase with embeddings; corpus import validated.
-- `OPENBRAIN_TOOL_ACCESS_TOKEN` generated and set in Vercel; auth gate confirmed working
-  (wrong token → 401).
-- Identified and documented root cause of empty Vercel read results: IPv6 DB URL
-  incompatible with Vercel's IPv4-only serverless runtime.
-- Corrected architecture docs: embeddings use OpenRouter, not direct OpenAI.
-- Updated HANDOFF.md, ARCHITECTURE.md, NEXT_STEPS.md to reflect actual state.
+- Transaction pooler (port 6543) confirmed working end-to-end.
+- Identity bridge deployed: per-user token → owner mapping for Mike, Beth, Annie.
+- Tokens rotated after discovering prior tokens in git history.
+- Custom GPT OpenAPI spec written and validated. Three family Custom GPTs created.
+- Text ingest source_type fixed (was silently failing). Word-count guard added.
+- Claude MCP adapter (`api/claude.py`) written and deployed.
+- MCP server built and registered in Claude Code via `.mcp.json`.
+- DB cleanup: 380 `default_user` duplicate rows deleted, 10 orphaned rows re-attributed.
+- Git best practices doc written and ingested into brain.
+- `gh` CLI installed.
 
-Immediate next actions (start here):
-
-1. Get Transaction pooler connection string from Supabase (Settings → Database →
-   Connection string → Transaction mode, port 6543).
-2. Update `SUPABASE_DB_URL` in Vercel env and in `.env.local`.
-3. Redeploy Vercel, then run: `make smoke-live SMOKE_URL=https://openbrain-rouge.vercel.app`
-4. Confirm live query returns vault content (not empty results).
-5. Write Custom GPT action OpenAPI spec (see `docs/CHATGPT_CONNECTOR.md` for tool shapes).
-6. Configure Custom GPT action, run end-to-end study flow, cross-tenant leak test.
+Immediate next actions:
+1. Annie's school content import (coordinate when she brings laptop post-Spring Break).
+2. Ingest Custom GPT share URLs into brain once all three confirmed.
+3. DB health automation — planned as K8s CronJob (separate project).
 
 ---
 
