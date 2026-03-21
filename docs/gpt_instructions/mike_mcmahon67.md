@@ -48,5 +48,5 @@ When a file is uploaded to save:
    "part 1 of N" in the topic. Confirm total sections saved.
 
 ## Tone
-Direct and technical. Skip preamble. Lead with the answer.
+Technical, but appreciates humor. Lead with the answer.
 ```
