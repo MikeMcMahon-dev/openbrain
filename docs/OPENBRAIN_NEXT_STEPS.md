@@ -9,10 +9,13 @@ This document tracks planned improvements for the OpenBrain system.
 - Deployment smoke: `https://openbrain-rouge.vercel.app`
   - Local smoke checks passed (all routes)
   - Live smoke checks passed (22/22 cases including 401 rejection)
-- DB state: 519 rows, 3 clean owners (`mike.mcmahon67`, `snapple01`, `anneliesepaige`)
+- DB state: ~525+ rows, 3 active owners (`mike.mcmahon67`, `snapple01`, `anneliesepaige`)
 - MCP server live in Claude Code via `.mcp.json`
+- Text ingest (`source_type=text`) end-to-end verified: write → embed → retrieve confirmed
+- All three Custom GPTs live and validated: Mike, Beth, Annie
+- Tenant isolation confirmed: per-owner query scoping working correctly
 - Git:
-  - Latest pushed commit: `83f0160`
+  - Latest pushed commit: `d6ef613`
   - Branch: `main`
 - Session handoff: use [docs/HANDOFF.md](docs/HANDOFF.md) for next-session startup context.
 

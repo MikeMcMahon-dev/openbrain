@@ -4,10 +4,11 @@
 
 - Vercel app live: `https://openbrain-rouge.vercel.app/`
 - Supabase primary storage (`edljijurbmcupawnjpfx`), Transaction pooler (port 6543) in use
-- `public.thoughts`: 519 rows — `mike.mcmahon67` (516), `snapple01` (2), `anneliesepaige` (1)
+- `public.thoughts`: ~525+ rows — `mike.mcmahon67`, `snapple01`, `anneliesepaige` (all confirmed active)
 - Obsidian vault corpus imported and current
 - `vault/` is a symlink: `vault -> /Users/mmcmahon/Library/Mobile Documents/iCloud~md~obsidian/Documents/Shared Vault`
 - Embeddings via OpenRouter (`text-embedding-3-small`) using `OPENROUTER_API_KEY`
+- **Text ingest (`source_type=text`) is now fully working** — embeds and upserts into DB via `_write_text_ingest()` in `api/_openbrain_api.py`
 
 ## Last Successful Validation (2026-03-21)
 
@@ -15,6 +16,9 @@
 - Live smoke checks pass (22/22 cases including 401 rejection test)
 - MCP server live in Claude Code: `mcp_server/openbrain.py` via `.mcp.json`
 - DB cleanup complete: no orphaned owners, no duplicate rows
+- Text ingest end-to-end verified: ingest via MCP → DB write → query retrieval confirmed
+- All three Custom GPTs confirmed working: Mike, Beth, Annie
+- Tenant isolation confirmed: Annie's content not visible to Mike's queries
 
 ## Identity Bridge
 
@@ -30,11 +34,12 @@ Token → owner resolution happens in `api/chatgpt.py:_require_tool_auth()` and 
 
 ## Custom GPTs
 
-Three family Custom GPTs configured in ChatGPT:
+Three family Custom GPTs confirmed working in ChatGPT:
 - Each uses the OpenAPI 3.1.0 spec at `docs/CUSTOM_GPT_ACTION_SPEC.yaml`
 - System prompts in `docs/gpt_instructions/`
 - Authentication: Bearer token (per-user, from token map above)
-- GPT URLs to be documented in brain once all three confirmed
+- All three GPTs validated end-to-end (query, ingest) on 2026-03-21
+- GPT URLs to be ingested into brain (pending)
 
 ## MCP Server (Claude Code Integration)
 
@@ -65,8 +70,8 @@ Registered via `.mcp.json` at project root. Reads token from `.env.local`, calls
 
 ## Recent Commits
 
+- `d6ef613` — Fix text ingest: introspect schema columns before INSERT (PR #7)
+- `ac0f691` — Fix text ingest: actually write to DB instead of silently accepting (PR #6)
 - `83f0160` — Add OpenBrain MCP server for Claude Code integration
 - `6d1a48a` — Add text source_type support and word-count guard for GPT ingest
 - `acdd555` — Remove tokens from GPT instruction files, exclude gpt_instructions from brain ingest
-- `4ad89a8` — Add per-user GPT instruction files and fix token owner map
-- `f679859` — Add per-user token → owner mapping for family identity bridge
