@@ -1,90 +1,69 @@
-# OpenBrain Student Tutor Project
+# OpenBrain Agent Integration
 
-This repository implements a personal tutoring system for a student using:
+OpenBrain is a personal and family RAG memory system accessible via three agent surfaces.
 
-- OpenBrain vector database
-- Model Context Protocol (MCP)
-- Vercel web interface
+---
 
-Primary goals:
+## 1. ChatGPT Custom GPTs
 
-1. Allow a student to upload study materials (PDF, DOCX, URLs)
-2. Ingest those materials into OpenBrain vectors
-3. Generate quizzes and flashcards
-4. Provide tutoring explanations
+Three family Custom GPTs, one per user. Each uses the OpenAPI 3.1.0 action spec
+at `docs/CUSTOM_GPT_ACTION_SPEC.yaml` and a per-user system prompt from `docs/gpt_instructions/`.
 
-Architecture:
+See `docs/CHATGPT_CONNECTOR.md` for full setup and auth details.
 
-Student Laptop
-      ↓
-Vercel Study App
-      ↓
-MCP Server
-      ↓
-OpenBrain Vector DB
+---
 
-Core Components:
+## 2. Claude Code MCP Server
 
-/ingestion
-Handles file ingestion and embedding
+`mcp_server/openbrain.py` — stdio MCP server registered via `.mcp.json` at project root.
 
-/mcp
-Implements MCP server endpoints
+Tools exposed natively in Claude Code sessions:
+- `openbrain_query` — hybrid keyword + vector search over the vault
+- `openbrain_ingest` — save notes or content to the vault
+- `openbrain_generate_quiz` — generate quiz questions from vault content
+- `openbrain_generate_flashcards` — generate flashcards from vault content
 
-/vercel-ui
-Frontend interface for students
+Reads `OPENBRAIN_TOOL_ACCESS_TOKEN` from `.env.local`, calls Vercel over HTTP.
+Requires `mcp` and `httpx` packages (both in `requirements-full.txt`).
 
-/vector-store
-Interfaces with OpenBrain database
+---
 
-Supported Inputs:
+## 3. Claude API (tool_use format)
 
-- PDF
-- DOCX
-- TXT
-- URL
+`api/claude.py` — thin HTTP adapter for the Claude native `tool_use` envelope.
+Routes: `/claude_query`, `/claude_generate_quiz`, `/claude_generate_flashcards`, `/claude_ingest`
 
-Chunking Strategy:
+Same auth and owner resolution as ChatGPT adapter. Prioritises `input` key in payload.
 
-500 tokens
-100 overlap
+---
 
-Tutor Behavior Rules:
+## Supported Ingest Sources
 
-The AI must behave as a tutor, not an answer engine.
+| source_type | Description |
+|------------|-------------|
+| `text` | Inline content pasted directly as `source` field |
+| `url` | Web URL to fetch and ingest |
+| `pdf` | PDF file path (local ingest only) |
+| `docx` | DOCX file path (local ingest only) |
+| `obsidian` | Obsidian vault directory (CLI ingest only) |
 
-Rules:
+---
 
-1. Ask students to attempt answers before revealing solutions
-2. Provide step-by-step explanations
-3. Use language appropriate for a middle school student
-4. Encourage effort and learning
-5. Generate quizzes when possible
+## Tutor Behaviour
 
-Endpoints to implement:
+All query responses include:
+- `rules` — list of tutor behaviour rules to apply in the response
+- `tutor_prompt` — suggested opening line
+- `context_used` — vault chunks used to build the response
+- `results` — raw ranked results with scores and source metadata
 
-POST /ingest
-POST /query
-POST /generate_quiz
-POST /generate_flashcards
+See `docs/TUTOR_BEHAVIOR_CONTRACT.md` for full contract.
 
-Frontend UX Requirements:
+---
 
-The UI must remain extremely simple for a student.
+## Future Enhancements
 
-Three buttons:
-
-Upload Study Material
-Generate Practice
-Ask Tutor
-
-Constraints:
-
-No CLI interaction required for the student.
-All actions must be available via web UI.
-
-Future enhancements:
-
-- student progress tracking
-- weak-topic detection
-- adaptive quizzes
+- Student progress tracking (weak-topic detection across sessions)
+- Adaptive quizzes that weight toward topics with low recent scores
+- Per-user tutor behaviour tuning beyond system prompt guardrails
+- K8s CronJob daemon for scheduled ingest and DB health evaluation

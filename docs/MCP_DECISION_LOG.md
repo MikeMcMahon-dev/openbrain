@@ -27,11 +27,9 @@ should be confirmed before code changes.
   - `topic` derives to `YYYY-MM-DD` when not supplied
 - `ingest_id` is deterministic (md5 fingerprint) for idempotent retries.
 
-## Remaining open questions
+## Resolved (2026-03-21)
 
-- Source reachability is required and unreachable inputs now return
-  `failed`.
-- Owner should be passed explicitly by the caller when available; fallback is
-  a temporary safety default.
-- Keyword-first surfacing is implemented; explicit low-confidence threshold
-  for fallback remains optional future enhancement.
+- Source reachability: enforced — unreachable inputs return `failed`.
+- Owner resolution: token → owner map (`OPENBRAIN_TOKEN_OWNER_MAP`) is the primary path for agent callers. Header `x-openbrain-owner` is the fallback. Body `owner` field is untrusted for scope enforcement.
+- Keyword-first surfacing: implemented. Low-confidence threshold for fallback is optional future enhancement.
+- `text` source_type: added to allowed set. Word-count guard (413) prevents oversized payloads.

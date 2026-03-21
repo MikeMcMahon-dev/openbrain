@@ -1,46 +1,72 @@
 # OpenBrain Handoff
 
-## Current State
-- Vercel app is live at: `https://openbrain-rouge.vercel.app/`
-- Supabase is primary storage (`edljijurbmcupawnjpfx`), Chroma legacy path retired.
-- 775 rows in `public.thoughts`, all with embeddings, under tenant `family`.
-- Obsidian vault corpus confirmed imported (multiple successful runs of `scripts/ingest.py`).
+## Current State (2026-03-21)
+
+- Vercel app live: `https://openbrain-rouge.vercel.app/`
+- Supabase primary storage (`edljijurbmcupawnjpfx`), Transaction pooler (port 6543) in use
+- `public.thoughts`: 519 rows — `mike.mcmahon67` (516), `snapple01` (2), `anneliesepaige` (1)
+- Obsidian vault corpus imported and current
 - `vault/` is a symlink: `vault -> /Users/mmcmahon/Library/Mobile Documents/iCloud~md~obsidian/Documents/Shared Vault`
-- Embeddings use OpenRouter (`text-embedding-3-small`) via `OPENROUTER_API_KEY` — not direct OpenAI.
-- `OPENBRAIN_TOOL_ACCESS_TOKEN` is set in Vercel. `/openbrain_*` and `/tools/openbrain_*` routes are wired, deployed, and auth-gated.
+- Embeddings via OpenRouter (`text-embedding-3-small`) using `OPENROUTER_API_KEY`
 
-## Last Successful Validation (2026-03-20)
-- Local smoke checks pass (all routes 200, query returns vault content for owner `mike.mcmahon67`).
-- Live auth gate confirmed: wrong token → 401, correct token → 200.
-- Ingest idempotency checks are in place and passing (pre/post ingest row counts stable).
-- Latest handoff commit: `3c116c3`.
+## Last Successful Validation (2026-03-21)
 
-## Current Known Blocker
-**Vercel read path returns empty results.**
-- Root cause: `SUPABASE_DB_URL` resolves to an IPv6 address; Vercel serverless is IPv4-only.
-- Error: `connection to server at "2600:..." failed: Cannot assign requested address`
-- Fix: replace `SUPABASE_DB_URL` in Vercel env (and `.env.local`) with the Supabase
-  **Transaction pooler** connection string (port `6543`, `aws-0-us-east-1.pooler.supabase.com`).
-  Find it at: Supabase → Settings → Database → Connection string → Transaction mode.
-- After updating the env var, redeploy Vercel.
+- Local smoke checks pass (all routes 200, auth gate working)
+- Live smoke checks pass (22/22 cases including 401 rejection test)
+- MCP server live in Claude Code: `mcp_server/openbrain.py` via `.mcp.json`
+- DB cleanup complete: no orphaned owners, no duplicate rows
+
+## Identity Bridge
+
+Three per-user bearer tokens map to owner strings via `OPENBRAIN_TOKEN_OWNER_MAP` in Vercel:
+
+| User | Owner string | Token (see .env.local) |
+|------|-------------|------------------------|
+| Mike | `mike.mcmahon67` | `OPENBRAIN_TOOL_ACCESS_TOKEN` (also shared admin fallback) |
+| Beth | `snapple01` | per-user token |
+| Annie | `anneliesepaige` | per-user token |
+
+Token → owner resolution happens in `api/chatgpt.py:_require_tool_auth()` and is injected as `x-openbrain-owner` before the request hits core logic.
+
+## Custom GPTs
+
+Three family Custom GPTs configured in ChatGPT:
+- Each uses the OpenAPI 3.1.0 spec at `docs/CUSTOM_GPT_ACTION_SPEC.yaml`
+- System prompts in `docs/gpt_instructions/`
+- Authentication: Bearer token (per-user, from token map above)
+- GPT URLs to be documented in brain once all three confirmed
+
+## MCP Server (Claude Code Integration)
+
+`mcp_server/openbrain.py` — stdio MCP server exposing four tools:
+- `openbrain_query`
+- `openbrain_ingest`
+- `openbrain_generate_quiz`
+- `openbrain_generate_flashcards`
+
+Registered via `.mcp.json` at project root. Reads token from `.env.local`, calls Vercel over HTTP.
 
 ## Open Items
-- Custom GPT action OpenAPI spec: not yet written.
-- Identity strategy: Slack user_id as canonical identity; per-user token mapping planned.
-- RLS enforcement: scaffolded only (Phase 2).
-- OPENAI_API_KEY not in Vercel (using OpenRouter instead — already working via OPENROUTER_API_KEY).
 
-## Next Actions
-1. Fix `SUPABASE_DB_URL` → Transaction pooler URL in Vercel + `.env.local`, then redeploy.
-2. Smoke test live read path: `make smoke-live SMOKE_URL=https://openbrain-rouge.vercel.app`
-3. Validate keyword hit ranking (query for known vault terms like "Terraform", "SELinux").
-4. Write Custom GPT action OpenAPI spec (routes already live, auth already gated).
-5. Configure Custom GPT action and run end-to-end: study question → flashcards → quiz.
-6. Cross-tenant leak test before family rollout.
+- Annie's school content import (deferred — Spring Break; coordinate with wife)
+- Custom GPT URLs — ingest into brain once all three confirmed working
+- DB health automation — planned as K8s CronJob (separate project)
+- RLS enforcement — scaffolded only; Phase 2 hardening not yet applied
+- Slack identity canonicalisation — `slack_user_id` as the durable identity anchor (vs. username strings) is a future architectural goal; current owner strings work but are not tied to Slack auth
 
 ## Environment / Command Notes
-- Local smoke: `.venv/bin/python scripts/smoke_checks.py`
-- Live smoke: `make smoke-live SMOKE_URL=https://openbrain-rouge.vercel.app`
-- Idempotency: `.venv/bin/python scripts/smoke_checks.py --idempotency-source /tmp/openbrain-single/focus.md --idempotency-owner mike.mcmahon67`
-- Default owner: `mike.mcmahon67` / default tenant: `family`
 
+- Local smoke: `.venv/bin/python scripts/smoke_checks.py`
+- Live smoke: `.venv/bin/python scripts/smoke_checks.py --live https://openbrain-rouge.vercel.app`
+- Full ingest: `.venv/bin/python scripts/ingest.py`
+- Default owner: `mike.mcmahon67` / default tenant: `family`
+- `gh` CLI installed — use for PR creation going forward
+- **Git rule**: all changes via feature branch + PR, never direct to main
+
+## Recent Commits
+
+- `83f0160` — Add OpenBrain MCP server for Claude Code integration
+- `6d1a48a` — Add text source_type support and word-count guard for GPT ingest
+- `acdd555` — Remove tokens from GPT instruction files, exclude gpt_instructions from brain ingest
+- `4ad89a8` — Add per-user GPT instruction files and fix token owner map
+- `f679859` — Add per-user token → owner mapping for family identity bridge

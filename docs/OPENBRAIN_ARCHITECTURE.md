@@ -87,12 +87,9 @@ No direct OpenAI key is required — all embedding calls route through OpenRoute
 
 Provides:
 
-- MCP-like routes in scaffold:
-  - `POST /ingest`
-  - `POST /query`
-  - `POST /generate_quiz`
-  - `POST /generate_flashcards`
-  - legacy-compatible `GET/POST /query`, `/search`, `/generate_quiz`, `/generate_flashcards`, `/ingest`
+- Core routes: `POST /ingest`, `/query`, `/search`, `/generate_quiz`, `/generate_flashcards` (and `/api/*` variants)
+- Tool routes: `/openbrain_query`, `/openbrain_generate_quiz`, `/openbrain_generate_flashcards`, `/openbrain_ingest` (+ `/tools/*` variants)
+- Claude routes: `/claude_query`, `/claude_generate_quiz`, `/claude_generate_flashcards`, `/claude_ingest`
 
 The primary web surface is Vercel, with these API contracts now exercised through
 the deployed serverless entrypoint.
@@ -203,32 +200,28 @@ OpenBrain prioritizes:
 
 ---
 
-## 11. ChatGPT Integration Layer (Planned)
+## 11. ChatGPT + Claude Integration Layer (Complete)
 
-OpenBrain currently exposes API routes that can be consumed by a ChatGPT
-personalization layer, but no direct connector is active yet.
+### Custom GPT (ChatGPT)
 
-Planned connector architecture:
+Three family Custom GPTs are live, one per user, each with an isolated bearer token:
 
-- Chat entrypoint invokes OpenBrain tool calls:
-  - `POST /api/query`
-  - `POST /api/search`
-  - `POST /api/generate_quiz`
-  - `POST /api/generate_flashcards`
-  - `POST /api/ingest` (admin/import tooling)
-- A thin identity gateway maps chat user context into:
-  - `x-openbrain-owner`
-  - tenant context headers
-- Tool output stays in OpenBrain schema:
-  - query `results`
-  - `context_used`
-  - `tutor_prompt` and `rules`
+- OpenAPI 3.1.0 spec: `docs/CUSTOM_GPT_ACTION_SPEC.yaml`
+- System prompts: `docs/gpt_instructions/` (mike_mcmahon67, snapple01, anneliesepaige)
+- Routes: `/openbrain_query`, `/openbrain_generate_quiz`, `/openbrain_generate_flashcards`, `/openbrain_ingest`
+- Auth: `Authorization: Bearer <per-user-token>`; token resolves to owner via `OPENBRAIN_TOKEN_OWNER_MAP`
 
-Current gap:
+### Claude Code MCP Server
 
-- Define Custom GPT action/tool schema and auth strategy.
-- Add request/response transforms and error envelopes for chat-friendly responses.
-- Add explicit tenant/user binding from chat identity to DB identities.
+`mcp_server/openbrain.py` — stdio MCP server registered via `.mcp.json`. Exposes four native tools directly in Claude Code sessions: `openbrain_query`, `openbrain_ingest`, `openbrain_generate_quiz`, `openbrain_generate_flashcards`.
+
+### Identity Bridge
+
+`OPENBRAIN_TOKEN_OWNER_MAP` (Vercel env var) — JSON mapping bearer token → owner string. Each family member has an isolated token. Token resolution happens in `api/chatgpt.py:_require_tool_auth()` and injects `x-openbrain-owner` before core logic runs. No code changes needed in `_openbrain_api.py`.
+
+### Claude API adapter
+
+`api/claude.py` — thin adapter for Claude native `tool_use` format (prioritises `input` key). Shares `_require_tool_auth` and `_inject_token_owner` with `api/chatgpt.py`. Routes: `/claude_query`, `/claude_generate_quiz`, `/claude_generate_flashcards`, `/claude_ingest`.
 
 ---
 
