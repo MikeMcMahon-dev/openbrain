@@ -226,6 +226,8 @@ def _smoke_local_idempotency_check(source: str, owner: str | None) -> int:
 
 def smoke_local(idempotency_source: str | None = None, idempotency_owner: str | None = None) -> int:
     query_body = json.dumps({"query": "test"})
+    _token = os.getenv("OPENBRAIN_TOOL_ACCESS_TOKEN", "")
+    _auth = {"Authorization": f"Bearer {_token}"} if _token else {}
     cases = [
         ({"path": "/", "method": "GET"}, 200),
         ({"path": "/health", "method": "GET"}, 200),
@@ -342,7 +344,7 @@ def smoke_local(idempotency_source: str | None = None, idempotency_owner: str | 
                 "path": "/openbrain_query",
                 "method": "POST",
                 "body": json.dumps({"query": "test"}),
-                "headers": {},
+                "headers": _auth,
             },
             200,
         ),
@@ -353,7 +355,7 @@ def smoke_local(idempotency_source: str | None = None, idempotency_owner: str | 
                 "body": json.dumps(
                     {"tool_input": {"query": "test"}, "tool_name": "openbrain_generate_quiz"}
                 ),
-                "headers": {"Content-Type": "application/json"},
+                "headers": {"Content-Type": "application/json", **_auth},
             },
             200,
         ),
@@ -367,7 +369,7 @@ def smoke_local(idempotency_source: str | None = None, idempotency_owner: str | 
                         "name": "openbrain_generate_flashcards",
                     }
                 ),
-                "headers": {"Content-Type": "application/json"},
+                "headers": {"Content-Type": "application/json", **_auth},
             },
             200,
         ),
@@ -383,7 +385,7 @@ def smoke_local(idempotency_source: str | None = None, idempotency_owner: str | 
                         }
                     }
                 ),
-                "headers": {"Content-Type": "application/json"},
+                "headers": {"Content-Type": "application/json", **_auth},
             },
             200,
             True,
@@ -394,7 +396,7 @@ def smoke_local(idempotency_source: str | None = None, idempotency_owner: str | 
                 "path": "/claude_query",
                 "method": "POST",
                 "body": json.dumps({"type": "tool_use", "name": "claude_query", "input": {"query": "test"}}),
-                "headers": {"Content-Type": "application/json"},
+                "headers": {"Content-Type": "application/json", **_auth},
             },
             200,
         ),
@@ -403,7 +405,7 @@ def smoke_local(idempotency_source: str | None = None, idempotency_owner: str | 
                 "path": "/claude_generate_quiz",
                 "method": "POST",
                 "body": json.dumps({"type": "tool_use", "name": "claude_generate_quiz", "input": {"query": "test"}}),
-                "headers": {"Content-Type": "application/json"},
+                "headers": {"Content-Type": "application/json", **_auth},
             },
             200,
         ),
@@ -412,7 +414,7 @@ def smoke_local(idempotency_source: str | None = None, idempotency_owner: str | 
                 "path": "/claude_generate_flashcards",
                 "method": "POST",
                 "body": json.dumps({"type": "tool_use", "name": "claude_generate_flashcards", "input": {"query": "test"}}),
-                "headers": {"Content-Type": "application/json"},
+                "headers": {"Content-Type": "application/json", **_auth},
             },
             200,
         ),
@@ -421,7 +423,7 @@ def smoke_local(idempotency_source: str | None = None, idempotency_owner: str | 
                 "path": "/claude_ingest",
                 "method": "POST",
                 "body": json.dumps({"type": "tool_use", "name": "claude_ingest", "input": {"source_type": "text", "source": "smoke test"}}),
-                "headers": {"Content-Type": "application/json"},
+                "headers": {"Content-Type": "application/json", **_auth},
             },
             200,
             True,
@@ -432,7 +434,7 @@ def smoke_local(idempotency_source: str | None = None, idempotency_owner: str | 
                 "path": "/tools/claude_query",
                 "method": "POST",
                 "body": json.dumps({"input": {"query": "test"}}),
-                "headers": {"Content-Type": "application/json"},
+                "headers": {"Content-Type": "application/json", **_auth},
             },
             200,
         ),

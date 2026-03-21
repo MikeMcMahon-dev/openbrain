@@ -3,6 +3,7 @@
 [data_sources]
 
 obsidian = "vault"
+project_docs = "docs"
 # Optional additional sources for student study materials.
 # pdf = "materials/pdf"
 # docx = "materials/docx"
