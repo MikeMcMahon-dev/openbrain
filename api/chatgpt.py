@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json as _json
 import os
 from collections.abc import Mapping
 from typing import Any
@@ -19,10 +20,31 @@ def _stringify_headers(headers: Any) -> dict[str, str]:
     return normalized
 
 
-def _require_tool_auth(metadata: Mapping[str, Any] | None) -> tuple[bool, str | None]:
+def _get_token_owner_map() -> dict[str, str]:
+    """Load OPENBRAIN_TOKEN_OWNER_MAP — JSON mapping token → owner string."""
+    raw = os.getenv("OPENBRAIN_TOKEN_OWNER_MAP", "").strip()
+    if not raw:
+        return {}
+    try:
+        result = _json.loads(raw)
+        return result if isinstance(result, dict) else {}
+    except Exception:
+        return {}
+
+
+def _require_tool_auth(metadata: Mapping[str, Any] | None) -> tuple[bool, str | None, str | None]:
+    """
+    Validate the bearer token from request headers.
+
+    Returns (authorized, error_reason, resolved_owner).
+    resolved_owner is set when the token maps to a specific owner via
+    OPENBRAIN_TOKEN_OWNER_MAP; None means use the deployment default.
+    """
     access_token = os.getenv("OPENBRAIN_TOOL_ACCESS_TOKEN")
-    if not access_token:
-        return True, None
+    token_map = _get_token_owner_map()
+
+    if not access_token and not token_map:
+        return True, None, None
 
     headers = _stringify_headers(metadata.get("headers") if isinstance(metadata, Mapping) else None)
     candidate = (
@@ -32,15 +54,30 @@ def _require_tool_auth(metadata: Mapping[str, Any] | None) -> tuple[bool, str | 
     )
 
     if not candidate:
-        return False, "Tool access token required."
+        return False, "Tool access token required.", None
 
     if candidate.startswith("Bearer ") or candidate.startswith("bearer "):
         candidate = candidate.split(" ", 1)[1].strip()
 
-    if candidate != access_token:
-        return False, "Invalid tool access token."
+    # Per-user token map takes priority — resolves both auth and owner.
+    if token_map and candidate in token_map:
+        return True, None, token_map[candidate]
 
-    return True, None
+    # Fall back to shared token (admin / legacy use).
+    if access_token and candidate == access_token:
+        return True, None, None
+
+    return False, "Invalid tool access token.", None
+
+
+def _inject_token_owner(metadata: dict[str, Any], owner: str) -> None:
+    """Inject token-resolved owner as x-openbrain-owner if not already set."""
+    headers = metadata.get("headers")
+    if not isinstance(headers, dict):
+        headers = {}
+        metadata["headers"] = headers
+    if not headers.get("x-openbrain-owner"):
+        headers["x-openbrain-owner"] = owner
 
 
 def _resolve_tool_payload(payload: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -73,7 +110,7 @@ def handler(request, *, tool_mode: str) -> dict[str, Any]:
             },
         )
 
-    is_authorized, reason = _require_tool_auth(metadata)
+    is_authorized, reason, resolved_owner = _require_tool_auth(metadata)
     if not is_authorized:
         return response_payload(
             401,
@@ -83,6 +120,9 @@ def handler(request, *, tool_mode: str) -> dict[str, Any]:
                 "status": 401,
             },
         )
+
+    if resolved_owner:
+        _inject_token_owner(metadata, resolved_owner)
 
     normalized_payload = dict(_resolve_tool_payload(payload) if isinstance(payload, Mapping) else {})
 
@@ -105,4 +145,3 @@ def handler(request, *, tool_mode: str) -> dict[str, Any]:
         )
 
     return response_payload(status, body)
-

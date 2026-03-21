@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from api._openbrain_api import ingest_payload, parse_request, query_payload, response_payload, validate_method
-from api.chatgpt import _require_tool_auth
+from api.chatgpt import _inject_token_owner, _require_tool_auth
 
 
 def _resolve_claude_payload(payload: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -36,7 +36,7 @@ def handler(request, *, tool_mode: str) -> dict[str, Any]:
             },
         )
 
-    is_authorized, reason = _require_tool_auth(metadata)
+    is_authorized, reason, resolved_owner = _require_tool_auth(metadata)
     if not is_authorized:
         return response_payload(
             401,
@@ -46,6 +46,9 @@ def handler(request, *, tool_mode: str) -> dict[str, Any]:
                 "status": 401,
             },
         )
+
+    if resolved_owner:
+        _inject_token_owner(metadata, resolved_owner)
 
     normalized_payload = dict(_resolve_claude_payload(payload) if isinstance(payload, Mapping) else {})
 
