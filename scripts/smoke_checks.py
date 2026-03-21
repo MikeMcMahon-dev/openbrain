@@ -497,6 +497,8 @@ def _call_live(
 
 
 def smoke_live(base_url: str) -> int:
+    _token = os.getenv("OPENBRAIN_TOOL_ACCESS_TOKEN", "")
+    _auth = {"Authorization": f"Bearer {_token}"} if _token else {}
     cases = [
         ("/", None, 200),
         ("/health", None, 200),
@@ -517,21 +519,24 @@ def smoke_live(base_url: str) -> int:
             {"x-openbrain-owner": "tenant-a-owner"},
             "tenant-a-owner",
         ),
-        ("/openbrain_query", {"query": "test"}, 200),
+        ("/openbrain_query", {"query": "test"}, 200, _auth),
         (
             "/openbrain_generate_quiz",
             {"tool_input": {"query": "test"}, "tool_name": "openbrain_generate_quiz"},
             200,
+            _auth,
         ),
         (
             "/openbrain_generate_flashcards",
             {"arguments": {"query": "test"}, "name": "openbrain_generate_flashcards"},
             200,
+            _auth,
         ),
         (
             "/openbrain_ingest",
             {"tool_input": {"source_type": "obsidian", "source": "/tmp"}},
             200,
+            _auth,
         ),
         # Claude adapter — live, with auth token
         (
