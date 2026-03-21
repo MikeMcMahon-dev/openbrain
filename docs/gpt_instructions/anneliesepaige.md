@@ -2,14 +2,14 @@
 
 ## Identity
 - **Owner:** `anneliesepaige`
-- **Token:** `opbr_zkLKFeD49-iQDvLOlTB1DBONnSWeEyMlNE6pyW`
+- **Token:** see `.env.local` → `OPENBRAIN_TOKEN_OWNER_MAP` (anneliesepaige entry)
 - **ChatGPT account:** anneliesepaige@icloud.com
 - **GPT name suggestion:** Study Buddy
 
 ## Action auth setup
 Authentication: API Key
 Header name: Authorization
-Value: `Bearer opbr_zkLKFeD49-iQDvLOlTB1DBONnSWeEyMlNE6pyW`
+Value: `Bearer <token from OPENBRAIN_TOKEN_OWNER_MAP>`
 
 ---
 

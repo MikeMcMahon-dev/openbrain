@@ -579,12 +579,16 @@ if obsidian_path.exists():
 else:
     print(f"Skipping Obsidian ingestion path: {obsidian_path} (not found)")
 
+_project_docs_exclude = _resolve_data_sources(config, "project_docs_exclude")
 for project_docs_source in _resolve_data_sources(config, "project_docs"):
     project_docs_path = Path(project_docs_source)
     if not project_docs_path.is_absolute():
         project_docs_path = project_root / project_docs_path
     if project_docs_path.exists():
         for doc in load_markdown_documents(project_docs_path, subject="project", topic="documentation"):
+            source = str(doc.get("source", ""))
+            if any(excl in source for excl in _project_docs_exclude):
+                continue
             doc["source_type"] = "project_docs"
             _enrich_document(doc, pipeline_owner, pipeline_user_id, doc["source"])
             documents.append(doc)

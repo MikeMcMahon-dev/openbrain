@@ -2,14 +2,14 @@
 
 ## Identity
 - **Owner:** `mike.mcmahon67`
-- **Token:** `opbr_FMKv2T-s4ujBZxdd-vc-Ax_KMEhkQv8-zAmz6_kqyqk`
+- **Token:** see `.env.local` → `OPENBRAIN_TOKEN_OWNER_MAP` (mike.mcmahon67 entry)
 - **ChatGPT account:** mike.mcmahon67 (primary)
 - **GPT name suggestion:** OpenBrain
 
 ## Action auth setup
 Authentication: API Key
 Header name: Authorization
-Value: `Bearer opbr_FMKv2T-s4ujBZxdd-vc-Ax_KMEhkQv8-zAmz6_kqyqk`
+Value: `Bearer <token from OPENBRAIN_TOKEN_OWNER_MAP>`
 
 ---
 

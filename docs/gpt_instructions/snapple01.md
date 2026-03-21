@@ -2,14 +2,14 @@
 
 ## Identity
 - **Owner:** `snapple01`
-- **Token:** `opbr_JkPvOdX-IyBdNowrCDWrBOPWsfvwzY-1XKEJK_`
+- **Token:** see `.env.local` → `OPENBRAIN_TOKEN_OWNER_MAP` (snapple01 entry)
 - **ChatGPT account:** snapple01@gmail.com
 - **GPT name suggestion:** Family Brain
 
 ## Action auth setup
 Authentication: API Key
 Header name: Authorization
-Value: `Bearer opbr_JkPvOdX-IyBdNowrCDWrBOPWsfvwzY-1XKEJK_`
+Value: `Bearer <token from OPENBRAIN_TOKEN_OWNER_MAP>`
 
 ---
 

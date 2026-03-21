@@ -4,6 +4,7 @@
 
 obsidian = "vault"
 project_docs = "docs"
+project_docs_exclude = ["gpt_instructions"]
 # Optional additional sources for student study materials.
 # pdf = "materials/pdf"
 # docx = "materials/docx"
