@@ -632,6 +632,9 @@ if not documents:
     print("No documents prepared for ingestion.")
     raise SystemExit(0)
 
+# Phase 1: connect for schema introspection and preflight only.
+# The connection is closed before embedding computation begins so the
+# transaction pooler cannot time out during slow OpenRouter API calls.
 print("\nConnecting to Supabase...")
 supabase_conn, supabase_error = _connect_supabase(supabase_config)
 if not supabase_conn:
@@ -652,62 +655,76 @@ try:
         available_columns=available_columns,
     ):
         raise SystemExit(2)
+finally:
+    try:
+        supabase_conn.close()
+    except Exception:
+        pass
 
-    print(f"Writing {len(documents)} docs into Supabase tenant '{tenant_id}'")
+# Phase 2: build all rows and compute embeddings with no DB connection open.
+print(f"Writing {len(documents)} docs into Supabase tenant '{tenant_id}'")
 
-    rows: list[dict[str, Any]] = []
-    for document in documents:
-        source_type = str(document.get("source_type") or "obsidian").strip() or "obsidian"
-        chunks = _chunk_documents_for_source(document)
-        print(document["source"], "→", len(chunks), "chunks")
+rows: list[dict[str, Any]] = []
+for document in documents:
+    source_type = str(document.get("source_type") or "obsidian").strip() or "obsidian"
+    chunks = _chunk_documents_for_source(document)
+    print(document["source"], "→", len(chunks), "chunks")
 
-        for index, chunk in enumerate(chunks):
-            chunk_text = chunk.get("text", "").strip()
-            if len(chunk_text) < MIN_CHUNK_LENGTH:
-                continue
+    for index, chunk in enumerate(chunks):
+        chunk_text = chunk.get("text", "").strip()
+        if len(chunk_text) < MIN_CHUNK_LENGTH:
+            continue
 
-            heading = chunk.get("heading", "root")
-            row_id, source_chunk_id = _build_chunk_identifier(
-                pipeline_owner,
-                str(document["id"]),
-                index,
-                chunk_text,
-                tenant_id,
-            )
-            embedding = _compute_embedding(chunk_text)
-            metadata = _build_metadata(document, heading, index)
-            metadata["source_type"] = source_type
+        heading = chunk.get("heading", "root")
+        row_id, source_chunk_id = _build_chunk_identifier(
+            pipeline_owner,
+            str(document["id"]),
+            index,
+            chunk_text,
+            tenant_id,
+        )
+        embedding = _compute_embedding(chunk_text)
+        metadata = _build_metadata(document, heading, index)
+        metadata["source_type"] = source_type
 
-            row: dict[str, Any] = {
-                "id": row_id,
-                "content": chunk_text,
-                "tenant_id": tenant_id,
-                "source_type": source_type,
-                "source_uri": document.get("source"),
-                "source_chunk_id": source_chunk_id,
-                "document_id": document["id"],
-                "chunk_id": index,
-                "content_hash": hashlib.sha256(chunk_text.encode("utf-8")).hexdigest(),
-                "metadata": metadata,
-                "created_by_user_id": pipeline_user_id,
-                "created_by_user_login": pipeline_owner,
-                "slack_username": pipeline_owner,
-                "visibility": "private",
-                "subject": document.get("subject"),
-                "topic": document.get("topic"),
-            }
+        row: dict[str, Any] = {
+            "id": row_id,
+            "content": chunk_text,
+            "tenant_id": tenant_id,
+            "source_type": source_type,
+            "source_uri": document.get("source"),
+            "source_chunk_id": source_chunk_id,
+            "document_id": document["id"],
+            "chunk_id": index,
+            "content_hash": hashlib.sha256(chunk_text.encode("utf-8")).hexdigest(),
+            "metadata": metadata,
+            "created_by_user_id": pipeline_user_id,
+            "created_by_user_login": pipeline_owner,
+            "slack_username": pipeline_owner,
+            "visibility": "private",
+            "subject": document.get("subject"),
+            "topic": document.get("topic"),
+        }
 
-            if embedding is not None and "embedding" in available_columns:
-                row["embedding"] = embedding
-            if "source_team_id" in available_columns:
-                row["source_team_id"] = document.get("source_team_id")
-            if "source_workspace_id" in available_columns:
-                row["source_workspace_id"] = document.get("source_workspace_id")
-            if "source_channel_id" in available_columns:
-                row["source_channel_id"] = document.get("source_channel_id")
+        if embedding is not None and "embedding" in available_columns:
+            row["embedding"] = embedding
+        if "source_team_id" in available_columns:
+            row["source_team_id"] = document.get("source_team_id")
+        if "source_workspace_id" in available_columns:
+            row["source_workspace_id"] = document.get("source_workspace_id")
+        if "source_channel_id" in available_columns:
+            row["source_channel_id"] = document.get("source_channel_id")
 
-            rows.append({key: value for key, value in row.items() if key in available_columns})
+        rows.append({key: value for key, value in row.items() if key in available_columns})
 
+# Phase 3: open a fresh connection for the bulk insert only.
+print(f"\nConnecting to Supabase for bulk insert ({len(rows)} rows)...")
+supabase_conn, supabase_error = _connect_supabase(supabase_config)
+if not supabase_conn:
+    print(f"Supabase connection not established for insert: {supabase_error}")
+    raise SystemExit(2)
+
+try:
     inserted, updated, skipped = _insert_rows(supabase_conn, rows, available_columns)
     print(
         f"Prepared chunks: {len(rows)}; inserted: {inserted}; updated: {updated}; skipped: {skipped}."
