@@ -84,6 +84,65 @@
 - Re-run ingestion to reproduce from source material.
 - If accidental generated artifacts are created locally, clean them before commit.
 
+## End-of-session process (repeatable)
+
+Run this at the end of every working session to keep docs, brain, and git in sync.
+
+### 1. Open a docs branch
+
+```bash
+git checkout -b docs/session-YYYY-MM-DD-close
+```
+
+### 2. Update docs
+
+- `docs/HANDOFF.md` — current DB state, last validated items, open items, recent commits
+- `docs/OPENBRAIN_NEXT_STEPS.md` — last successful checks block at the top
+
+### 3. Ingest session learnings into brain
+
+Use the MCP `openbrain_ingest` tool (or Custom GPT) to write any:
+- lessons learned
+- architectural decisions
+- operational notes
+- personal context updates
+
+Use `source_type=text`, `subject=OpenBrain` (or relevant subject), appropriate `topic`.
+
+### 4. Commit and push
+
+```bash
+git add docs/HANDOFF.md docs/OPENBRAIN_NEXT_STEPS.md
+git commit -m "Update docs for YYYY-MM-DD session close"
+git push -u origin docs/session-YYYY-MM-DD-close
+```
+
+### 5. Create PR
+
+```bash
+gh pr create --title "Update docs for YYYY-MM-DD session close" --body "..."
+```
+
+### 6. After PR merge — clean up local
+
+```bash
+git checkout main && git pull && git branch -d docs/session-YYYY-MM-DD-close
+```
+
+### Vault drop folder
+
+To ingest personal reference documents (resumes, context files, notes) into the brain via `scripts/ingest.py`:
+
+1. Drop `.md` files into `vault/Personal/`
+2. Run `.venv/bin/python scripts/ingest.py`
+
+The vault symlink points to:
+`/Users/mmcmahon/Library/Mobile Documents/iCloud~md~obsidian/Documents/Shared Vault/`
+
+Files added there are also visible in Obsidian automatically.
+
+---
+
 ## Safe commit gates
 
 - Do not include generated artifacts:
