@@ -51,6 +51,8 @@ Registered via `.mcp.json` at project root. Reads token from `.env.local`, calls
 - Annie's school content import (deferred — Spring Break; coordinate with wife)
 - Custom GPT URLs — ingest into brain once all three confirmed working
 - DB health automation — planned as K8s CronJob (separate project)
+- RLS enforcement — scaffolded only; Phase 2 hardening not yet applied
+- Slack identity canonicalisation — `slack_user_id` as the durable identity anchor (vs. username strings) is a future architectural goal; current owner strings work but are not tied to Slack auth
 
 ## Environment / Command Notes
 
