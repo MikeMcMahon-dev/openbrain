@@ -863,7 +863,7 @@ def ingest_payload(
     owner, _tenant_id = request_context(method_metadata)
     subject, topic = derive_subject_topic(source, payload.get("subject"), payload.get("topic"))
 
-    allowed = {"obsidian", "pdf", "docx", "url"}
+    allowed = {"obsidian", "pdf", "docx", "url", "text"}
     status = "failed"
     message = ""
     details: list[str] = []
@@ -983,6 +983,22 @@ def ingest_payload(
     elif source_type not in allowed:
         message = f"Ingest failed: unsupported source_type '{source_type}'."
         details.append(f"source_type '{source_type}' is not supported")
+    elif source_type == "text":
+        word_count = len(source.split())
+        max_words = int(os.getenv("OPENBRAIN_TEXT_INGEST_MAX_WORDS", "6000"))
+        if word_count > max_words:
+            return 413, {
+                "error": "content_too_large",
+                "message": (
+                    f"Text content is too large ({word_count} words). "
+                    f"Split into sections under 1500 words and re-submit each section separately."
+                ),
+                "status": 413,
+                "word_count": word_count,
+                "max_words": max_words,
+            }
+        status = "accepted"
+        message = "Ingest request accepted."
     else:
         reachable, reason = _source_reachable(source_type, source)
         if not reachable:
