@@ -444,6 +444,7 @@ def build_row_payload(row: Mapping[str, Any], source_channel: str) -> dict[str, 
         "owner": created_owner,
         "source_channel": source_channel,
         "text": row.get("content", ""),
+        "confidence": "low",  # populated by retrieve_thoughts after RRF fusion
     }
 
 
@@ -608,6 +609,35 @@ def _ts_query(query: str) -> str:
     return cleaned
 
 
+_RRF_K = 60  # standard RRF constant; higher = flatter score curve
+_LENGTH_PENALTY_THRESHOLD = 30  # words; below this, apply a length penalty
+_CONFIDENCE_HIGH_SCORE = 0.020  # RRF score threshold for "high" confidence
+_CONFIDENCE_HIGH_SEP = 0.004   # min gap between rank-1 and rank-2 for "high"
+_CONFIDENCE_HIGH_WORDS = 100   # min word count for "high"
+_CONFIDENCE_MED_SCORE = 0.012  # RRF score threshold for "medium" confidence
+
+
+def _word_count(text: str) -> int:
+    return len((text or "").split())
+
+
+def _confidence_label(
+    score: float,
+    second_score: float | None,
+    word_count: int,
+) -> str:
+    if word_count < _LENGTH_PENALTY_THRESHOLD or score < _CONFIDENCE_MED_SCORE:
+        return "low"
+    separation = (score - second_score) if second_score is not None else score
+    if (
+        score >= _CONFIDENCE_HIGH_SCORE
+        and separation >= _CONFIDENCE_HIGH_SEP
+        and word_count >= _CONFIDENCE_HIGH_WORDS
+    ):
+        return "high"
+    return "medium"
+
+
 def retrieve_thoughts(
     query: str,
     n_results: int,
@@ -624,7 +654,7 @@ def retrieve_thoughts(
     except Exception:
         vector_rows = []
 
-    keyword_rows = []
+    keyword_rows: list[dict[str, Any]] = []
     try:
         keyword_rows = search_keyword_candidates(query, owner, tenant_id, max_results)
     except Exception:
@@ -633,27 +663,56 @@ def retrieve_thoughts(
     if not keyword_rows and not vector_rows:
         return []
 
+    # --- Reciprocal Rank Fusion ---
+    # Build a map of doc_key → accumulated RRF score across both ranked lists.
+    # A document appearing in both lists gets contributions from each rank.
+    rrf_scores: dict[tuple[Any, Any], float] = {}
+    row_by_key: dict[tuple[Any, Any], dict[str, Any]] = {}
+
+    for rank, row in enumerate(keyword_rows):
+        key = (row.get("file"), row.get("source"))
+        rrf_scores[key] = rrf_scores.get(key, 0.0) + 1.0 / (_RRF_K + rank + 1)
+        row_by_key[key] = row
+
+    for rank, row in enumerate(vector_rows):
+        key = (row.get("file"), row.get("source"))
+        rrf_scores[key] = rrf_scores.get(key, 0.0) + 1.0 / (_RRF_K + rank + 1)
+        if key not in row_by_key:
+            row_by_key[key] = row
+
+    # Apply length penalty: docs with very short content are down-weighted
+    for key, row in row_by_key.items():
+        wc = _word_count(row.get("text", ""))
+        if wc < _LENGTH_PENALTY_THRESHOLD:
+            penalty = wc / _LENGTH_PENALTY_THRESHOLD  # 0.0–1.0
+            rrf_scores[key] *= penalty
+
+    # Sort by fused score descending
+    ranked_keys = sorted(rrf_scores, key=lambda k: rrf_scores[k], reverse=True)
+    ranked_keys = ranked_keys[:max_results]
+
+    # Compute confidence labels now that final ranking is known
+    top_score = rrf_scores[ranked_keys[0]] if ranked_keys else 0.0
+    second_score = rrf_scores[ranked_keys[1]] if len(ranked_keys) > 1 else None
+
     final: list[dict[str, Any]] = []
-    keyword_seen: set[tuple[Any, Any]] = set()
-    for row in keyword_rows:
-        key = (row.get("file"), row.get("source"))
-        if key in keyword_seen:
-            continue
-        keyword_seen.add(key)
+    for i, key in enumerate(ranked_keys):
+        row = dict(row_by_key[key])
+        row["score"] = rrf_scores[key]
+        wc = _word_count(row.get("text", ""))
+        if i == 0:
+            row["confidence"] = _confidence_label(top_score, second_score, wc)
+        elif i == 1:
+            row["confidence"] = _confidence_label(
+                rrf_scores[key],
+                rrf_scores[ranked_keys[2]] if len(ranked_keys) > 2 else None,
+                wc,
+            )
+        else:
+            row["confidence"] = _confidence_label(rrf_scores[key], None, wc)
         final.append(row)
-        if len(final) >= max_results:
-            break
 
-    for row in vector_rows:
-        key = (row.get("file"), row.get("source"))
-        if key in keyword_seen:
-            continue
-        keyword_seen.add(key)
-        final.append(row)
-        if len(final) >= max_results:
-            break
-
-    return final[:max_results]
+    return final
 
 
 def run_tutor_payload(
@@ -731,9 +790,16 @@ def query_payload(
         tutor_packet,
     ) = run_tutor_payload(query, mode, results, student_attempt)
 
+    top_two = results[:2]
+    query_confidence = next(
+        (r.get("confidence") for r in top_two if r.get("confidence") in ("high", "medium")),
+        "low",
+    )
+
     return 200, {
         "mode": normalized_mode,
         "question": query,
+        "query_confidence": query_confidence,
         "rules": tutor_packet.get("rules", []),
         "tutor_prompt": tutor_packet.get("tutor_prompt", ""),
         "context_used": context_chunks,
