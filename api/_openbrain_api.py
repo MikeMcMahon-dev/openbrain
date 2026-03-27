@@ -448,6 +448,35 @@ def build_row_payload(row: Mapping[str, Any], source_channel: str) -> dict[str, 
     }
 
 
+def log_error(
+    exc: BaseException,
+    path: str = "",
+    method: str = "",
+    request_id: str = "",
+) -> None:
+    """Write a structured error record to public.error_log.
+    Never raises — logging must not mask the original error.
+    """
+    import traceback as _tb
+
+    exc_type = type(exc).__name__
+    exc_message = str(exc)
+    tb_text = _tb.format_exc()
+
+    try:
+        with connect(_db_conninfo(), row_factory=dict_row, autocommit=True) as conn:
+            conn.execute(
+                """
+                INSERT INTO public.error_log
+                    (path, method, exc_type, exc_message, traceback, request_id)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                """,
+                [path, method, exc_type, exc_message, tb_text, request_id],
+            )
+    except Exception:
+        pass  # silently swallow — logging failure must never surface to caller
+
+
 def source_reference(row: Mapping[str, Any]) -> str:
     pieces = []
     if row.get("source_type"):
