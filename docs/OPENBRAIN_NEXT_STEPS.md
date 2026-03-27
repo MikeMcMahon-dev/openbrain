@@ -171,7 +171,14 @@ Replaced naive keyword-first merge with Reciprocal Rank Fusion (RRF) + length pe
 - **Confidence score**: every result carries `confidence: high | medium | low`. Top-level `query_confidence` added to query API response so GPTs and callers know when to caveat answers.
 - **Test harness**: `scripts/test_query_harness.py` — 1000-query suite, vault + adversarial + naive queries. Pass criteria: ≥90% relevancy in position 1 or 2.
 - **Results log**: `scripts/query_test_results.md` — timestamped per run, tracks improvement across iterations.
-- Baseline result: **97% at 100 queries**, full 1000-query run in progress.
+- Baseline result: **97% at 100 queries, 96.9% at 1000 queries**. Certified trustworthy.
+
+## Step 10 – Production Hardening (Complete 2026-03-27)
+
+- **Vercel runtime fix** (`api/index.py`): Vercel silently updated `@vercel/python` to detect ASGI/WSGI apps by name. Renamed `from api import app` → `from api.app import handler as _route` to eliminate the name collision. All Python functions were returning 500 until this was deployed.
+- **Application-level error logging**: `log_error()` in `_openbrain_api.py` writes structured error records (path, method, exc_type, traceback, Vercel request_id) to `public.error_log` with autocommit. `api/index.py` wraps every request in try/except that calls `log_error` before re-raising. `scripts/error_log.py` provides CLI access (`--hours`, `--tail`, `--full`).
+- **GPT confidence instructions**: All three Custom GPT system prompts updated to act on `query_confidence` field — high/medium/low each produce distinct user-facing behavior. Annie's prompt additionally enforces consistent tutor voice on web-sourced answers.
+- **Supabase anon key lockdown**: `REVOKE ALL ON public.error_log FROM anon/authenticated` applied to match `thoughts` table lockdown.
 
 ---
 
