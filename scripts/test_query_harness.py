@@ -557,6 +557,30 @@ def write_results_md(runs: list[dict]) -> None:
     print(f"Results written to {path}")
 
 
+def append_eval_history(runs: list[dict]) -> None:
+    """Append retrieval harness run summary to shared eval_history.md."""
+    history_path = Path(__file__).parent / "eval_history.md"
+    for run in runs:
+        timestamp = run.get("timestamp", datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"))
+        n = run["total"]
+        pass_rate = run["pass_rate"]
+        entry_lines = [
+            f"\n## {timestamp} | query_harness | n={n}",
+            f"- Pass rate / avg fidelity: {pass_rate:.1%}",
+            f"- Model versions: generator=N/A (retrieval only), judge_a=N/A, judge_b=N/A",
+            f"- Disagreements: N/A",
+            f"- Flags: bias_flags={run.get('bias_flags', 0)}, failures={run.get('failures', 0)}",
+        ]
+        entry = "\n".join(entry_lines) + "\n"
+        if history_path.exists():
+            with open(history_path, "a") as f:
+                f.write(entry)
+        else:
+            header = "# Eval History\n\nShared log for all OpenBrain evaluation harnesses.\n"
+            history_path.write_text(header + entry)
+    print(f"Eval history appended to {history_path}")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--n", type=int, default=None, help="Limit to first N test cases")
@@ -582,6 +606,7 @@ if __name__ == "__main__":
         "changes": "baseline: RRF fusion (k=60), length penalty (threshold=30 words), confidence scoring",
     }
     write_results_md([run_record])
+    append_eval_history([run_record])
 
     if results["pass_rate"] >= 0.90:
         print(f"✓ PASS: {results['pass_rate']:.1%} ≥ 90% target")
