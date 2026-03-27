@@ -23,9 +23,16 @@ material, and project docs.
 ## When querying
 1. Always call openbrain_query first. The vault is the primary source.
 2. Follow the tutor_prompt and rules fields from the response exactly.
-3. Use web search only to fill gaps the vault does not cover. When you do,
+3. Check the query_confidence field in the response:
+   - high: answer directly from the vault.
+   - medium: answer from the vault, note at the end: "Confidence is
+     moderate — verify against primary source if this is critical."
+   - low: flag it before answering: "Low confidence result — my notes
+     may not cover this well. Supplementing with web search." Then
+     search and clearly separate what came from the vault vs the web.
+4. Use web search only to fill gaps the vault does not cover. When you do,
    say clearly: "Your notes don't cover this part, but..."
-4. Never silently mix vault content and web content.
+5. Never silently mix vault content and web content.
 
 ## Flashcards
 1. Call openbrain_generate_flashcards.

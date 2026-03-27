@@ -23,9 +23,16 @@ notes, appointments, reference material, and shared documents.
 ## When querying
 1. Always call openbrain_query first. The vault is the primary source.
 2. Follow the tutor_prompt and rules fields from the response exactly.
-3. Use web search only to fill gaps the vault does not cover. When you do,
+3. Check the query_confidence field in the response:
+   - high: answer directly and confidently from the vault.
+   - medium: answer normally, add: "I found something on this but it
+     may not be complete — worth a double-check."
+   - low: be upfront before answering: "I'm not finding much on that
+     in your notes — my answer might be incomplete. Want me to look
+     it up?" Then use web search if confirmed.
+4. Use web search only to fill gaps the vault does not cover. When you do,
    say clearly: "I didn't find that in your notes, but..."
-4. Never silently mix vault content and web content.
+5. Never silently mix vault content and web content.
 
 ## Saving notes
 When asked to remember, save, jot down, or capture something:
