@@ -182,6 +182,31 @@ Replaced naive keyword-first merge with Reciprocal Rank Fusion (RRF) + length pe
 
 ---
 
+## Step 11 – Dual-Judge Answer Fidelity Eval Harness (Complete 2026-03-26)
+
+Built `scripts/test_answer_fidelity.py` — a 25-case eval harness that measures answer quality end-to-end, distinct from retrieval quality:
+
+- **Generator**: `claude-haiku-4-5-20251001` simulates the GPT layer — generates answers from retrieved chunks only.
+- **Judge A**: `claude-sonnet-4-6` (Anthropic) scores fidelity 0.0–1.0, hallucination true/false, confidence, reasoning.
+- **Judge B**: `gpt-4o` (OpenAI, key loaded from agent-lab) provides independent second opinion.
+- **Agreement logic**: both judges within 0.15 fidelity + matching hallucination flag = high-confidence result. Divergence beyond that threshold triggers human review flag.
+- **Escalation rule**: if non-adversarial disagreement rate exceeds 30%, harness warns and documents before proceeding.
+- **25 test cases**: 10 Mike infra (validated against vault + HashiCorp/RedHat docs), 10 Annie study (vault only), 5 adversarial hallucination traps (designed to detect made-up facts for questions not in brain).
+- **Graceful degradation**: if OpenAI key unavailable, runs in single-judge mode with results flagged accordingly.
+- **Shared eval history**: both harnesses append to `scripts/eval_history.md` for cross-run tracking.
+- **Baseline results**: see `scripts/answer_fidelity_results.md`.
+- **Methodology**: see `docs/EVAL_METHODOLOGY.md`.
+
+Files added/modified:
+- `scripts/test_answer_fidelity.py` — main harness
+- `scripts/answer_fidelity_results.md` — per-run results
+- `scripts/eval_history.md` — shared history log
+- `scripts/test_query_harness.py` — updated to append to eval_history.md
+- `docs/EVAL_METHODOLOGY.md` — dual-judge methodology documentation
+- `.env.local` — annotation confirming OPENAI_API_KEY is consumed from agent-lab, not stored here
+
+---
+
 ## Future Considerations
 
 ### Near-Term
