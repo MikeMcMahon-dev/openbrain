@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from http.server import BaseHTTPRequestHandler
 
-from api import app
+from api.app import handler as _route
 
 
 def _normalize_path(raw_path: str | None) -> str:
@@ -71,15 +71,15 @@ def _write_response(request: "handler", response: dict[str, object]) -> None:
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
         event = _build_event(self)
-        response = app.handler(event)
+        response = _route(event)
         _write_response(self, response)
 
     def do_POST(self):
         event = _build_event(self)
-        response = app.handler(event)
+        response = _route(event)
         _write_response(self, response)
 
     def do_OPTIONS(self):
         event = _build_event(self)
-        response = app.handler(event)
+        response = _route(event)
         _write_response(self, response)
