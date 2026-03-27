@@ -162,11 +162,48 @@ Immediate next actions:
 
 ---
 
+## Step 9 – Query Tuning + Confidence Scoring (Complete 2026-03-27)
+
+Replaced naive keyword-first merge with Reciprocal Rank Fusion (RRF) + length penalty:
+
+- **RRF fusion** (`k=60`): documents appearing in both keyword and vector lists get boosted; no channel unconditionally wins.
+- **Length penalty**: docs with <30 words are down-weighted proportionally — eliminates short-message noise (Slack, instruction snippets) dominating results.
+- **Confidence score**: every result carries `confidence: high | medium | low`. Top-level `query_confidence` added to query API response so GPTs and callers know when to caveat answers.
+- **Test harness**: `scripts/test_query_harness.py` — 1000-query suite, vault + adversarial + naive queries. Pass criteria: ≥90% relevancy in position 1 or 2.
+- **Results log**: `scripts/query_test_results.md` — timestamped per run, tracks improvement across iterations.
+- Baseline result: **97% at 100 queries**, full 1000-query run in progress.
+
+---
+
 ## Future Considerations
 
-- Add richer hybrid ranking and re-rankers in production query path.
-- Move metadata routing into shared retrieval abstractions.
-- Remove legacy-only assumptions once Vercel + Supabase parity is proven.
+### Near-Term
+
+- **Weekly query eval automation** — schedule `scripts/test_query_harness.py` to run every Thursday (100-query pass first, then 1000). Results appended to `scripts/query_test_results.md`. Alert if pass rate drops below 90%. Currently manual; target: Claude Code scheduled agent, then K8s CronJob.
+
+- **Study Buddy session auto-logging** — modify Annie's Custom GPT system prompt to automatically commit a structured session summary (topics covered, correct/incorrect/close items) to the brain at the end of every study session. Eliminates reliance on manual "commit to brain" prompts. Particularly important for test prep — captures performance data before memory fades.
+
+- **NVIDIA ticket automation** — near-term project, high personal impact. Build automated pipeline for NVIDIA support ticket ingestion and tracking.
+
+- **Annie's school content import** — ongoing, more material to ingest as school year continues. Coordinate when new content is available.
+
+- **Ingest Custom GPT share URLs** — once all three GPTs are confirmed stable long-term, ingest their share URLs into the brain for reference.
+
+### Medium-Term
+
+- **RLS Phase 2 enforcement** — proper row-level security in Supabase. Immediate mitigation (anon/authenticated role revocation) is in place. Full RLS is a separate project.
+
+- **DB health automation** — planned as K8s CronJob. Includes: duplicate detection, orphaned row cleanup, embedding coverage check. Separate project from OpenBrain core.
+
+- **Slack `/brain ask` interface** — surface brain queries directly from Slack without switching to ChatGPT. Was an original use case; revisit once core system is stable.
+
+### Long-Term / K8s Deployment Targets
+
+When a Claude agent is running on a K8s/Linux VM node, the following scripts are candidates for automated scheduling:
+
+- `scripts/rotate_tokens.py` — semi-annual bearer token rotation (Jan 1 / Jul 4). Only manual step remaining: update ChatGPT Custom GPT configs (no API available).
+- `scripts/test_query_harness.py` — weekly retrieval quality eval.
+- DB health checks — duplicate/orphan detection, embedding coverage.
 
 ---
 
