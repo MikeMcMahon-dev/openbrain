@@ -1,13 +1,14 @@
 from __future__ import annotations
 
+from api.chatgpt import handler as chatgpt_handler
+from api.claude import handler as claude_handler
+from api.cron_session_report import handler as cron_session_report_handler
 from api.generate_flashcards import handler as flashcards_handler
 from api.generate_quiz import handler as quiz_handler
 from api.health import handler as health_handler
 from api.ingest import handler as ingest_handler
 from api.query import handler as query_handler
 from api.search import handler as search_handler
-from api.chatgpt import handler as chatgpt_handler
-from api.claude import handler as claude_handler
 from api.session_report import handler as session_report_handler
 
 
@@ -66,6 +67,8 @@ def handler(request):
         return claude_handler(request, tool_mode="ingest")
     if path in {"/session_report", "/api/session_report"}:
         return session_report_handler(request)
+    if path in {"/api/cron/session_report"}:
+        return cron_session_report_handler(request)
 
     return {
         "statusCode": 404,

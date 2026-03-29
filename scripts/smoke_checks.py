@@ -237,7 +237,7 @@ def smoke_local(idempotency_source: str | None = None, idempotency_owner: str | 
                 "path": "/query",
                 "method": "POST",
                 "body": query_body,
-                "headers": {},
+                "headers": _auth,
             },
             200,
         ),
@@ -246,7 +246,7 @@ def smoke_local(idempotency_source: str | None = None, idempotency_owner: str | 
                 "path": "/api/query",
                 "method": "POST",
                 "body": query_body,
-                "headers": {},
+                "headers": _auth,
             },
             200,
         ),
@@ -255,7 +255,7 @@ def smoke_local(idempotency_source: str | None = None, idempotency_owner: str | 
                 "path": "/search",
                 "method": "POST",
                 "body": query_body,
-                "headers": {},
+                "headers": _auth,
             },
             200,
         ),
@@ -264,7 +264,7 @@ def smoke_local(idempotency_source: str | None = None, idempotency_owner: str | 
                 "path": "/api/search",
                 "method": "POST",
                 "body": query_body,
-                "headers": {},
+                "headers": _auth,
             },
             200,
         ),
@@ -309,7 +309,7 @@ def smoke_local(idempotency_source: str | None = None, idempotency_owner: str | 
                 "path": "/ingest",
                 "method": "POST",
                 "body": json.dumps({"source_type": "obsidian", "source": "/tmp"}),
-                "headers": {"Content-Type": "application/json"},
+                "headers": {"Content-Type": "application/json", **_auth},
             },
             200,
         ),
@@ -318,7 +318,7 @@ def smoke_local(idempotency_source: str | None = None, idempotency_owner: str | 
                 "path": "/api/ingest",
                 "method": "POST",
                 "body": json.dumps({"source_type": "obsidian", "source": "/tmp"}),
-                "headers": {"Content-Type": "application/json"},
+                "headers": {"Content-Type": "application/json", **_auth},
             },
             200,
             True,
@@ -333,6 +333,7 @@ def smoke_local(idempotency_source: str | None = None, idempotency_owner: str | 
                 "headers": {
                     "Content-Type": "application/json",
                     "x-openbrain-owner": "tenant-a-owner",
+                    **_auth,
                 },
             },
             200,
@@ -439,6 +440,48 @@ def smoke_local(idempotency_source: str | None = None, idempotency_owner: str | 
             200,
         ),
         ({"path": "/bogus-path", "method": "GET"}, 404),
+        # session_report — 400 when missing owner (auth passes first)
+        (
+            {
+                "path": "/session_report",
+                "method": "POST",
+                "body": json.dumps({"recipients": ["test@example.com"]}),
+                "headers": {"Content-Type": "application/json", **_auth},
+            },
+            400,
+        ),
+        # session_report — 400 when missing recipients
+        (
+            {
+                "path": "/session_report",
+                "method": "POST",
+                "body": json.dumps({"owner": "annie"}),
+                "headers": {"Content-Type": "application/json", **_auth},
+            },
+            400,
+        ),
+        # session_report — cross-tenant: mismatched owner → 403 when token map is active;
+        # 200 (skipped) when no token map configured (dev with no auth)
+        (
+            {
+                "path": "/session_report",
+                "method": "POST",
+                "body": json.dumps(
+                    {"owner": "nobody-has-this-owner-xyz", "recipients": ["test@example.com"]}
+                ),
+                "headers": {"Content-Type": "application/json", **_auth},
+            },
+            403 if os.getenv("OPENBRAIN_TOKEN_OWNER_MAP") else 200,
+        ),
+        # cron endpoint — 200 with no REPORT_CONFIGS set (returns skipped)
+        (
+            {
+                "path": "/api/cron/session_report",
+                "method": "GET",
+                "headers": {},
+            },
+            200,
+        ),
     ]
 
     failed = 0
@@ -569,6 +612,35 @@ def smoke_live(base_url: str) -> int:
             {"input": {"query": "terraform"}},
             401,
             {"Authorization": "Bearer invalid-token"},
+        ),
+        # session_report — missing owner → 400
+        (
+            "/session_report",
+            {"recipients": ["test@example.com"]},
+            400,
+            _auth,
+        ),
+        # session_report — missing recipients → 400
+        (
+            "/session_report",
+            {"owner": "annie"},
+            400,
+            _auth,
+        ),
+        # session_report — valid request; no DB rows for smoke-test-owner → 200 skipped
+        (
+            "/session_report",
+            {"owner": "smoke-test-owner", "recipients": ["test@example.com"]},
+            200,
+            _auth,
+        ),
+        # session_report — cross-tenant: if TOKEN_OWNER_MAP is set, wrong owner → 403
+        # (skipped when no token map configured)
+        # cron endpoint — no REPORT_CONFIGS → 200 skipped
+        (
+            "/api/cron/session_report",
+            None,
+            200,
         ),
     ]
 

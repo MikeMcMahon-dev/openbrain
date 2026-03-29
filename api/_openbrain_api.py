@@ -148,13 +148,60 @@ def validate_method(method: str) -> bool:
     return method.upper() in {"GET", "POST", "OPTIONS"}
 
 
+def _get_token_owner_map() -> dict[str, str]:
+    """Load OPENBRAIN_TOKEN_OWNER_MAP — JSON mapping token → owner string."""
+    raw = os.getenv("OPENBRAIN_TOKEN_OWNER_MAP", "").strip()
+    if not raw:
+        return {}
+    try:
+        result = json.loads(raw)
+        return result if isinstance(result, dict) else {}
+    except Exception:
+        return {}
+
+
+def _require_tool_auth(
+    metadata: Mapping[str, Any] | None,
+) -> tuple[bool, str | None, str | None]:
+    """Validate the bearer token from request headers.
+
+    Returns (authorized, error_reason, resolved_owner).
+    resolved_owner is set when the token maps to a specific owner via
+    OPENBRAIN_TOKEN_OWNER_MAP; None means use the deployment default.
+    """
+    access_token = os.getenv("OPENBRAIN_TOOL_ACCESS_TOKEN")
+    token_map = _get_token_owner_map()
+
+    if not access_token and not token_map:
+        return True, None, None
+
+    headers = _stringify_headers(metadata.get("headers") if isinstance(metadata, Mapping) else None)
+    candidate = (
+        headers.get("authorization")
+        or headers.get("x-openbrain-tool-token")
+        or headers.get("x-openbrain-tool-key")
+    )
+
+    if not candidate:
+        return False, "Tool access token required.", None
+
+    if candidate.lower().startswith("bearer "):
+        candidate = candidate.split(" ", 1)[1].strip()
+
+    if token_map and candidate in token_map:
+        return True, None, token_map[candidate]
+
+    if access_token and candidate == access_token:
+        return True, None, None
+
+    return False, "Invalid tool access token.", None
+
+
 def require_auth(metadata: dict[str, Any]) -> dict[str, Any] | None:
     """Return a 401 response payload if auth fails, None if auth passes.
 
     Drop-in guard for raw endpoints that previously had no auth check.
-    Behaviour mirrors chatgpt.py: passes through when no tokens are configured
-    (dev/local), enforces token when OPENBRAIN_TOOL_ACCESS_TOKEN or
-    OPENBRAIN_TOKEN_OWNER_MAP is set.
+    Passes through when no tokens are configured (dev/local).
     """
     is_authorized, reason, _owner = _require_tool_auth(metadata)
     if not is_authorized:
@@ -167,6 +214,23 @@ def require_auth(metadata: dict[str, Any]) -> dict[str, Any] | None:
             },
         )
     return None
+
+
+def require_auth_owner(
+    metadata: dict[str, Any],
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Like require_auth, but also returns the token-resolved owner.
+
+    Returns (error_response | None, resolved_owner | None).
+    Use when the endpoint needs to bind owner to the token identity.
+    """
+    is_authorized, reason, resolved_owner = _require_tool_auth(metadata)
+    if not is_authorized:
+        return (
+            response_payload(401, {"error": "unauthorized", "message": reason, "status": 401}),
+            None,
+        )
+    return None, resolved_owner
 
 
 def _stringify_headers(headers: Any) -> dict[str, str]:

@@ -1,5 +1,11 @@
 {
   "version": 2,
+  "crons": [
+    {
+      "path": "/api/cron/session_report",
+      "schedule": "0 21 * * *"
+    }
+  ],
   "builds": [
     {
       "src": "api/index.py",

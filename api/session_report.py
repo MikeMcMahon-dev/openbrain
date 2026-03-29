@@ -10,7 +10,7 @@ from typing import Any
 from api._openbrain_api import (
     _db_conninfo,
     parse_request,
-    require_auth,
+    require_auth_owner,
     response_payload,
 )
 
@@ -155,7 +155,7 @@ def handler(request) -> dict[str, Any]:
     if metadata["method"] != "POST":
         return response_payload(405, {"error": "method_not_allowed", "status": 405})
 
-    auth_error = require_auth(metadata)
+    auth_error, token_owner = require_auth_owner(metadata)
     if auth_error:
         return auth_error
 
@@ -170,7 +170,19 @@ def handler(request) -> dict[str, Any]:
     if not owner:
         return response_payload(400, {"error": "validation_error", "message": "owner is required.", "status": 400})
     if not isinstance(recipients, list) or not recipients:
-        return response_payload(400, {"error": "validation_error", "message": "recipients must be a non-empty list.", "status": 400})
+        return response_payload(400, {
+            "error": "validation_error",
+            "message": "recipients must be a non-empty list.",
+            "status": 400,
+        })
+
+    # If the token resolves to a specific owner, enforce it — prevent cross-tenant reads.
+    if token_owner and owner != token_owner:
+        return response_payload(403, {
+            "error": "forbidden",
+            "message": "Token is not authorized for this owner.",
+            "status": 403,
+        })
 
     rows = _fetch_session_rows(owner, date)
     if not rows:

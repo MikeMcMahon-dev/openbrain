@@ -1,73 +1,16 @@
 from __future__ import annotations
 
-import json as _json
-import os
 from collections.abc import Mapping
 from typing import Any
 
-from api._openbrain_api import ingest_payload, parse_request, query_payload, response_payload, validate_method
-
-
-def _stringify_headers(headers: Any) -> dict[str, str]:
-    if not isinstance(headers, Mapping):
-        return {}
-
-    normalized: dict[str, str] = {}
-    for key, value in headers.items():
-        if not isinstance(key, str):
-            continue
-        normalized[key.lower()] = str(value) if value is not None else ""
-    return normalized
-
-
-def _get_token_owner_map() -> dict[str, str]:
-    """Load OPENBRAIN_TOKEN_OWNER_MAP — JSON mapping token → owner string."""
-    raw = os.getenv("OPENBRAIN_TOKEN_OWNER_MAP", "").strip()
-    if not raw:
-        return {}
-    try:
-        result = _json.loads(raw)
-        return result if isinstance(result, dict) else {}
-    except Exception:
-        return {}
-
-
-def _require_tool_auth(metadata: Mapping[str, Any] | None) -> tuple[bool, str | None, str | None]:
-    """
-    Validate the bearer token from request headers.
-
-    Returns (authorized, error_reason, resolved_owner).
-    resolved_owner is set when the token maps to a specific owner via
-    OPENBRAIN_TOKEN_OWNER_MAP; None means use the deployment default.
-    """
-    access_token = os.getenv("OPENBRAIN_TOOL_ACCESS_TOKEN")
-    token_map = _get_token_owner_map()
-
-    if not access_token and not token_map:
-        return True, None, None
-
-    headers = _stringify_headers(metadata.get("headers") if isinstance(metadata, Mapping) else None)
-    candidate = (
-        headers.get("authorization")
-        or headers.get("x-openbrain-tool-token")
-        or headers.get("x-openbrain-tool-key")
-    )
-
-    if not candidate:
-        return False, "Tool access token required.", None
-
-    if candidate.startswith("Bearer ") or candidate.startswith("bearer "):
-        candidate = candidate.split(" ", 1)[1].strip()
-
-    # Per-user token map takes priority — resolves both auth and owner.
-    if token_map and candidate in token_map:
-        return True, None, token_map[candidate]
-
-    # Fall back to shared token (admin / legacy use).
-    if access_token and candidate == access_token:
-        return True, None, None
-
-    return False, "Invalid tool access token.", None
+from api._openbrain_api import (
+    _require_tool_auth,
+    ingest_payload,
+    parse_request,
+    query_payload,
+    response_payload,
+    validate_method,
+)
 
 
 def _inject_token_owner(metadata: dict[str, Any], owner: str) -> None:

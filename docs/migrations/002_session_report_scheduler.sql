@@ -1,37 +1,35 @@
--- Migration 002: nightly session report scheduler via Supabase pg_cron
--- Run in Supabase SQL Editor
--- Requires pg_cron extension (enabled by default on Supabase).
+-- Migration 002: nightly session report scheduler
+-- DEPRECATED — replaced by Vercel Cron Jobs (vercel.json crons config)
 --
--- This fires nightly at 21:00 UTC (3pm MDT / 4pm MDT summer).
--- Calls the Vercel session_report endpoint for each configured child owner.
--- Skips silently if no queries were logged that day (handled by the endpoint).
+-- The original pg_cron approach required enabling the pg_cron extension in
+-- Supabase (Database → Extensions), which is not enabled by default.
 --
--- Prerequisites:
---   1. RESEND_API_KEY set in Vercel environment variables
---   2. RESEND_FROM_EMAIL set in Vercel environment variables
---   3. OPENBRAIN_TOOL_ACCESS_TOKEN set (used as bearer token below)
---   4. 001_query_log.sql migration has been run
+-- The replacement uses Vercel's native cron job support:
+--   - Schedule defined in vercel.json: "crons": [{"path": "/api/cron/session_report", "schedule": "0 21 * * *"}]
+--   - Handler: api/cron_session_report.py
+--   - Auth: CRON_SECRET env var (set automatically by Vercel)
+--   - Config: REPORT_CONFIGS env var — JSON array of {owner, recipients}
+--     e.g. [{"owner": "annie", "recipients": ["mike@example.com"]}]
 --
--- Replace the placeholder values before running:
---   <VERCEL_URL>        e.g. openbrain-rouge.vercel.app
---   <PARENT_API_TOKEN>  value of OPENBRAIN_TOOL_ACCESS_TOKEN
---   <PARENT_EMAIL>      where reports should be sent
-
-SELECT cron.schedule(
-  'annie-nightly-session-report',
-  '0 21 * * *',
-  $$
-  SELECT net.http_post(
-    url := 'https://<VERCEL_URL>/session_report',
-    headers := jsonb_build_object(
-      'Content-Type', 'application/json',
-      'Authorization', 'Bearer <PARENT_API_TOKEN>'
-    ),
-    body := jsonb_build_object(
-      'report_type', 'study_session',
-      'owner', 'annie',
-      'recipients', jsonb_build_array('<PARENT_EMAIL>')
-    )
-  );
-  $$
-);
+-- No SQL migration is required. Set REPORT_CONFIGS in Vercel environment variables.
+--
+-- Original pg_cron approach (kept for reference):
+--
+-- SELECT cron.schedule(
+--   'annie-nightly-session-report',
+--   '0 21 * * *',
+--   $$
+--   SELECT net.http_post(
+--     url := 'https://<VERCEL_URL>/session_report',
+--     headers := jsonb_build_object(
+--       'Content-Type', 'application/json',
+--       'Authorization', 'Bearer <PARENT_API_TOKEN>'
+--     ),
+--     body := jsonb_build_object(
+--       'report_type', 'study_session',
+--       'owner', 'annie',
+--       'recipients', jsonb_build_array('<PARENT_EMAIL>')
+--     )
+--   );
+--   $$
+-- );
