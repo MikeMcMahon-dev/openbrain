@@ -546,20 +546,20 @@ def smoke_live(base_url: str) -> int:
         ("/", None, 200),
         ("/health", None, 200),
         ("/api/health", None, 200),
-        ("/query", {"query": "test"}, 200),
-        ("/api/query", {"query": "test"}, 200),
-        ("/search", {"query": "test"}, 200),
-        ("/api/search", {"query": "test"}, 200),
+        ("/query", {"query": "test"}, 200, _auth),
+        ("/api/query", {"query": "test"}, 200, _auth),
+        ("/search", {"query": "test"}, 200, _auth),
+        ("/api/search", {"query": "test"}, 200, _auth),
         ("/generate_quiz", {"query": "test"}, 200),
         ("/api/generate_quiz", {"query": "test"}, 200),
         ("/generate_flashcards", {"query": "test"}, 200),
         ("/api/generate_flashcards", {"query": "test"}, 200),
-        ("/ingest", {"source_type": "obsidian", "source": "/tmp"}, 200),
+        ("/ingest", {"source_type": "obsidian", "source": "/tmp"}, 200, _auth),
         (
             "/api/ingest",
             {"source_type": "obsidian", "source": "/tmp", "owner": "evil-user"},
             200,
-            {"x-openbrain-owner": "tenant-a-owner"},
+            {"x-openbrain-owner": "tenant-a-owner", **_auth},
             "tenant-a-owner",
         ),
         ("/openbrain_query", {"query": "test"}, 200, _auth),
@@ -627,15 +627,14 @@ def smoke_live(base_url: str) -> int:
             400,
             _auth,
         ),
-        # session_report — valid request; no DB rows for smoke-test-owner → 200 skipped
+        # session_report — cross-tenant guard: mismatched owner → 403
+        # (confirms TOKEN_OWNER_MAP enforcement is active in production)
         (
             "/session_report",
-            {"owner": "smoke-test-owner", "recipients": ["test@example.com"]},
-            200,
+            {"owner": "nobody-has-this-owner-xyz", "recipients": ["test@example.com"]},
+            403,
             _auth,
         ),
-        # session_report — cross-tenant: if TOKEN_OWNER_MAP is set, wrong owner → 403
-        # (skipped when no token map configured)
         # cron endpoint — no REPORT_CONFIGS → 200 skipped
         (
             "/api/cron/session_report",
