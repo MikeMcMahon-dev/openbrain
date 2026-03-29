@@ -8,6 +8,7 @@ from api.query import handler as query_handler
 from api.search import handler as search_handler
 from api.chatgpt import handler as chatgpt_handler
 from api.claude import handler as claude_handler
+from api.session_report import handler as session_report_handler
 
 
 def _extract_path(request) -> str:
@@ -63,6 +64,8 @@ def handler(request):
         return claude_handler(request, tool_mode="generate_flashcards")
     if path in {"/claude_ingest", "/tools/claude_ingest"}:
         return claude_handler(request, tool_mode="ingest")
+    if path in {"/session_report", "/api/session_report"}:
+        return session_report_handler(request)
 
     return {
         "statusCode": 404,
