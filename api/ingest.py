@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from api._openbrain_api import ingest_payload, parse_request, response_payload
+from api._openbrain_api import ingest_payload, parse_request, require_auth, response_payload
 
 
 def handler(request):
@@ -18,6 +18,10 @@ def handler(request):
                 "status": 405,
             },
         )
+
+    auth_error = require_auth(metadata)
+    if auth_error:
+        return auth_error
 
     status, body = ingest_payload(payload, metadata)
     return response_payload(status, body)
