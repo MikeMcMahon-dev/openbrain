@@ -1159,7 +1159,8 @@ _INJECTION_PATTERNS = re.compile(
     r"ignore|forget|pretend|act\s+as|system\s+prompt|new\s+rule|"
     r"permission|granted|allowed\s+to|without\s+restriction|"
     r"don.?t\s+log|disable|turn\s+off|bypass|override|jailbreak|"
-    r"my\s+mom\s+said|my\s+dad\s+said|my\s+parent"
+    r"my\s+mom\s+said|my\s+dad\s+said|my\s+parent|"
+    r"instruction[s]?"
     r")\b",
     re.IGNORECASE,
 )
