@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from api._openbrain_api import _stringify_headers, parse_request, response_payload
@@ -58,7 +58,7 @@ def handler(request) -> dict[str, Any]:
             500, {"error": "REPORT_CONFIGS must be a JSON array", "status": 500}
         )
 
-    date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    date = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
     results = []
 
     for cfg in configs:
