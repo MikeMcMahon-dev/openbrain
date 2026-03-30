@@ -43,7 +43,40 @@ def _fetch_session_rows(owner: str, date: str) -> list[dict[str, Any]]:
         return []
 
 
-def _build_report_html(owner: str, date: str, rows: list[dict[str, Any]]) -> str:
+def _fetch_study_notes(owner: str, date: str) -> list[dict[str, Any]]:
+    """Pull thoughts rows for owner on a given date (YYYY-MM-DD)."""
+    if connect is None:
+        return []
+    try:
+        with connect(_db_conninfo(), row_factory=dict_row) as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    content,
+                    metadata->>'subject' AS subject,
+                    metadata->>'topic'   AS topic,
+                    created_at
+                FROM public.thoughts
+                WHERE LOWER(COALESCE(created_by_user_login, metadata->>'owner', '')) = LOWER(%s)
+                  AND created_at::date = %s::date
+                ORDER BY created_at ASC
+                """,
+                [owner, date],
+            ).fetchall()
+        return [dict(r) for r in rows]
+    except Exception:
+        return []
+
+
+def _build_report_html(
+    owner: str,
+    date: str,
+    rows: list[dict[str, Any]],
+    notes: list[dict[str, Any]] | None = None,
+) -> str:
+    if notes is None:
+        notes = []
+
     total = len(rows)
     flagged = [r for r in rows if r.get("flagged")]
     modes = {}
@@ -68,6 +101,26 @@ def _build_report_html(owner: str, date: str, rows: list[dict[str, Any]]) -> str
         last_ts = ts
 
     mode_summary = ", ".join(f"{m}: {c}" for m, c in sorted(modes.items()))
+
+    # Study notes section
+    notes_section = ""
+    if notes:
+        cards = ""
+        for n in notes:
+            subject = n.get("subject") or ""
+            topic = n.get("topic") or ""
+            ts = str(n.get("created_at", ""))[:19]
+            content = (n.get("content") or "").replace("&", "&amp;").replace("<", "&lt;")
+            label = " · ".join(x for x in [subject, topic] if x)
+            cards += f"""
+            <div style="border:1px solid #ddd;border-radius:4px;padding:12px;margin-bottom:12px;">
+              <div style="font-size:0.8em;color:#666;margin-bottom:6px;">{ts} UTC
+                {f'&nbsp;·&nbsp;<strong>{label}</strong>' if label else ''}</div>
+              <pre style="white-space:pre-wrap;font-family:sans-serif;margin:0;font-size:0.9em"
+              >{content}</pre>
+            </div>"""
+        notes_section = f"<h3>Study Session Notes ({len(notes)})</h3>{cards}"
+
     flag_section = ""
     if flagged:
         items = "".join(
@@ -80,30 +133,37 @@ def _build_report_html(owner: str, date: str, rows: list[dict[str, Any]]) -> str
         <ul>{items}</ul>
         """
 
-    query_list = "".join(
-        f"<li style='color:{'#c0392b' if r.get('flagged') else '#333'}'>"
-        f"{str(r.get('created_at',''))[:19]} | {r.get('mode','?')} | "
-        f"{r.get('result_count',0)} results — {(r.get('query_text') or '')[:100]}"
-        f"{'  ⚠' if r.get('flagged') else ''}</li>"
-        for r in rows
-    )
+    query_section = ""
+    if rows:
+        query_list = "".join(
+            f"<li style='color:{'#c0392b' if r.get('flagged') else '#333'}'>"
+            f"{str(r.get('created_at',''))[:19]} | {r.get('mode','?')} | "
+            f"{r.get('result_count',0)} results — {(r.get('query_text') or '')[:100]}"
+            f"{'  ⚠' if r.get('flagged') else ''}</li>"
+            for r in rows
+        )
+        query_section = f"""
+        {flag_section}
+        <h3>Brain Queries ({total})</h3>
+        <ul style="font-size:0.85em">{query_list}</ul>"""
 
     return f"""
     <html><body style="font-family:sans-serif;max-width:700px;margin:auto;">
     <h2>Study Session Report — {owner} — {date}</h2>
     <table style="border-collapse:collapse;width:100%">
-      <tr><td style="padding:6px;border:1px solid #ddd"><strong>Total queries</strong></td>
+      <tr><td style="padding:6px;border:1px solid #ddd"><strong>Study notes</strong></td>
+          <td style="padding:6px;border:1px solid #ddd">{len(notes)}</td></tr>
+      <tr><td style="padding:6px;border:1px solid #ddd"><strong>Brain queries</strong></td>
           <td style="padding:6px;border:1px solid #ddd">{total}</td></tr>
-      <tr><td style="padding:6px;border:1px solid #ddd"><strong>Sessions</strong></td>
+      <tr><td style="padding:6px;border:1px solid #ddd"><strong>Query sessions</strong></td>
           <td style="padding:6px;border:1px solid #ddd">{sessions}</td></tr>
       <tr><td style="padding:6px;border:1px solid #ddd"><strong>Modes</strong></td>
           <td style="padding:6px;border:1px solid #ddd">{mode_summary or 'n/a'}</td></tr>
       <tr><td style="padding:6px;border:1px solid #ddd"><strong>Flagged</strong></td>
           <td style="padding:6px;border:1px solid #ddd">{len(flagged)}</td></tr>
     </table>
-    {flag_section}
-    <h3>Query Log</h3>
-    <ul style="font-size:0.85em">{query_list or '<li>No queries found.</li>'}</ul>
+    {notes_section}
+    {query_section}
     <p style="color:#999;font-size:0.75em">Generated by OpenBrain session reporter</p>
     </body></html>
     """
@@ -185,16 +245,18 @@ def handler(request) -> dict[str, Any]:
         })
 
     rows = _fetch_session_rows(owner, date)
-    if not rows:
+    notes = _fetch_study_notes(owner, date)
+    if not rows and not notes:
         return response_payload(200, {
             "status": "skipped",
-            "message": f"No query_log entries for {owner} on {date}.",
+            "message": f"No activity for {owner} on {date}.",
             "owner": owner,
             "date": date,
             "query_count": 0,
+            "note_count": 0,
         })
 
-    html = _build_report_html(owner, date, rows)
+    html = _build_report_html(owner, date, rows, notes)
     subject = f"[OpenBrain] {report_type.replace('_', ' ').title()} — {owner} — {date}"
     sent, detail = _send_email(recipients, subject, html)
 
@@ -203,6 +265,7 @@ def handler(request) -> dict[str, Any]:
         "owner": owner,
         "date": date,
         "query_count": len(rows),
+        "note_count": len(notes),
         "recipients": recipients,
         "resend_id": detail if sent else None,
         "error": None if sent else detail,

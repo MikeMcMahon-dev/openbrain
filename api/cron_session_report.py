@@ -6,7 +6,7 @@ Vercel sets CRON_SECRET automatically and sends it as:
 REPORT_CONFIGS env var: JSON array of {"owner": "...", "recipients": ["..."]}
     e.g. [{"owner": "annie", "recipients": ["mike@example.com"]}]
 
-Schedule is defined in vercel.json crons config (currently 0 21 * * * = 9pm UTC).
+Schedule is defined in vercel.json crons config (currently 0 3 * * * = 9pm MDT / 3am UTC).
 """
 from __future__ import annotations
 
@@ -16,7 +16,12 @@ from datetime import datetime, timezone
 from typing import Any
 
 from api._openbrain_api import _stringify_headers, parse_request, response_payload
-from api.session_report import _build_report_html, _fetch_session_rows, _send_email
+from api.session_report import (
+    _build_report_html,
+    _fetch_session_rows,
+    _fetch_study_notes,
+    _send_email,
+)
 
 
 def handler(request) -> dict[str, Any]:
@@ -70,17 +75,19 @@ def handler(request) -> dict[str, Any]:
             continue
 
         rows = _fetch_session_rows(owner, date)
-        if not rows:
-            results.append({"owner": owner, "status": "skipped", "query_count": 0})
+        notes = _fetch_study_notes(owner, date)
+        if not rows and not notes:
+            results.append({"owner": owner, "status": "skipped", "query_count": 0, "note_count": 0})
             continue
 
-        html = _build_report_html(owner, date, rows)
+        html = _build_report_html(owner, date, rows, notes)
         subject = f"[OpenBrain] Study Session — {owner} — {date}"
         sent, detail = _send_email(recipients, subject, html)
         results.append({
             "owner": owner,
             "status": "sent" if sent else "email_failed",
             "query_count": len(rows),
+            "note_count": len(notes),
             "recipients": recipients,
             "resend_id": detail if sent else None,
             "error": None if sent else detail,
