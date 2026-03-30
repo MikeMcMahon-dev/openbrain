@@ -51,22 +51,29 @@ Current status:
 
 ### 4) Query/Generation behavior
 
-- `POST /query`, `/api/query` return valid tutor payload.
-- `POST /search`, `/api/search` return valid result envelope.
+- `POST /query`, `/api/query` return valid tutor payload. **Auth required** (Bearer token).
+- `POST /search`, `/api/search` return valid result envelope. **Auth required** (Bearer token).
 - `POST /generate_quiz`, `/api/generate_quiz` works.
 - `POST /generate_flashcards`, `/api/generate_flashcards` works.
 - `/openbrain_query`, `/openbrain_generate_quiz`, `/openbrain_generate_flashcards`, `/openbrain_ingest` are live and auth-gated (Bearer token required).
 - `/claude_query`, `/claude_generate_quiz`, `/claude_generate_flashcards`, `/claude_ingest` are live (Claude tool_use envelope).
 - `GET` responses remain method-restricted (`405`) where not supported.
 
-### 5) Vercel App Surface
+### 5) Reporting
+
+- `POST /session_report` — requires Bearer token; returns 400 (missing owner/recipients), 403 (cross-tenant), 200 (sent or skipped).
+- `GET /api/cron/session_report` — auth via `CRON_SECRET`; returns 200 with results array or skipped status.
+- `REPORT_CONFIGS` env var configured with owner + recipient list.
+- Vercel cron job visible in dashboard → Cron Jobs tab after deploy to `main`.
+
+### 6) Vercel App Surface
 
 - `GET /` loads the web UI.
 - Core UI actions hit header-scoped API endpoints.
 - Legacy paths remain routed and functionally equivalent to `/api/*` versions:
   - `/query`, `/search`, `/generate_quiz`, `/generate_flashcards`, `/ingest`.
 
-### 6) Error and Recovery
+### 7) Error and Recovery
 
 - Bad input returns a JSON error payload and non-200 status.
 - 500 cases are visible in Vercel logs with clear traces.
@@ -86,7 +93,7 @@ Current status:
 
 - RLS migration objects applied.
 - Header-driven tenant context validated in integration checks.
-- No cross-tenant leakage in representative demo paths.
+- Cross-tenant read prevention enforced via `TOKEN_OWNER_MAP` — validated in smoke (403 on mismatch). ✓
 - Manual import path documented and successfully tested.
 
 ---
