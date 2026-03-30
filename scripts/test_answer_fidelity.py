@@ -418,10 +418,12 @@ def parse_judge_response(raw: str) -> dict:
             "reasoning": str(data.get("reasoning", "")),
         }
     except Exception:
+        # Parse errors are NOT hallucination signals — flag as parse_error so
+        # disagreement detection treats this as a false positive, not a real flag.
         return {
-            "fidelity_score": 0.0,
-            "hallucination_detected": True,
-            "confidence": "low",
+            "fidelity_score": None,
+            "hallucination_detected": None,
+            "confidence": "parse_error",
             "reasoning": f"[PARSE ERROR: {raw[:120]}]",
         }
 
@@ -506,6 +508,18 @@ def judge_agreement(judge_a: dict, judge_b: dict | None) -> dict:
             "reason": "single-judge mode (no Judge B)",
             "final_fidelity": judge_a["fidelity_score"],
             "final_hallucination": judge_a["hallucination_detected"],
+            "review_flag": False,
+            "single_judge": True,
+        }
+
+    # If either judge returned a parse error, treat as single-judge — not a real disagreement.
+    if judge_a.get("confidence") == "parse_error" or judge_b.get("confidence") == "parse_error":
+        valid = judge_b if judge_a.get("confidence") == "parse_error" else judge_a
+        return {
+            "agreed": None,
+            "reason": "parse_error on one judge — treated as single-judge (not a real disagreement)",
+            "final_fidelity": valid["fidelity_score"],
+            "final_hallucination": valid["hallucination_detected"],
             "review_flag": False,
             "single_judge": True,
         }

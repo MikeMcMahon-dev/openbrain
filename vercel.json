@@ -1,5 +1,11 @@
 {
   "version": 2,
+  "crons": [
+    {
+      "path": "/api/cron/session_report",
+      "schedule": "0 21 * * *"
+    }
+  ],
   "builds": [
     {
       "src": "api/index.py",
@@ -32,7 +38,7 @@
       "dest": "/api/index.py"
     },
     {
-      "src": "/(query|search|generate_quiz|generate_flashcards|ingest)(/)?",
+      "src": "/(query|search|generate_quiz|generate_flashcards|ingest|session_report)(/)?",
       "dest": "/api/index.py"
     },
     {
