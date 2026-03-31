@@ -219,12 +219,11 @@ Files added/modified:
 - `make smoke` — 29/29 passing (includes 3 new PDF cases)
 
 **Known limitation — ChatGPT action interface:**
-ChatGPT Custom GPT actions cannot submit raw binary files. The `source_type=pdf` path is for **server-side batch ingest scripts only**. GPTs must extract PDF text and submit as `source_type=text`. Annie's GPT system prompt needs updating to reflect this (out of scope this session).
+ChatGPT Custom GPT actions cannot submit raw binary files. The `source_type=pdf` path is for **server-side batch ingest scripts only**. GPTs submit as `source_type=text` with verbatim extracted content.
 
 **Required follow-up:**
 - Deploy to Vercel and run `make smoke-live` / `make pdf-eval-live` to confirm ≥80% pass rate
-- Re-ingest Annie's PDFs that were silently dropped — requires Annie to **re-upload the original files** (ChatGPT does not expose uploaded file content after the fact; content is not recoverable)
-- Update Annie GPT system prompt: instruct it to extract PDF text and submit as `source_type=text`
+- Apply updated system prompt and action spec to Beth's GPT config (repo is up to date)
 
 ---
 
