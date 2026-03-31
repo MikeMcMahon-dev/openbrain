@@ -207,18 +207,46 @@ Files added/modified:
 
 ---
 
-## URGENT — Next Session
+## Step 12 — PDF Ingestion (Complete 2026-03-31)
 
-### PDF / DOCX / URL ingestion — not implemented (2026-03-30)
-`pdf`, `docx`, `url` source_types are stubbed — they pass reachability checks, return `status: "queued"`, and silently drop content. No extraction layer exists. PDFs uploaded via ChatGPT last week were **never written to Supabase**.
+`source_type=pdf` now extracts and writes to Supabase. Previously returned `status: "queued"` and silently dropped content.
 
-**Required work (next session, first priority):**
-- Add `pypdf` or `pdfplumber` + `python-docx` to `requirements.txt`
-- Implement `_extract_pdf(path) -> str` and `_extract_docx(path) -> str` in `_openbrain_api.py`
-- Implement `_fetch_url(url) -> str` (urllib + basic HTML strip)
-- Wire extractions into the `else` branch (~line 1448) — replace `status="queued"` with actual write
-- Update Vercel deps, deploy, run `make smoke-live`
-- Re-ingest PDFs that were silently dropped last week (owner: anneliesepaige)
+- `pypdf==6.9.2` added to `requirements.txt`
+- `_extract_pdf(source)` added to `api/_openbrain_api.py` — local import, raises `ValueError` on failure
+- Large PDFs (>6000 words) chunked into 1500-word segments and written separately
+- Empty/image-only PDFs return `status: "failed"` with clear message
+- `make pdf-unit` — 6/6 passing
+- `make smoke` — 29/29 passing (includes 3 new PDF cases)
+
+**Known limitation — ChatGPT action interface:**
+ChatGPT Custom GPT actions cannot submit raw binary files. The `source_type=pdf` path is for **server-side batch ingest scripts only**. GPTs submit as `source_type=text` with verbatim extracted content.
+
+**Required follow-up:**
+- Deploy to Vercel and run `make smoke-live` / `make pdf-eval-live` to confirm ≥80% pass rate
+- Apply updated system prompt and action spec to Beth's GPT config (repo is up to date)
+
+---
+
+## Step 13 — DOCX and URL Ingestion (Complete 2026-03-31)
+
+`source_type=docx` and `source_type=url` now extract and write to Supabase.
+
+- `python-docx==1.2.0` added to `requirements.txt`
+- `_extract_docx(source)` added to `api/_openbrain_api.py` — local import, raises `ValueError` on failure
+- `_fetch_url(source)` added to `api/_openbrain_api.py` — stdlib urllib + html.parser, User-Agent header, 15s timeout
+- Both wired into `ingest_payload()` elif branches with chunking (1500-word chunks for docs >6000 words)
+- `make docx-unit` — 6/6 passing
+- `make url-unit` — 5/5 passing
+- `make smoke` — 35/35 passing (includes 6 new DOCX + URL cases)
+
+**URL ingestion limitations:**
+URL ingestion uses stdlib urllib + html.parser (no requests/BeautifulSoup). Content quality depends
+on site structure — navigation/boilerplate text will be included. Not suitable for JavaScript-rendered
+pages (no headless browser). Sufficient for documentation and article URLs.
+
+**Required follow-up:**
+- Deploy to Vercel and run `make smoke-live` / `make docx-url-eval-live` to confirm ≥75% pass rate
+- Apply updated GPT system prompts and action spec to all three GPT configs (repo is up to date)
 
 ---
 

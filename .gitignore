@@ -8,3 +8,4 @@ brain_index/
 *.log
 .vercel
 .env*.local
+.DS_Store

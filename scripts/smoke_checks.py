@@ -6,6 +6,7 @@ import os
 import json
 import ssl
 import sys
+import time
 import traceback
 import urllib.error
 import urllib.parse
@@ -14,6 +15,8 @@ from pathlib import Path
 from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+PDF_FIXTURE_DIR = PROJECT_ROOT / "scripts" / "test_fixtures" / "pdf"
+DOCX_FIXTURE_DIR = PROJECT_ROOT / "scripts" / "test_fixtures" / "docx"
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -80,7 +83,7 @@ def _validate_payload_shape(
     if missing:
         return False, f"{path}: missing keys {missing}"
 
-    if payload.get("status") not in {"accepted", "queued"}:
+    if payload.get("status") not in {"accepted", "queued", "failed"}:
         return False, f"{path}: unexpected status '{payload.get('status')}'"
 
     if expected_owner is not None and payload.get("owner") != expected_owner:
@@ -222,6 +225,267 @@ def _smoke_local_idempotency_check(source: str, owner: str | None) -> int:
         return 1
     print("Idempotency check passed.")
     return 0
+
+
+def _smoke_pdf_cases_local() -> int:
+    """Run 3 PDF-specific smoke cases against the local handler.
+
+    Case 1: valid PDF path → status "accepted" (requires _extract_pdf implementation)
+    Case 2: missing file path → status "failed"
+    Case 3: ingest then query → unique phrase appears in results (requires implementation)
+
+    Returns count of failures.
+    """
+    _token = os.getenv("OPENBRAIN_TOOL_ACCESS_TOKEN", "")
+    _auth = {"Authorization": f"Bearer {_token}"} if _token else {}
+    failed = 0
+    simple_pdf = str(PDF_FIXTURE_DIR / "simple_text.pdf")
+
+    # Case 27: valid PDF path → "accepted" (not "queued")
+    ok, msg = run_case(
+        {
+            "path": "/api/ingest",
+            "method": "POST",
+            "body": json.dumps({
+                "source_type": "pdf",
+                "source": simple_pdf,
+                "owner": "mike.mcmahon67",
+                "subject": "pdf_smoke_test",
+                "topic": "pdf_smoke",
+            }),
+            "headers": {"Content-Type": "application/json", **_auth},
+        },
+        200,
+        validate_payload=True,
+    )
+    # Override: we specifically need "accepted", not "queued"
+    if ok:
+        # Re-check body directly for "accepted"
+        from api.app import handler
+        resp = handler({
+            "path": "/api/ingest",
+            "method": "POST",
+            "body": json.dumps({
+                "source_type": "pdf",
+                "source": simple_pdf,
+                "owner": "mike.mcmahon67",
+                "subject": "pdf_smoke_test",
+                "topic": "pdf_smoke",
+            }),
+            "headers": {"Content-Type": "application/json", **_auth},
+        })
+        body = json.loads(resp.get("body", "{}")) if isinstance(resp.get("body"), str) else {}
+        status_val = body.get("status", "")
+        if status_val == "accepted":
+            print("/api/ingest [pdf accepted]: ok (accepted)")
+        elif status_val == "queued":
+            print("/api/ingest [pdf accepted]: FAIL — status=queued (implementation not yet active)")
+            failed += 1
+        else:
+            print(f"/api/ingest [pdf accepted]: FAIL — status={status_val!r}")
+            failed += 1
+    else:
+        print(f"/api/ingest [pdf accepted]: {msg}")
+        failed += 1
+
+    # Case 28: missing file → "failed"
+    ok2, msg2 = run_case(
+        {
+            "path": "/api/ingest",
+            "method": "POST",
+            "body": json.dumps({
+                "source_type": "pdf",
+                "source": "/nonexistent/smoke_test.pdf",
+                "owner": "mike.mcmahon67",
+                "subject": "pdf_smoke_test",
+                "topic": "pdf_smoke",
+            }),
+            "headers": {"Content-Type": "application/json", **_auth},
+        },
+        200,
+        validate_payload=True,
+    )
+    if ok2:
+        from api.app import handler as _handler
+        resp2 = _handler({
+            "path": "/api/ingest",
+            "method": "POST",
+            "body": json.dumps({
+                "source_type": "pdf",
+                "source": "/nonexistent/smoke_test.pdf",
+                "owner": "mike.mcmahon67",
+                "subject": "pdf_smoke_test",
+                "topic": "pdf_smoke",
+            }),
+            "headers": {"Content-Type": "application/json", **_auth},
+        })
+        body2 = json.loads(resp2.get("body", "{}")) if isinstance(resp2.get("body"), str) else {}
+        if body2.get("status") == "failed":
+            print("/api/ingest [pdf missing file]: ok (failed)")
+        else:
+            print(f"/api/ingest [pdf missing file]: FAIL — expected status=failed, got {body2.get('status')!r}")
+            failed += 1
+    else:
+        print(f"/api/ingest [pdf missing file]: {msg2}")
+        failed += 1
+
+    # Case 29: ingest then retrieve — unique phrase appears in results
+    # This case requires both _extract_pdf implementation AND a live DB connection.
+    unique_phrase = "xyloquartz-retrieval-fixture-alpha"
+    db_url = _supabase_url()
+    if not db_url:
+        print("/api/ingest+query [pdf retrieval]: SKIP — no DB URL available")
+    else:
+        from api.app import handler as _h
+        ingest_resp = _h({
+            "path": "/api/ingest",
+            "method": "POST",
+            "body": json.dumps({
+                "source_type": "pdf",
+                "source": simple_pdf,
+                "owner": "mike.mcmahon67",
+                "subject": "pdf_smoke_test",
+                "topic": "pdf_smoke",
+            }),
+            "headers": {"Content-Type": "application/json", **_auth},
+        })
+        ingest_body = json.loads(ingest_resp.get("body", "{}")) if isinstance(ingest_resp.get("body"), str) else {}
+        if ingest_body.get("status") != "accepted":
+            print(f"/api/ingest+query [pdf retrieval]: SKIP — ingest returned {ingest_body.get('status')!r} (not accepted)")
+        else:
+            time.sleep(1)
+            query_resp = _h({
+                "path": "/api/query",
+                "method": "POST",
+                "body": json.dumps({"query": unique_phrase, "owner": "mike.mcmahon67"}),
+                "headers": {"Content-Type": "application/json", **_auth},
+            })
+            query_body = json.loads(query_resp.get("body", "{}")) if isinstance(query_resp.get("body"), str) else {}
+            results = query_body.get("results", [])
+            found = any(unique_phrase in (r.get("text", "") or r.get("content", "")) for r in results)
+            if found:
+                print("/api/ingest+query [pdf retrieval]: ok (phrase found in results)")
+            else:
+                print(f"/api/ingest+query [pdf retrieval]: FAIL — phrase not found in {len(results)} results")
+                failed += 1
+
+    return failed
+
+
+def _smoke_docx_url_cases_local() -> int:
+    """Run 6 DOCX+URL smoke cases against the local handler.
+
+    Case 30: valid DOCX path → status "accepted" (requires _extract_docx implementation)
+    Case 31: missing DOCX file → status "failed"
+    Case 32: ingest then query → unique DOCX phrase appears in results
+    Case 33: valid URL → status "accepted" (requires _fetch_url implementation)
+    Case 34: bad URL → status "failed"
+    Case 35: ingest example.com then query → "Example Domain" appears in results
+
+    Returns count of failures.
+    """
+    _token = os.getenv("OPENBRAIN_TOOL_ACCESS_TOKEN", "")
+    _auth = {"Authorization": f"Bearer {_token}"} if _token else {}
+    failed = 0
+    simple_docx = str(DOCX_FIXTURE_DIR / "simple_text.docx")
+    docx_unique_phrase = "xyloquartz-retrieval-fixture-beta"
+    url_unique_phrase = "Example Domain"
+
+    def _ingest_and_check_status(label: str, source_type: str, source: str, expected_status: str) -> tuple[bool, str]:
+        """Helper: call ingest and return (ok, actual_status)."""
+        from api.app import handler as _h
+        resp = _h({
+            "path": "/api/ingest",
+            "method": "POST",
+            "body": json.dumps({
+                "source_type": source_type,
+                "source": source,
+                "owner": "mike.mcmahon67",
+                "subject": "docx_url_smoke_test",
+                "topic": "docx_url_smoke",
+            }),
+            "headers": {"Content-Type": "application/json", **_auth},
+        })
+        body = json.loads(resp.get("body", "{}")) if isinstance(resp.get("body"), str) else {}
+        actual = body.get("status", "")
+        if actual == expected_status:
+            print(f"/api/ingest [{label}]: ok ({expected_status})")
+            return True, actual
+        elif actual == "queued":
+            print(f"/api/ingest [{label}]: FAIL — status=queued (implementation not yet active)")
+            return False, actual
+        else:
+            print(f"/api/ingest [{label}]: FAIL — expected {expected_status!r}, got {actual!r}")
+            return False, actual
+
+    # Case 30: valid DOCX path → "accepted"
+    ok30, status30 = _ingest_and_check_status("docx accepted", "docx", simple_docx, "accepted")
+    if not ok30:
+        failed += 1
+
+    # Case 31: missing DOCX file → "failed"
+    ok31, _ = _ingest_and_check_status("docx missing file", "docx", "/nonexistent/smoke_test.docx", "failed")
+    if not ok31:
+        failed += 1
+
+    # Case 32: ingest then query — unique DOCX phrase appears in results
+    db_url = _supabase_url()
+    if not db_url:
+        print("/api/ingest+query [docx retrieval]: SKIP — no DB URL available")
+    elif status30 != "accepted":
+        print(f"/api/ingest+query [docx retrieval]: SKIP — ingest returned {status30!r} (not accepted)")
+    else:
+        from api.app import handler as _h
+        time.sleep(1)
+        query_resp = _h({
+            "path": "/api/query",
+            "method": "POST",
+            "body": json.dumps({"query": docx_unique_phrase, "owner": "mike.mcmahon67"}),
+            "headers": {"Content-Type": "application/json", **_auth},
+        })
+        query_body = json.loads(query_resp.get("body", "{}")) if isinstance(query_resp.get("body"), str) else {}
+        results = query_body.get("results", [])
+        found = any(docx_unique_phrase in (r.get("text", "") or r.get("content", "")) for r in results)
+        if found:
+            print("/api/ingest+query [docx retrieval]: ok (phrase found in results)")
+        else:
+            print(f"/api/ingest+query [docx retrieval]: FAIL — phrase not found in {len(results)} results")
+            failed += 1
+
+    # Case 33: valid URL → "accepted"
+    ok33, status33 = _ingest_and_check_status("url accepted", "url", "https://example.com", "accepted")
+    if not ok33:
+        failed += 1
+
+    # Case 34: bad URL → "failed"
+    ok34, _ = _ingest_and_check_status("url bad url", "url", "not-a-valid-url", "failed")
+    if not ok34:
+        failed += 1
+
+    # Case 35: ingest example.com then query — "Example Domain" phrase in results
+    if not db_url:
+        print("/api/ingest+query [url retrieval]: SKIP — no DB URL available")
+    elif status33 != "accepted":
+        print(f"/api/ingest+query [url retrieval]: SKIP — url ingest returned {status33!r} (not accepted)")
+    else:
+        from api.app import handler as _h
+        time.sleep(1)
+        query_resp = _h({
+            "path": "/api/query",
+            "method": "POST",
+            "body": json.dumps({"query": url_unique_phrase, "owner": "mike.mcmahon67"}),
+            "headers": {"Content-Type": "application/json", **_auth},
+        })
+        query_body = json.loads(query_resp.get("body", "{}")) if isinstance(query_resp.get("body"), str) else {}
+        results = query_body.get("results", [])
+        found = any(url_unique_phrase in (r.get("text", "") or r.get("content", "")) for r in results)
+        if found:
+            print("/api/ingest+query [url retrieval]: ok (phrase found in results)")
+        else:
+            print(f"/api/ingest+query [url retrieval]: FAIL — phrase not found in {len(results)} results")
+            failed += 1
+
+    return failed
 
 
 def smoke_local(idempotency_source: str | None = None, idempotency_owner: str | None = None) -> int:
@@ -505,6 +769,12 @@ def smoke_local(idempotency_source: str | None = None, idempotency_owner: str | 
         print(f"\nRunning local ingest idempotency check for source: {idempotency_source}")
         failed += _smoke_local_idempotency_check(idempotency_source, idempotency_owner)
 
+    # PDF-specific smoke cases (cases 27–29)
+    failed += _smoke_pdf_cases_local()
+
+    # DOCX + URL smoke cases (cases 30–35)
+    failed += _smoke_docx_url_cases_local()
+
     return failed
 
 
@@ -680,6 +950,71 @@ def smoke_live(base_url: str) -> int:
 
         print(message)
         if not ok:
+            failed += 1
+
+    # PDF-specific live smoke cases (cases 27–29 in local; live subset below)
+    # Case 27: missing file → status "failed" (works on any environment)
+    # Case 28: non-existent path for docx also returns "failed" (confirms impl active)
+    # NOTE: "pdf accepted" and "pdf retrieval" cases are local-only (Vercel can't access
+    # local file paths). Run `make pdf-eval-live` for end-to-end PDF eval against production.
+    # PDF/DOCX/URL live cases — only missing-file/bad-URL variants; Vercel can't access local paths.
+    # Full retrieval eval: use `make pdf-eval-live` / `make docx-url-eval-live`
+    pdf_live_cases = [
+        (
+            "/api/ingest [pdf missing file]",
+            "/api/ingest",
+            {
+                "source_type": "pdf",
+                "source": "/nonexistent/smoke_test.pdf",
+                "owner": "mike.mcmahon67",
+                "subject": "pdf_smoke_test",
+                "topic": "pdf_smoke",
+            },
+            "failed",
+        ),
+        (
+            "/api/ingest [docx missing file]",
+            "/api/ingest",
+            {
+                "source_type": "docx",
+                "source": "/nonexistent/smoke_test.docx",
+                "owner": "mike.mcmahon67",
+                "subject": "docx_url_smoke_test",
+                "topic": "docx_url_smoke",
+            },
+            "failed",
+        ),
+        (
+            "/api/ingest [url bad url]",
+            "/api/ingest",
+            {
+                "source_type": "url",
+                "source": "not-a-valid-url",
+                "owner": "mike.mcmahon67",
+                "subject": "docx_url_smoke_test",
+                "topic": "docx_url_smoke",
+            },
+            "failed",
+        ),
+    ]
+    for label, path, payload, expected_status in pdf_live_cases:
+        try:
+            status, body = _call_live(base_url, "POST", path, payload, _auth)
+            body_status = body.get("status", "") if isinstance(body, dict) else ""
+            if status == 200 and body_status == expected_status:
+                print(f"{label}: ok ({expected_status})")
+            elif status == 200 and body_status == "queued":
+                print(f"{label}: FAIL — status=queued (PDF implementation not yet active on this deployment)")
+                failed += 1
+            else:
+                print(f"{label}: FAIL — HTTP {status}, status={body_status!r}")
+                failed += 1
+        except urllib.error.HTTPError as exc:
+            body_raw = exc.read().decode("utf-8", errors="replace")
+            print(f"{label}: FAIL — HTTP {exc.code}: {body_raw[:120]}")
+            failed += 1
+        except Exception as exc:
+            print(f"{label}: FAIL — {exc}")
             failed += 1
 
     return failed
