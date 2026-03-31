@@ -207,6 +207,21 @@ Files added/modified:
 
 ---
 
+## URGENT — Next Session
+
+### PDF / DOCX / URL ingestion — not implemented (2026-03-30)
+`pdf`, `docx`, `url` source_types are stubbed — they pass reachability checks, return `status: "queued"`, and silently drop content. No extraction layer exists. PDFs uploaded via ChatGPT last week were **never written to Supabase**.
+
+**Required work (next session, first priority):**
+- Add `pypdf` or `pdfplumber` + `python-docx` to `requirements.txt`
+- Implement `_extract_pdf(path) -> str` and `_extract_docx(path) -> str` in `_openbrain_api.py`
+- Implement `_fetch_url(url) -> str` (urllib + basic HTML strip)
+- Wire extractions into the `else` branch (~line 1448) — replace `status="queued"` with actual write
+- Update Vercel deps, deploy, run `make smoke-live`
+- Re-ingest PDFs that were silently dropped last week (owner: anneliesepaige)
+
+---
+
 ## Future Considerations
 
 ### Near-Term
