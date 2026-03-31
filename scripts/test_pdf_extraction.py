@@ -152,9 +152,10 @@ def test_extract_special_chars() -> None:
 
 
 def test_extract_nonexistent_path() -> None:
-    """Non-existent file: raises FileNotFoundError (or returns empty string).
+    """Non-existent file: raises ValueError (wrapping the underlying OS error).
 
-    Either behavior is acceptable — document which one the implementation chose.
+    Per spec: _extract_pdf raises ValueError on any extraction failure so callers
+    can map it uniformly to status="failed". FileNotFoundError is also accepted.
     """
     name = "test_extract_nonexistent_path"
     path = "/nonexistent/path/does_not_exist.pdf"
@@ -165,9 +166,9 @@ def test_extract_nonexistent_path() -> None:
         if isinstance(result, str):
             _record(name, True, f"returned str (len={len(result)}) without raising — silent empty mode")
         else:
-            _record(name, False, f"expected str or FileNotFoundError, got {type(result).__name__}")
-    except FileNotFoundError:
-        _record(name, True, "raised FileNotFoundError as expected")
+            _record(name, False, f"expected str or ValueError, got {type(result).__name__}")
+    except (ValueError, FileNotFoundError) as exc:
+        _record(name, True, f"raised {type(exc).__name__} as expected")
     except (ImportError, AttributeError):
         _record(name, False, "_extract_pdf not yet implemented in api/_openbrain_api.py")
     except Exception as exc:

@@ -1154,6 +1154,22 @@ def _write_text_ingest(
     return None
 
 
+def _extract_pdf(source: str) -> str:
+    """Extract text from a PDF file path. Returns empty string if extraction finds no text."""
+    from pypdf import PdfReader  # local import — only loaded when PDF ingestion is invoked
+    path = Path(source)
+    text_parts = []
+    try:
+        reader = PdfReader(str(path))
+        for page in reader.pages:
+            extracted = page.extract_text() or ""
+            if extracted.strip():
+                text_parts.append(extracted.strip())
+    except Exception as exc:
+        raise ValueError(f"PDF extraction failed for {source}: {exc}") from exc
+    return "\n".join(text_parts)
+
+
 _INJECTION_PATTERNS = re.compile(
     r"\b("
     r"ignore|forget|pretend|act\s+as|system\s+prompt|new\s+rule|"
@@ -1445,7 +1461,53 @@ def ingest_payload(
                 message = "Ingest request accepted."
                 if preflight_summary.get("warnings"):
                     details.extend(preflight_summary.get("warnings", []))
+        elif source_type == "pdf":
+            try:
+                extracted_text = _extract_pdf(source)
+            except ValueError as exc:
+                status = "failed"
+                message = f"Ingest failed: {exc}"
+                details.append(str(exc))
+            else:
+                if not extracted_text.strip():
+                    status = "failed"
+                    message = "Ingest failed: PDF contained no extractable text (may be image-only)."
+                    details.append("empty extraction")
+                else:
+                    word_count = len(extracted_text.split())
+                    max_words = int(os.getenv("OPENBRAIN_TEXT_INGEST_MAX_WORDS", "6000"))
+                    if word_count > max_words:
+                        words = extracted_text.split()
+                        chunk_size = 1500
+                        chunks = [
+                            " ".join(words[i:i + chunk_size])
+                            for i in range(0, len(words), chunk_size)
+                        ]
+                        failed_chunks = []
+                        for idx, chunk in enumerate(chunks):
+                            chunk_id = compute_ingest_id(source_type, chunk, owner, subject, f"{topic}_chunk{idx}")
+                            write_error = _write_text_ingest(chunk, owner, _tenant_id, subject, f"{topic}_chunk{idx}", chunk_id)
+                            if write_error:
+                                failed_chunks.append(idx)
+                        if failed_chunks:
+                            status = "failed"
+                            message = f"Ingest failed: {len(failed_chunks)}/{len(chunks)} chunks failed to write."
+                        else:
+                            status = "accepted"
+                            message = f"Ingest accepted. PDF split into {len(chunks)} chunks."
+                            details.append(f"chunks: {len(chunks)}, words: {word_count}")
+                    else:
+                        _pdf_ingest_id = compute_ingest_id(source_type, extracted_text, owner, subject, topic)
+                        write_error = _write_text_ingest(extracted_text, owner, _tenant_id, subject, topic, _pdf_ingest_id)
+                        if write_error:
+                            status = "failed"
+                            message = f"Ingest failed: {write_error}"
+                            details.append(write_error)
+                        else:
+                            status = "accepted"
+                            message = "Ingest request accepted."
         else:
+            # DOCX, URL, and other source types remain queued until implemented
             preflight_summary = _ingest_preflight(owner, _tenant_id, source, source_type)
             if preflight_summary.get("status") == "failed":
                 status = "failed"

@@ -1,1 +1,2 @@
 psycopg[binary]==3.2.10
+pypdf==6.9.2

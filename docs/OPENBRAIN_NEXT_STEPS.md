@@ -207,28 +207,24 @@ Files added/modified:
 
 ---
 
-## URGENT — Next Session
+## Step 12 — PDF Ingestion (Complete 2026-03-31)
 
-### PDF / DOCX / URL ingestion — test harness done, extraction not yet implemented (2026-03-31)
-`pdf`, `docx`, `url` source_types are stubbed — they pass reachability checks, return `status: "queued"`, and silently drop content. No extraction layer exists. PDFs uploaded via ChatGPT last week were **never written to Supabase**.
+`source_type=pdf` now extracts and writes to Supabase. Previously returned `status: "queued"` and silently dropped content.
 
-**Test harness is complete and committed** (`feat/pdf-ingest-next-steps`):
-- `scripts/test_pdf_extraction.py` — unit tests for `_extract_pdf()` (fail until implemented)
-- `scripts/test_pdf_ingest_eval.py` — full eval harness: ingest → retrieval → cleanup
-- `scripts/test_fixtures/pdf/` — 5 fixture PDFs committed
-- `scripts/smoke_checks.py` — 3 new PDF smoke cases (cases 27–29)
-- `make pdf-unit`, `make pdf-eval`, `make pdf-eval-live` targets ready
+- `pypdf==6.9.2` added to `requirements.txt`
+- `_extract_pdf(source)` added to `api/_openbrain_api.py` — local import, raises `ValueError` on failure
+- Large PDFs (>6000 words) chunked into 1500-word segments and written separately
+- Empty/image-only PDFs return `status: "failed"` with clear message
+- `make pdf-unit` — 6/6 passing
+- `make smoke` — 29/29 passing (includes 3 new PDF cases)
 
-**Remaining work (next session, first priority):**
-- Add `pypdf>=4.0.0` to `requirements.txt`
-- Implement `_extract_pdf(path: str | Path) -> str` in `_openbrain_api.py`
-  - Model after `_write_text_ingest` — extract text, call `_write_text_ingest` with extracted content
-  - Wire into the `else` branch (~line 1448) — replace `status="queued"` with extract + write
-  - Handle: empty PDF (return "" → "accepted" with warning), missing file (raise → "failed"), large PDF (chunking or rejection at `OPENBRAIN_TEXT_INGEST_MAX_WORDS`)
-- Update Vercel deps, deploy
-- Run `make pdf-unit && make smoke && make pdf-eval` — all must pass
-- Run `make pdf-eval-live` — ≥80% pass rate
-- Re-ingest PDFs that were silently dropped last week (owner: anneliesepaige)
+**Known limitation — ChatGPT action interface:**
+ChatGPT Custom GPT actions cannot submit raw binary files. The `source_type=pdf` path is for **server-side batch ingest scripts only**. GPTs must extract PDF text and submit as `source_type=text`. Annie's GPT system prompt needs updating to reflect this (out of scope this session).
+
+**Required follow-up:**
+- Deploy to Vercel and run `make smoke-live` / `make pdf-eval-live` to confirm ≥80% pass rate
+- Re-ingest Annie's PDFs that were silently dropped — requires Annie to **re-upload the original files** (ChatGPT does not expose uploaded file content after the fact; content is not recoverable)
+- Update Annie GPT system prompt: instruct it to extract PDF text and submit as `source_type=text`
 
 ---
 
