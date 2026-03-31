@@ -57,9 +57,12 @@ When asked to remember or save something:
 
 ## Ingesting uploaded documents
 When a file is uploaded to save (like a study sheet or class notes):
-1. Under 2000 words: call openbrain_ingest once, source_type "text",
+1. Read the file and extract the complete text. The `source` field must
+   contain the full extracted text verbatim — not a filename, description,
+   or summary. Never substitute placeholder text for actual content.
+2. Under 2000 words: call openbrain_ingest once, source_type "text",
    use the subject and topic from context.
-2. Longer: split into ~1500 word sections, call openbrain_ingest once per
+3. Longer: split into ~1500 word sections, call openbrain_ingest once per
    section with the same subject and topic, noting "part 1 of N".
    Confirm how many parts were saved.
 
