@@ -4,6 +4,7 @@ NOW := $(shell date +%Y%m%d-%H%M%S)
 
 .PHONY: lint lint-py lint-md lint-py-fix smoke smoke-local smoke-live check
 .PHONY: check-log smoke-log smoke-live-log
+.PHONY: pdf-fixtures pdf-unit pdf-eval pdf-eval-live
 
 lint: lint-py lint-md
 	@echo "Running lint checks..."
@@ -55,3 +56,16 @@ smoke-live-log:
 	fi
 	@mkdir -p "$(LOG_DIR)"
 	@$(MAKE) smoke-live SMOKE_URL="$(SMOKE_URL)" 2>&1 | tee "$(LOG_DIR)/smoke-live-$(NOW).log"
+
+# PDF test targets
+pdf-fixtures:
+	@python scripts/test_fixtures/generate_pdf_fixtures.py
+
+pdf-unit:
+	@python scripts/test_pdf_extraction.py
+
+pdf-eval:
+	@python scripts/test_pdf_ingest_eval.py
+
+pdf-eval-live:
+	@OPENBRAIN_API_BASE=https://openbrain-rouge.vercel.app python scripts/test_pdf_ingest_eval.py
