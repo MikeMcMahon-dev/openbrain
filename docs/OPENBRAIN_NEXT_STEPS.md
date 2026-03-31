@@ -228,6 +228,25 @@ ChatGPT Custom GPT actions cannot submit raw binary files. The `source_type=pdf`
 
 ---
 
+## NEXT SESSION — DOCX and URL/HTML Ingest (2026-03-31)
+
+Same pattern as PDF: test harness first, then implementation.
+
+**DOCX:**
+- Add `python-docx` to `requirements.txt`
+- Implement `_extract_docx(source) -> str` in `_openbrain_api.py`
+- Wire into `ingest_payload()` elif branch (currently falls to queued else)
+- Test fixtures: simple, multi-section, empty, large, special chars
+
+**URL/HTML:**
+- Implement `_fetch_url(url) -> str` (urllib + basic HTML strip via html.parser)
+- No new deps needed — stdlib only
+- Test fixtures: mock URLs or small real pages
+
+**Both:** follow the same harness structure as `test_pdf_extraction.py` and `test_pdf_ingest_eval.py`. Update smoke to 32/32.
+
+---
+
 ## Future Considerations
 
 ### Near-Term
