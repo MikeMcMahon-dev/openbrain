@@ -227,22 +227,26 @@ ChatGPT Custom GPT actions cannot submit raw binary files. The `source_type=pdf`
 
 ---
 
-## NEXT SESSION — DOCX and URL/HTML Ingest (2026-03-31)
+## Step 13 — DOCX and URL Ingestion (Complete 2026-03-31)
 
-Same pattern as PDF: test harness first, then implementation.
+`source_type=docx` and `source_type=url` now extract and write to Supabase.
 
-**DOCX:**
-- Add `python-docx` to `requirements.txt`
-- Implement `_extract_docx(source) -> str` in `_openbrain_api.py`
-- Wire into `ingest_payload()` elif branch (currently falls to queued else)
-- Test fixtures: simple, multi-section, empty, large, special chars
+- `python-docx==1.2.0` added to `requirements.txt`
+- `_extract_docx(source)` added to `api/_openbrain_api.py` — local import, raises `ValueError` on failure
+- `_fetch_url(source)` added to `api/_openbrain_api.py` — stdlib urllib + html.parser, User-Agent header, 15s timeout
+- Both wired into `ingest_payload()` elif branches with chunking (1500-word chunks for docs >6000 words)
+- `make docx-unit` — 6/6 passing
+- `make url-unit` — 5/5 passing
+- `make smoke` — 35/35 passing (includes 6 new DOCX + URL cases)
 
-**URL/HTML:**
-- Implement `_fetch_url(url) -> str` (urllib + basic HTML strip via html.parser)
-- No new deps needed — stdlib only
-- Test fixtures: mock URLs or small real pages
+**URL ingestion limitations:**
+URL ingestion uses stdlib urllib + html.parser (no requests/BeautifulSoup). Content quality depends
+on site structure — navigation/boilerplate text will be included. Not suitable for JavaScript-rendered
+pages (no headless browser). Sufficient for documentation and article URLs.
 
-**Both:** follow the same harness structure as `test_pdf_extraction.py` and `test_pdf_ingest_eval.py`. Update smoke to 32/32.
+**Required follow-up:**
+- Deploy to Vercel and run `make smoke-live` / `make docx-url-eval-live` to confirm ≥75% pass rate
+- Apply updated GPT system prompts and action spec to all three GPT configs (repo is up to date)
 
 ---
 

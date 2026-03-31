@@ -228,10 +228,10 @@ paths:
               properties:
                 source_type:
                   type: string
-                  description: Type of content being ingested. For all GPT uploads use "text". Values "pdf", "url", and "obsidian" are for server-side scripts only.
+                  description: Type of content being ingested. Use "text" to capture notes from conversation or uploaded files. Use "url" to ingest a webpage — the server fetches and extracts the content. Values "pdf" and "obsidian" are for server-side scripts only.
                 source:
                   type: string
-                  description: The actual text content to store. Must be the verbatim extracted text — not a filename, variable name, description, or placeholder.
+                  description: For source_type "text" — the verbatim text content to store (not a filename, variable, or placeholder). For source_type "url" — the full URL to fetch, exactly as given.
                 subject:
                   type: string
                   description: Subject or domain label for the ingested content.

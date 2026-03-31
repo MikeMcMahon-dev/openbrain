@@ -1170,6 +1170,70 @@ def _extract_pdf(source: str) -> str:
     return "\n".join(text_parts)
 
 
+def _extract_docx(source: str) -> str:
+    """Extract text from a DOCX file path. Returns joined paragraph text."""
+    from docx import Document  # local import — only loaded when DOCX ingestion is invoked
+    try:
+        doc = Document(source)
+        parts = [
+            para.text.strip()
+            for para in doc.paragraphs
+            if para.text and para.text.strip()
+        ]
+    except Exception as exc:
+        raise ValueError(f"DOCX extraction failed for {source}: {exc}") from exc
+    return "\n".join(parts)
+
+
+def _fetch_url(source: str) -> str:
+    """Fetch a URL and return stripped plain text. Uses stdlib only."""
+    import html as _html
+    from html.parser import HTMLParser
+
+    class _TextExtractor(HTMLParser):
+        SKIP_TAGS = {"script", "style", "head", "noscript"}
+
+        def __init__(self):
+            super().__init__()
+            self._parts: list[str] = []
+            self._skip_depth = 0
+
+        def handle_starttag(self, tag, attrs):
+            if tag.lower() in self.SKIP_TAGS:
+                self._skip_depth += 1
+
+        def handle_endtag(self, tag):
+            if tag.lower() in self.SKIP_TAGS:
+                self._skip_depth = max(0, self._skip_depth - 1)
+
+        def handle_data(self, data):
+            if self._skip_depth == 0:
+                stripped = data.strip()
+                if stripped:
+                    self._parts.append(stripped)
+
+        def get_text(self) -> str:
+            return "\n".join(self._parts)
+
+    request = urllib.request.Request(
+        source,
+        headers={"User-Agent": "openbrain-ingester/1.0"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            charset = "utf-8"
+            content_type = response.headers.get("Content-Type", "")
+            if "charset=" in content_type:
+                charset = content_type.split("charset=")[-1].strip().split(";")[0].strip()
+            raw_html = response.read().decode(charset, errors="replace")
+    except Exception as exc:
+        raise ValueError(f"URL fetch failed for {source}: {exc}") from exc
+
+    parser = _TextExtractor()
+    parser.feed(raw_html)
+    return _html.unescape(parser.get_text())
+
+
 _INJECTION_PATTERNS = re.compile(
     r"\b("
     r"ignore|forget|pretend|act\s+as|system\s+prompt|new\s+rule|"
@@ -1506,8 +1570,98 @@ def ingest_payload(
                         else:
                             status = "accepted"
                             message = "Ingest request accepted."
+        elif source_type == "docx":
+            try:
+                extracted_text = _extract_docx(source)
+            except ValueError as exc:
+                status = "failed"
+                message = f"Ingest failed: {exc}"
+                details.append(str(exc))
+            else:
+                if not extracted_text.strip():
+                    status = "failed"
+                    message = "Ingest failed: DOCX contained no extractable text (document may be empty)."
+                    details.append("empty extraction")
+                else:
+                    word_count = len(extracted_text.split())
+                    max_words = int(os.getenv("OPENBRAIN_TEXT_INGEST_MAX_WORDS", "6000"))
+                    if word_count > max_words:
+                        words = extracted_text.split()
+                        chunk_size = 1500
+                        chunks = [
+                            " ".join(words[i:i + chunk_size])
+                            for i in range(0, len(words), chunk_size)
+                        ]
+                        failed_chunks = []
+                        for idx, chunk in enumerate(chunks):
+                            chunk_id = compute_ingest_id(source_type, chunk, owner, subject, f"{topic}_chunk{idx}")
+                            write_error = _write_text_ingest(chunk, owner, _tenant_id, subject, f"{topic}_chunk{idx}", chunk_id)
+                            if write_error:
+                                failed_chunks.append(idx)
+                        if failed_chunks:
+                            status = "failed"
+                            message = f"Ingest failed: {len(failed_chunks)}/{len(chunks)} chunks failed to write."
+                        else:
+                            status = "accepted"
+                            message = f"Ingest accepted. DOCX split into {len(chunks)} chunks."
+                            details.append(f"chunks: {len(chunks)}, words: {word_count}")
+                    else:
+                        _docx_ingest_id = compute_ingest_id(source_type, extracted_text, owner, subject, topic)
+                        write_error = _write_text_ingest(extracted_text, owner, _tenant_id, subject, topic, _docx_ingest_id)
+                        if write_error:
+                            status = "failed"
+                            message = f"Ingest failed: {write_error}"
+                            details.append(write_error)
+                        else:
+                            status = "accepted"
+                            message = "Ingest request accepted."
+        elif source_type == "url":
+            try:
+                extracted_text = _fetch_url(source)
+            except ValueError as exc:
+                status = "failed"
+                message = f"Ingest failed: {exc}"
+                details.append(str(exc))
+            else:
+                if not extracted_text.strip():
+                    status = "failed"
+                    message = "Ingest failed: URL returned no extractable text."
+                    details.append("empty extraction")
+                else:
+                    word_count = len(extracted_text.split())
+                    max_words = int(os.getenv("OPENBRAIN_TEXT_INGEST_MAX_WORDS", "6000"))
+                    if word_count > max_words:
+                        words = extracted_text.split()
+                        chunk_size = 1500
+                        chunks = [
+                            " ".join(words[i:i + chunk_size])
+                            for i in range(0, len(words), chunk_size)
+                        ]
+                        failed_chunks = []
+                        for idx, chunk in enumerate(chunks):
+                            chunk_id = compute_ingest_id(source_type, chunk, owner, subject, f"{topic}_chunk{idx}")
+                            write_error = _write_text_ingest(chunk, owner, _tenant_id, subject, f"{topic}_chunk{idx}", chunk_id)
+                            if write_error:
+                                failed_chunks.append(idx)
+                        if failed_chunks:
+                            status = "failed"
+                            message = f"Ingest failed: {len(failed_chunks)}/{len(chunks)} chunks failed to write."
+                        else:
+                            status = "accepted"
+                            message = f"Ingest accepted. URL content split into {len(chunks)} chunks."
+                            details.append(f"chunks: {len(chunks)}, words: {word_count}")
+                    else:
+                        _url_ingest_id = compute_ingest_id(source_type, extracted_text, owner, subject, topic)
+                        write_error = _write_text_ingest(extracted_text, owner, _tenant_id, subject, topic, _url_ingest_id)
+                        if write_error:
+                            status = "failed"
+                            message = f"Ingest failed: {write_error}"
+                            details.append(write_error)
+                        else:
+                            status = "accepted"
+                            message = "Ingest request accepted."
         else:
-            # DOCX, URL, and other source types remain queued until implemented
+            # Other source types remain queued until implemented
             preflight_summary = _ingest_preflight(owner, _tenant_id, source, source_type)
             if preflight_summary.get("status") == "failed":
                 status = "failed"

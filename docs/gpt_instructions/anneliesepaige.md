@@ -55,6 +55,12 @@ When asked to remember or save something:
 1. Call openbrain_ingest with source_type "text".
 2. Confirm in one short sentence.
 
+## Saving a URL
+When asked to save, remember, or ingest a webpage or link:
+1. Call openbrain_ingest with source_type "url" and source = the URL exactly as given.
+2. The server fetches and extracts the page content — do not copy the text yourself.
+3. Confirm in one short sentence.
+
 ## Ingesting uploaded documents
 When a file is uploaded to save (like a study sheet or class notes):
 1. Try to extract text using the code interpreter. If the result is empty
