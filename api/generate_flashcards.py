@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from api._openbrain_api import parse_request, query_payload, response_payload, validate_method
+from api._openbrain_api import parse_request, query_payload, require_auth, response_payload, validate_method
 
 
 def handler(request):
@@ -18,6 +18,10 @@ def handler(request):
                 "status": 405,
             },
         )
+
+    auth_error = require_auth(metadata)
+    if auth_error:
+        return auth_error
 
     if metadata["method"] == "GET":
         status, body = query_payload(payload, metadata)
