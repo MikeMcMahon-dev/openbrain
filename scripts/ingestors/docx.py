@@ -2,6 +2,14 @@ import hashlib
 from pathlib import Path
 from typing import Any
 
+HEADING_MAP = {
+    "Heading 1": "#",
+    "Heading 2": "##",
+    "Heading 3": "###",
+    "Heading 4": "####",
+    "Title": "#",
+}
+
 
 def load_docx_documents(
     docx_root: Path,
@@ -21,11 +29,13 @@ def load_docx_documents(
     for file in sorted(docx_root.rglob("*.docx")):
         try:
             doc = Document(str(file))
-            text = "\n".join(
-                (para.text or "").strip()
-                for para in doc.paragraphs
-                if para.text and para.text.strip()
-            )
+            lines = []
+            for para in doc.paragraphs:
+                if not para.text.strip():
+                    continue
+                prefix = HEADING_MAP.get(para.style.name, "")
+                lines.append(f"{prefix} {para.text}".strip() if prefix else para.text)
+            text = "\n".join(lines)
         except Exception as exc:
             print(f"Error reading DOCX {file}: {exc}")
             continue
@@ -42,7 +52,7 @@ def load_docx_documents(
                 "file": file.name,
                 "section": str(file.parent).replace(str(docx_root) + "/", ""),
                 "heading": "root",
-                "content_type": "docx",
+                "content_type": "markdown",
                 "subject": subject,
                 "topic": topic,
             }

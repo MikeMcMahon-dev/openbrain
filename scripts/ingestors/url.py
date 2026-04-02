@@ -3,7 +3,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import requests
-from bs4 import BeautifulSoup
+from markdownify import markdownify as md
 
 
 def load_url_documents(
@@ -31,8 +31,7 @@ def load_url_documents(
                 headers={"User-Agent": "OpenBrain/1.0 (+https://openbrain.local)"},
             )
             response.raise_for_status()
-            soup = BeautifulSoup(response.text, "html.parser")
-            text = soup.get_text("\n", strip=True)
+            text = md(response.text, heading_style="ATX", strip=["script", "style"])
         except Exception as exc:
             print(f"Error reading URL {normalized}: {exc}")
             continue
@@ -49,7 +48,7 @@ def load_url_documents(
                 "file": parsed.netloc or normalized,
                 "section": "url",
                 "heading": "root",
-                "content_type": "url",
+                "content_type": "markdown",
                 "subject": subject,
                 "topic": topic,
             }
