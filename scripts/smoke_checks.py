@@ -539,7 +539,7 @@ def smoke_local(idempotency_source: str | None = None, idempotency_owner: str | 
                 "body": json.dumps({"query": "test"}),
                 "headers": {},
             },
-            200,
+            401,
         ),
         (
             {
@@ -548,7 +548,7 @@ def smoke_local(idempotency_source: str | None = None, idempotency_owner: str | 
                 "body": json.dumps({"query": "test"}),
                 "headers": {},
             },
-            200,
+            401,
         ),
         (
             {
@@ -557,7 +557,7 @@ def smoke_local(idempotency_source: str | None = None, idempotency_owner: str | 
                 "body": json.dumps({"query": "test"}),
                 "headers": {},
             },
-            200,
+            401,
         ),
         (
             {
@@ -566,7 +566,7 @@ def smoke_local(idempotency_source: str | None = None, idempotency_owner: str | 
                 "body": json.dumps({"query": "test"}),
                 "headers": {},
             },
-            200,
+            401,
         ),
         (
             {
@@ -820,10 +820,10 @@ def smoke_live(base_url: str) -> int:
         ("/api/query", {"query": "test"}, 200, _auth),
         ("/search", {"query": "test"}, 200, _auth),
         ("/api/search", {"query": "test"}, 200, _auth),
-        ("/generate_quiz", {"query": "test"}, 200),
-        ("/api/generate_quiz", {"query": "test"}, 200),
-        ("/generate_flashcards", {"query": "test"}, 200),
-        ("/api/generate_flashcards", {"query": "test"}, 200),
+        ("/generate_quiz", {"query": "test"}, 401),
+        ("/api/generate_quiz", {"query": "test"}, 401),
+        ("/generate_flashcards", {"query": "test"}, 401),
+        ("/api/generate_flashcards", {"query": "test"}, 401),
         ("/ingest", {"source_type": "obsidian", "source": "/tmp"}, 200, _auth),
         (
             "/api/ingest",
