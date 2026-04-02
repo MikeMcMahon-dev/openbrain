@@ -338,22 +338,26 @@ FIXTURES_DIR = REPO_ROOT / "test-fixtures"
 
 def find_additional_text_dominant_pdf() -> Path | None:
     """
-    Scan test-fixtures for any PDF not already in FIXTURES that pypdf can
-    actually extract text from (i.e., likely text-dominant).
-    Returns the first match, or None.
+    Scan test-fixtures/ and scripts/test_fixtures/pdf/ for any PDF not already
+    in FIXTURES that pypdf can extract text from (avg >= 200 chars/page).
+    Returns the best match (highest avg chars), or None.
     """
     known = {f["filename"] for f in FIXTURES}
-    for pdf_path in sorted(FIXTURES_DIR.glob("*.pdf")):
-        if pdf_path.name in known:
-            continue
-        try:
-            reader = PdfReader(str(pdf_path))
-            for page in reader.pages:
-                if len((page.extract_text() or "").strip()) > 100:
-                    return pdf_path
-        except Exception:
-            continue
-    return None
+    search_dirs = [FIXTURES_DIR, REPO_ROOT / "scripts" / "test_fixtures" / "pdf"]
+    best: tuple[float, Path] | None = None
+    for search_dir in search_dirs:
+        for pdf_path in sorted(search_dir.glob("*.pdf")):
+            if pdf_path.name in known:
+                continue
+            try:
+                reader = PdfReader(str(pdf_path))
+                chars = [len((p.extract_text() or "").strip()) for p in reader.pages]
+                avg = sum(chars) / len(chars) if chars else 0
+                if avg >= 200 and (best is None or avg > best[0]):
+                    best = (avg, pdf_path)
+            except Exception:
+                continue
+    return best[1] if best else None
 
 
 # ---------------------------------------------------------------------------
@@ -378,28 +382,29 @@ def main() -> None:
     if baseline_pdf:
         extra_fixtures.append({
             "filename": baseline_pdf.name,
-            "description": "additional baseline (text-dominant PDF found in test-fixtures)",
+            "full_path": baseline_pdf,
+            "description": "additional baseline (text-dominant)",
         })
     else:
         print(
-            "\n[Note] No additional text-dominant PDF found in test-fixtures/. "
+            "\n[Note] No additional text-dominant PDF found. "
             "Only running against the two scan fixtures."
         )
 
     run_fixtures = FIXTURES + extra_fixtures
 
     for fixture in run_fixtures:
-        pdf_path = FIXTURES_DIR / fixture["filename"]
+        pdf_path = fixture.get("full_path") or FIXTURES_DIR / fixture["filename"]
         if not pdf_path.exists():
             print(f"\n[SKIP] {fixture['filename']} — file not found at {pdf_path}")
             continue
 
         path_a = run_path_a(pdf_path)
         path_b = run_path_b(pdf_path)
-        all_results.append((fixture["filename"], fixture["description"], path_a, path_b))
+        all_results.append((fixture["filename"], fixture["description"], path_a, path_b, pdf_path))
 
     # Print tables
-    for filename, description, path_a, path_b in all_results:
+    for filename, description, path_a, path_b, _pdf_path in all_results:
         print_pdf_table(f"{filename} ({description})", path_a, path_b)
 
     # Summary
@@ -432,19 +437,13 @@ def main() -> None:
     )
 
     path_a_total_tokens = sum(
-        sum(count_tokens_whitespace(c["text"]) for c in
-            chunk_text_by_tokens(
-                "\n".join(
-                    (page.extract_text() or "").strip()
-                    for page in PdfReader(str(FIXTURES_DIR / r[0])).pages
-                ),
-                max_tokens=500, overlap=100
-            )
-        )
+        round(r[2]["avg_chunk_tokens"] * r[2]["chunk_count"])
         for r in all_results
+        if isinstance(r[2].get("chunk_count"), int) and r[2]["chunk_count"] > 0
     )
     path_a_overlap_tokens = sum(
         100 * r[2]["chunk_count"] for r in all_results
+        if isinstance(r[2].get("chunk_count"), int)
     )
 
     pending_str = f" (+ {path_b_pending_ocr} doc(s) / {ocr_stub_count} page(s) pending OCR)" if path_b_pending_ocr else ""
