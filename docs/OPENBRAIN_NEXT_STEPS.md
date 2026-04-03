@@ -250,6 +250,41 @@ pages (no headless browser). Sufficient for documentation and article URLs.
 
 ---
 
+## Step 14 — Structured Markdown Ingest Pipeline + Vision OCR (Complete 2026-04-02)
+
+All four ingestors now produce structured markdown. Sliding-window chunking replaced by heading-split chunking with token ceiling. Vision OCR path added for scanned PDFs. (ADR-006)
+
+### What shipped (PRs #23–27, merged to main)
+
+- **PDF three-way classification** (`scripts/ingestors/pdf.py`): avg chars/page determines path
+  - `text_dominant` (≥200 chars/page): pymupdf4llm → structured markdown
+  - `mixed` (50–199 chars/page): pymupdf4llm → structured markdown
+  - `image_dominant` (<50 chars/page): pymupdf page render → Pillow contrast(2.0x)/sharpen(1.5x) → Claude Haiku vision OCR → markdown
+- **DOCX heading preservation** (`scripts/ingestors/docx.py`): `para.style.name` → `#/##/###/####` headers; `content_type="markdown"`
+- **URL markdownify + boilerplate stripping** (`scripts/ingestors/url.py`): BeautifulSoup content extraction (main/article/role=main) + markdownify with nav/footer/header/aside strip; replaces raw `get_text()`
+- **chunk_markdown() token ceiling** (`scripts/chunking/markdown.py`): 600-token sub-chunking — oversized sections split with parent heading inherited; eliminates 20% sliding-window overlap redundancy
+- **Beth validation UX** (`docs/gpt_instructions/anneliesepaige.md`): post-ingest spot-check shows 3 sample items (start/middle/end) from GPT context window; no hidden folders, no DB query needed
+- **A/B test harness** (`scripts/test_pdf_pipeline_ab.py`): baseline confirmed 20% overlap redundancy eliminated, 1→13 chunks on text-dominant fixture
+- **Vercel bundle compliance**: pymupdf4llm/Pillow in `requirements-full.txt` only (local); Vercel API retains pypdf — stays under 250MB bundle constraint
+
+### Environment variables added
+- `OPENBRAIN_OCR_MODEL` — defaults to `claude-haiku-4-5-20251001`
+- `OPENBRAIN_OCR_CONTRAST` — defaults to `2.0`
+- `OPENBRAIN_OCR_SHARPEN` — defaults to `1.5`
+
+### OCR eval (multi-agent-lab PR #4, merged)
+OCR quality eval added to multi-agent harness (`agents/ocr_eval.py`). Two scenarios in `taskfiles/eval-scenarios.yaml`:
+- `ocr-handwritten-biology` — 1-page handwritten notes, ground-truth phrase scoring, pass_threshold 0.80
+- `ocr-geometry-degraded` — 40-page poor-quality scan, content-presence scoring, pass_threshold 0.50
+
+**Required follow-up (Part 2):**
+- Run OCR eval across all 5 models (Haiku/Sonnet/Opus/GPT-4o/GPT-4o-mini) — results pending, in progress
+- chunk_markdown() evaluation against real Annie study PDFs with headings (needs OCR output to produce heading structure)
+- markdownify boilerplate tuning — test against real URLs with heavy nav/footer
+- Source channel tracking on ingest (ChatGPT action vs direct API — forensic value)
+
+---
+
 ## Future Considerations
 
 ### Near-Term
