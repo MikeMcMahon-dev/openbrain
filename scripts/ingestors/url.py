@@ -31,7 +31,20 @@ def load_url_documents(
                 headers={"User-Agent": "OpenBrain/1.0 (+https://openbrain.local)"},
             )
             response.raise_for_status()
-            text = md(response.text, heading_style="ATX", strip=["script", "style"])
+            soup = BeautifulSoup(response.text, "html.parser")
+            main_content = (
+                soup.find("main")
+                or soup.find("article")
+                or soup.find(id="content")
+                or soup.find(id="main-content")
+                or soup.find(attrs={"role": "main"})
+            )
+            content_html = str(main_content) if main_content else response.text
+            text = md(
+                content_html,
+                heading_style="ATX",
+                strip=["script", "style", "nav", "footer", "header", "aside"],
+            )
         except Exception as exc:
             print(f"Error reading URL {normalized}: {exc}")
             continue
