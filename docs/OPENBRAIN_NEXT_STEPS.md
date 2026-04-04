@@ -317,6 +317,14 @@ When a Claude agent is running on a K8s/Linux VM node, the following scripts are
 
 ---
 
+## Open Investigation: Duplicate Nightly Reports (2026-04-03)
+
+User receiving two identical session reports 7 minutes apart nightly. Confirmed: single vercel.json cron entry, single REPORT_CONFIGS, _send_email sends one call with all recipients in `to` array simultaneously. 7-minute gap is consistent with Vercel retrying a slow/timed-out cron invocation (Hobby tier behavior). Cannot confirm — Hobby logs only retained 1 hour.
+
+**To investigate next time report fires:** check Vercel logs immediately after 9pm MDT. Look for two cron invocations vs. one invocation + one retry. If retry: add response time logging to cron_session_report.py, or optimize the report build to respond faster (Resend call is the likely slow path).
+
+---
+
 ## Long-Term Direction
 
 OpenBrain becomes the family-facing, multi-user knowledge memory with:
