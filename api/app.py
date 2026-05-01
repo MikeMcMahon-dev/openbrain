@@ -7,6 +7,7 @@ from api.generate_flashcards import handler as flashcards_handler
 from api.generate_quiz import handler as quiz_handler
 from api.health import handler as health_handler
 from api.ingest import handler as ingest_handler
+from api.mcp_http import handler as mcp_handler
 from api.query import handler as query_handler
 from api.search import handler as search_handler
 from api.session_report import handler as session_report_handler
@@ -65,6 +66,8 @@ def handler(request):
         return claude_handler(request, tool_mode="generate_flashcards")
     if path in {"/claude_ingest", "/tools/claude_ingest"}:
         return claude_handler(request, tool_mode="ingest")
+    if path in {"/mcp/messages", "/api/mcp/messages"}:
+        return mcp_handler(request)
     if path in {"/session_report", "/api/session_report"}:
         return session_report_handler(request)
     if path in {"/api/cron/session_report"}:
