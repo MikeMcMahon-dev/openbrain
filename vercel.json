@@ -42,6 +42,10 @@
       "dest": "/api/index.py"
     },
     {
+      "src": "/mcp/messages(/)?",
+      "dest": "/api/index.py"
+    },
+    {
       "src": "/(.*)",
       "dest": "/public/index.html"
     }
