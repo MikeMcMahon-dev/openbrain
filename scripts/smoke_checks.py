@@ -488,6 +488,190 @@ def _smoke_docx_url_cases_local() -> int:
     return failed
 
 
+def _smoke_mcp_cases_local() -> int:
+    """Run MCP endpoint smoke cases (cases 36–46).
+
+    Test the MCP HTTP endpoint at /mcp/messages for:
+    - Tool discovery (GET)
+    - Authentication (valid/invalid/missing)
+    - JSON-RPC protocol compliance
+    - Tool execution (query, ingest, quiz, flashcards)
+    - Error handling
+    """
+    _token = os.getenv("OPENBRAIN_TOOL_ACCESS_TOKEN", "")
+    if not _token:
+        print("MCP endpoint tests skipped: OPENBRAIN_TOOL_ACCESS_TOKEN not set")
+        return 0
+
+    _auth = {"Authorization": f"Bearer {_token}"}
+    failed = 0
+
+    mcp_cases = [
+        # Tool discovery
+        (
+            "MCP GET discovery",
+            {"path": "/mcp/messages", "method": "GET", "headers": _auth},
+            200,
+        ),
+        # Missing auth
+        (
+            "MCP POST no auth",
+            {
+                "path": "/mcp/messages",
+                "method": "POST",
+                "body": json.dumps({"jsonrpc": "2.0", "method": "tools/list", "id": 1}),
+                "headers": {},
+            },
+            401,
+        ),
+        # Invalid auth
+        (
+            "MCP POST invalid auth",
+            {
+                "path": "/mcp/messages",
+                "method": "POST",
+                "body": json.dumps({"jsonrpc": "2.0", "method": "tools/list", "id": 1}),
+                "headers": {"Authorization": "Bearer invalid-token"},
+            },
+            401,
+        ),
+        # Valid tools/list
+        (
+            "MCP tools/list",
+            {
+                "path": "/mcp/messages",
+                "method": "POST",
+                "body": json.dumps({"jsonrpc": "2.0", "method": "tools/list", "id": 1}),
+                "headers": _auth,
+            },
+            200,
+        ),
+        # Malformed JSON-RPC
+        (
+            "MCP malformed request",
+            {
+                "path": "/mcp/messages",
+                "method": "POST",
+                "body": json.dumps({"method": "tools/list"}),  # Missing jsonrpc
+                "headers": _auth,
+            },
+            400,
+        ),
+        # Unknown method
+        (
+            "MCP unknown method",
+            {
+                "path": "/mcp/messages",
+                "method": "POST",
+                "body": json.dumps(
+                    {"jsonrpc": "2.0", "method": "unknown/method", "id": 1}
+                ),
+                "headers": _auth,
+            },
+            200,  # Returns error in JSON-RPC format
+        ),
+        # Tool execution: query
+        (
+            "MCP tools/call query",
+            {
+                "path": "/mcp/messages",
+                "method": "POST",
+                "body": json.dumps({
+                    "jsonrpc": "2.0",
+                    "method": "tools/call",
+                    "params": {"name": "query", "arguments": {"query": "test"}},
+                    "id": 1,
+                }),
+                "headers": _auth,
+            },
+            200,
+        ),
+        # Tool execution: ingest
+        (
+            "MCP tools/call ingest",
+            {
+                "path": "/mcp/messages",
+                "method": "POST",
+                "body": json.dumps({
+                    "jsonrpc": "2.0",
+                    "method": "tools/call",
+                    "params": {
+                        "name": "ingest",
+                        "arguments": {
+                            "source_type": "text",
+                            "source": "MCP smoke test content",
+                            "subject": "mcp_smoke",
+                            "topic": "smoke_2026_05_01",
+                        },
+                    },
+                    "id": 1,
+                }),
+                "headers": _auth,
+            },
+            200,
+        ),
+        # Tool execution: generate_quiz
+        (
+            "MCP tools/call quiz",
+            {
+                "path": "/mcp/messages",
+                "method": "POST",
+                "body": json.dumps({
+                    "jsonrpc": "2.0",
+                    "method": "tools/call",
+                    "params": {"name": "generate_quiz", "arguments": {"query": "test"}},
+                    "id": 1,
+                }),
+                "headers": _auth,
+            },
+            200,
+        ),
+        # Tool execution: generate_flashcards
+        (
+            "MCP tools/call flashcards",
+            {
+                "path": "/mcp/messages",
+                "method": "POST",
+                "body": json.dumps({
+                    "jsonrpc": "2.0",
+                    "method": "tools/call",
+                    "params": {
+                        "name": "generate_flashcards",
+                        "arguments": {"query": "test"},
+                    },
+                    "id": 1,
+                }),
+                "headers": _auth,
+            },
+            200,
+        ),
+        # Missing required parameter
+        (
+            "MCP missing param",
+            {
+                "path": "/mcp/messages",
+                "method": "POST",
+                "body": json.dumps({
+                    "jsonrpc": "2.0",
+                    "method": "tools/call",
+                    "params": {"name": "query", "arguments": {}},
+                    "id": 1,
+                }),
+                "headers": _auth,
+            },
+            200,  # Returns error in result
+        ),
+    ]
+
+    for label, request, expected in mcp_cases:
+        ok, message = run_case(request, expected)
+        print(f"{label}: {message}")
+        if not ok:
+            failed += 1
+
+    return failed
+
+
 def smoke_local(idempotency_source: str | None = None, idempotency_owner: str | None = None) -> int:
     query_body = json.dumps({"query": "test"})
     _token = os.getenv("OPENBRAIN_TOOL_ACCESS_TOKEN", "")
@@ -774,6 +958,9 @@ def smoke_local(idempotency_source: str | None = None, idempotency_owner: str | 
 
     # DOCX + URL smoke cases (cases 30–35)
     failed += _smoke_docx_url_cases_local()
+
+    # MCP endpoint smoke cases (cases 36–46)
+    failed += _smoke_mcp_cases_local()
 
     return failed
 
