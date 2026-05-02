@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# Pre-commit guardrails — blocks secrets and direct commits to main/master.
+# Install: make install-hooks
+# DO NOT bypass with --no-verify. If this blocks a legitimate commit, fix the root cause.
+
+set -euo pipefail
+
+FAIL=0
+
+# ── 1. Branch protection ──────────────────────────────────────────────────────
+BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+if [[ "$BRANCH" == "main" || "$BRANCH" == "master" ]]; then
+    echo "BLOCKED: direct commits to '$BRANCH' are not allowed." >&2
+    echo "         Create a feature branch: git checkout -b feat/your-change" >&2
+    FAIL=1
+fi
+
+# ── 2. Secret scanning ────────────────────────────────────────────────────────
+# Add new patterns here as new secret types are introduced.
+SECRET_PATTERNS=(
+    'opbr_[A-Za-z0-9_-]{20,}'   # OpenBrain bearer tokens
+)
+
+STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACMR 2>/dev/null || true)
+
+for file in $STAGED_FILES; do
+    [[ -f "$file" ]] || continue
+    # Skip binary files
+    if file "$file" 2>/dev/null | grep -qiE "binary|image|PDF|Zip|compiled"; then
+        continue
+    fi
+    staged_content=$(git show ":$file" 2>/dev/null) || continue
+    for pattern in "${SECRET_PATTERNS[@]}"; do
+        if echo "$staged_content" | grep -qE "$pattern"; then
+            echo "BLOCKED: possible secret in '$file' (pattern: $pattern)" >&2
+            echo "         Use a placeholder like YOUR_TOKEN_HERE instead." >&2
+            FAIL=1
+        fi
+    done
+done
+
+# ── Result ────────────────────────────────────────────────────────────────────
+if [[ $FAIL -ne 0 ]]; then
+    echo "" >&2
+    echo "Commit aborted. --no-verify is not an acceptable workaround." >&2
+    exit 1
+fi
+
+exit 0

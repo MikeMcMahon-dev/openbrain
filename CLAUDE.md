@@ -24,6 +24,15 @@ See docs/decisions/ for full ADRs. Summary:
 - **Vercel Cron over pg_cron**: pg_cron not enabled by default in Supabase; scheduling belongs in app
 - **Report source**: public.thoughts for study notes + public.query_log for queries (both required)
 
+## Git guardrails — NON-NEGOTIABLE
+
+`scripts/pre-commit` is the enforcement layer. Run `make install-hooks` once after cloning.
+
+- **`--no-verify` is banned.** Never use it. If the hook blocks a commit, fix the root cause.
+- **`gh` CLI is read + create only**: view PR status, create PRs. No `gh pr merge`, no operations that bypass the review step.
+- **Never write real credentials into any file.** Docs and setup guides use placeholders (`YOUR_TOKEN_HERE`). Real tokens live in `.env.local` (gitignored) and Vercel env vars only.
+- All changes go feature branch → PR → merge. The hook enforces the branch side; the rest is on you.
+
 ## Critical constraints
 - SUPABASE_DB_URL in Vercel must be the **direct Postgres URI** (postgresql://), not the REST URL
 - psycopg uses port 6543 (transaction pooler) for serverless — not 5432

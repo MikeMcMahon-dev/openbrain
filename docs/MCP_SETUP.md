@@ -13,7 +13,7 @@ MCP is a standard protocol that allows AI assistants (like Claude) to call exter
 ## Connect in Claude.ai macOS App
 
 ### Step 1: Get Your Token
-Your OpenBrain token: `opbr_ZTn4cWWIUuhpBppbtSmgPEgSAVMr8VGJjJmRz3`
+Your OpenBrain token: `YOUR_TOKEN_HERE`
 
 Your owner ID: `mike.mcmahon67`
 
@@ -25,7 +25,7 @@ Your owner ID: `mike.mcmahon67`
 4. Fill in:
    - **URL:** `https://openbrain-rouge.vercel.app/mcp/messages`
    - **User ID:** `mike.mcmahon67`
-   - **Token:** `opbr_ZTn4cWWIUuhpBppbtSmgPEgSAVMr8VGJjJmRz3`
+   - **Token:** `YOUR_TOKEN_HERE`
 5. Click **Connect**
 6. Status should show **Connected** ✅
 
@@ -66,7 +66,7 @@ Go to [claude.ai](https://claude.ai) in your browser.
 ### Step 3: Enter MCP Endpoint Details
 
 - **URL:** `https://openbrain-rouge.vercel.app/mcp/messages`
-- **Token:** `opbr_ZTn4cWWIUuhpBppbtSmgPEgSAVMr8VGJjJmRz3`
+- **Token:** `YOUR_TOKEN_HERE`
 - **User ID:** `mike.mcmahon67`
 
 ### Step 4: Confirm
@@ -141,7 +141,7 @@ Generate flashcard decks from your vault on a given topic.
 All requests are authenticated using **Bearer token authentication**:
 
 ```
-Authorization: Bearer opbr_ZTn4cWWIUuhpBppbtSmgPEgSAVMr8VGJjJmRz3
+Authorization: Bearer YOUR_TOKEN_HERE
 ```
 
 The MCP endpoint validates your token and owner ID before executing any tool.
@@ -154,7 +154,7 @@ The MCP endpoint validates your token and owner ID before executing any tool.
 
 **Solution:**
 - Verify URL is exactly: `https://openbrain-rouge.vercel.app/mcp/messages`
-- Check token is correct: `opbr_ZTn4cWWIUuhpBppbtSmgPEgSAVMr8VGJjJmRz3`
+- Check token is correct: `YOUR_TOKEN_HERE`
 - Check user ID is correct: `mike.mcmahon67`
 - Try connecting again
 
