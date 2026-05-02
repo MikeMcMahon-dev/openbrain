@@ -1204,6 +1204,156 @@ def smoke_live(base_url: str) -> int:
             print(f"{label}: FAIL — {exc}")
             failed += 1
 
+    failed += smoke_oauth(base_url)
+    return failed
+
+
+def smoke_oauth(base_url: str) -> int:
+    """Test the OAuth 2.0 authorization flow end-to-end against a live deployment."""
+    import base64
+    import hashlib
+    import hmac
+    import secrets
+
+    failed = 0
+
+    def _pkce() -> tuple[str, str]:
+        v = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip("=")
+        c = base64.urlsafe_b64encode(hashlib.sha256(v.encode()).digest()).decode().rstrip("=")
+        return v, c
+
+    def _no_redirect_get(url: str) -> tuple[int, str, str]:
+        """GET without following redirects. Returns (status, location, body)."""
+        class _NoRedirect(urllib.request.HTTPErrorProcessor):
+            def http_response(self, req, resp):
+                return resp
+            https_response = http_response
+
+        opener = urllib.request.build_opener(_NoRedirect)
+        resp = opener.open(url, timeout=10)
+        location = resp.headers.get("Location", "")
+        body = resp.read().decode("utf-8", errors="replace")
+        return resp.status, location, body
+
+    redirect_uri = "https://claude.ai/api/mcp/auth_callback"
+    token = os.getenv("OPENBRAIN_TOOL_ACCESS_TOKEN", "")
+
+    # ── Case 1: Discovery document ────────────────────────────────────────────
+    label = "oauth/.well-known"
+    try:
+        status, body = _call_live(base_url, "GET", "/.well-known/oauth-authorization-server", None, None)
+        if status != 200:
+            print(f"{label}: FAIL — HTTP {status}")
+            failed += 1
+        elif not isinstance(body, dict) or "token_endpoint" not in body:
+            print(f"{label}: FAIL — missing token_endpoint in {str(body)[:120]}")
+            failed += 1
+        elif not body["token_endpoint"].startswith("https://"):
+            print(f"{label}: FAIL — token_endpoint looks wrong: {body['token_endpoint']}")
+            failed += 1
+        else:
+            print(f"{label}: ok (200)")
+    except Exception as exc:
+        print(f"{label}: FAIL — {exc}")
+        failed += 1
+
+    # ── Case 2: Authorize redirects to a proper URL (not URL-encoded junk) ───
+    label = "oauth/authorize → redirect"
+    try:
+        v, c = _pkce()
+        params = urllib.parse.urlencode({
+            "response_type": "code",
+            "client_id": "mike.mcmahon67",
+            "redirect_uri": redirect_uri,
+            "code_challenge": c,
+            "code_challenge_method": "S256",
+            "state": "smoke_test_state",
+        })
+        status, location, body = _no_redirect_get(f"{base_url}/authorize?{params}")
+        if status != 302:
+            print(f"{label}: FAIL — expected 302, got {status}; body={body[:120]}")
+            failed += 1
+        elif not location.startswith("https://claude.ai"):
+            # Catch the URL-encoded redirect bug explicitly
+            if "https%3A" in location or "claude.ai" not in location:
+                print(f"{label}: FAIL — Location is garbled or wrong: {location[:120]}")
+            else:
+                print(f"{label}: FAIL — unexpected Location: {location[:120]}")
+            failed += 1
+        else:
+            parsed_loc = urllib.parse.urlparse(location)
+            qs = dict(urllib.parse.parse_qsl(parsed_loc.query))
+            if "code" not in qs:
+                print(f"{label}: FAIL — no code in callback URL: {location[:120]}")
+                failed += 1
+            elif qs.get("state") != "smoke_test_state":
+                print(f"{label}: FAIL — state mismatch: got {qs.get('state')!r}")
+                failed += 1
+            else:
+                print(f"{label}: ok (302 → claude.ai callback with code + state)")
+                # Save for token exchange test
+                _smoke_code = qs["code"]
+                _smoke_verifier = v
+
+                # ── Case 3: Token exchange ────────────────────────────────────
+                label2 = "oauth/token exchange"
+                try:
+                    token_body = urllib.parse.urlencode({
+                        "grant_type": "authorization_code",
+                        "code": _smoke_code,
+                        "redirect_uri": redirect_uri,
+                        "code_verifier": _smoke_verifier,
+                    })
+                    req = urllib.request.Request(
+                        f"{base_url}/token",
+                        data=token_body.encode(),
+                        headers={"Content-Type": "application/x-www-form-urlencoded"},
+                        method="POST",
+                    )
+                    with urllib.request.urlopen(req, timeout=10) as resp:
+                        tok_body = json.loads(resp.read().decode())
+                    if tok_body.get("token_type") != "bearer":
+                        print(f"{label2}: FAIL — unexpected response: {tok_body}")
+                        failed += 1
+                    elif not tok_body.get("access_token"):
+                        print(f"{label2}: FAIL — no access_token in response")
+                        failed += 1
+                    elif tok_body["access_token"] != token:
+                        print(f"{label2}: FAIL — returned token doesn't match env token")
+                        failed += 1
+                    else:
+                        print(f"{label2}: ok (200 — bearer token returned)")
+                except Exception as exc2:
+                    print(f"{label2}: FAIL — {exc2}")
+                    failed += 1
+
+    except Exception as exc:
+        print(f"{label}: FAIL — {exc}")
+        failed += 1
+
+    # ── Case 4: Authorize rejects unknown client ──────────────────────────────
+    label = "oauth/authorize unknown client"
+    try:
+        v, c = _pkce()
+        params = urllib.parse.urlencode({
+            "response_type": "code",
+            "client_id": "nobody@example.com",
+            "redirect_uri": redirect_uri,
+            "code_challenge": c,
+            "code_challenge_method": "S256",
+            "state": "s",
+        })
+        status, location, body = _no_redirect_get(f"{base_url}/authorize?{params}")
+        qs = dict(urllib.parse.parse_qsl(urllib.parse.urlparse(location).query))
+        if qs.get("error") == "unauthorized_client":
+            print(f"{label}: ok (302 with unauthorized_client)")
+        else:
+            print(f"{label}: FAIL — expected unauthorized_client, got status={status} location={location[:80]}")
+            failed += 1
+    except Exception as exc:
+        print(f"{label}: FAIL — {exc}")
+        failed += 1
+
     return failed
 
 
