@@ -115,7 +115,7 @@ def handle_discovery(request: dict) -> dict[str, Any]:
 
 def handle_authorize(request: dict) -> dict[str, Any]:
     """GET /authorize — issue authorization code and redirect to callback."""
-    params = request.get("query") or {}
+    params = request.get("queryStringParameters") or request.get("query") or {}
 
     response_type       = params.get("response_type", "")
     client_id           = params.get("client_id", "")
