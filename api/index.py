@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import urllib.parse
 from http.server import BaseHTTPRequestHandler
 
 from api.app import handler as _route
@@ -27,7 +28,7 @@ def _build_event(request: "handler") -> dict[str, object]:
                 key, value = segment.split("=", 1)
             else:
                 key, value = segment, ""
-            query[key] = value
+            query[urllib.parse.unquote_plus(key)] = urllib.parse.unquote_plus(value)
 
     body: bytes | str | None = None
     content_length = request.headers.get("Content-Length")
