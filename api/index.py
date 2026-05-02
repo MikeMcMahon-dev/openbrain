@@ -4,8 +4,8 @@ import json
 import urllib.parse
 from http.server import BaseHTTPRequestHandler
 
-from api.app import handler as _route
 from api._openbrain_api import log_error
+from api.app import handler as _route
 
 
 def _normalize_path(raw_path: str | None) -> str:
