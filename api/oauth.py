@@ -17,7 +17,6 @@ from typing import Any
 
 from api._openbrain_api import _get_token_owner_map, cors_headers
 
-
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _signing_secret() -> bytes:
@@ -162,11 +161,12 @@ def handle_token(request: dict) -> dict[str, Any]:
 
     code_data = _decode_code(code)
     if not code_data:
-        return _json(400, {"error": "invalid_grant", "error_description": "Invalid or expired code"})
+        return _json(400, {"error": "invalid_grant", "error_description": "Invalid or expired"})
     if code_data.get("redirect_uri") != redirect_uri:
         return _json(400, {"error": "invalid_grant", "error_description": "redirect_uri mismatch"})
-    if not _verify_pkce(code_verifier, code_data["code_challenge"], code_data.get("code_challenge_method", "S256")):
-        return _json(400, {"error": "invalid_grant", "error_description": "PKCE verification failed"})
+    method = code_data.get("code_challenge_method", "S256")
+    if not _verify_pkce(code_verifier, code_data["code_challenge"], method):
+        return _json(400, {"error": "invalid_grant", "error_description": "PKCE failed"})
 
     token = _owner_to_token(code_data.get("client_id", ""))
     if not token:

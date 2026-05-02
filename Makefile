@@ -6,12 +6,17 @@ NOW := $(shell date +%Y%m%d-%H%M%S)
 .PHONY: check-log smoke-log smoke-live-log
 .PHONY: pdf-fixtures pdf-unit pdf-eval pdf-eval-live
 .PHONY: docx-fixtures docx-unit url-unit docx-url-eval docx-url-eval-live
-.PHONY: install-hooks
+.PHONY: install-hooks dev-install
 
 install-hooks:
 	@git config core.hooksPath scripts
 	@chmod +x scripts/pre-commit
 	@echo "Pre-commit hook installed. Blocks: direct commits to main, OpenBrain tokens in staged files."
+
+dev-install:
+	@python3 -m pip install -r requirements-dev.txt -q
+	@$(MAKE) install-hooks
+	@echo "Dev dependencies installed and hooks wired."
 
 lint: lint-py lint-md
 	@echo "Running lint checks..."
