@@ -4,20 +4,42 @@ This document tracks planned improvements for the OpenBrain system.
 
 ---
 
-## Last Successful Checks (2026-03-21)
+## Last Successful Checks (2026-05-01)
 
 - Deployment smoke: `https://openbrain-rouge.vercel.app`
-  - Local smoke checks passed (all routes)
-  - Live smoke checks passed (22/22 cases including 401 rejection)
-- DB state: ~525+ rows, 3 active owners (`mike.mcmahon67`, `snapple01`, `anneliesepaige`)
-- MCP server live in Claude Code via `.mcp.json`
-- Text ingest (`source_type=text`) end-to-end verified: write → embed → retrieve confirmed
-- All three Custom GPTs live and validated: Mike, Beth, Annie
-- Tenant isolation confirmed: per-owner query scoping working correctly
+  - Live smoke: **30/30** (includes 4 new OAuth flow cases)
+  - Vault queries returning real content — `kubernetes` high, `Talos` high, `openbrain` medium
+- DB state: 668+ rows, writes confirmed under `mike.mcmahon67`
+- Claude.ai native MCP connector: **live** — OAuth completes, all 4 tools available
+- SSH commit signing configured for `claude` OS user, verified on GitHub
 - Git:
-  - Latest pushed commit: `d6ef613`
-  - Branch: `main`
-- Session handoff: use [docs/HANDOFF.md](docs/HANDOFF.md) for next-session startup context.
+  - Latest merged commit: `67dd916` (main)
+  - PRs shipped: #34 guardrails, #35 MCP routing, #36 notifications, #37 OAuth,
+    #38 query-params, #39 URL-decode, #40 lint+dev-install
+
+---
+
+## Session Notes — 2026-05-01
+
+### What shipped
+- **Token rotation** — `opbr_*` bearer tokens rotated, `docs/MCP_SETUP.md` scrubbed of real token
+- **Pre-commit guardrails** (`scripts/pre-commit`) — blocks direct commits to main and `opbr_` token patterns; `make install-hooks` / `make dev-install` wire it
+- **MCP HTTP endpoint** — `/mcp/messages` route added to `vercel.json`; `notifications/initialized` handling added to `mcp_http.py`
+- **OAuth 2.0 server** (`api/oauth.py`) — stateless HMAC-signed authorization codes, PKCE S256, 5-minute code TTL; endpoints: `/.well-known/oauth-authorization-server`, `/authorize`, `/token`
+- **Two routing bugs fixed** — `queryStringParameters` vs `query` key mismatch in `handle_authorize`; `urllib.parse.unquote_plus` missing from `index.py` query string parser (caused `redirect_uri` to arrive URL-encoded → garbled Location header)
+- **OAuth smoke tests** — 4 new cases in `smoke_checks.py` covering discovery, authorize redirect, token exchange, and unknown-client rejection
+- **SSH commit signing** for `claude` OS user — ed25519 key at `~/.ssh/id_ed25519_signing`, global git config set, signing key on CC-mcmahon-dev GitHub account
+- **SUPABASE_DB_URL trailing quote** — found in Vercel Shared Variables; trailing `"` made database name `postgres"` → all DB reads failed silently for ~2-3 weeks
+
+### Key lessons learned
+- **Vercel Shared Variables** don't appear in project-level env var listings (API or dashboard project view); look in the Shared Variables section separately
+- **`retrieve_thoughts` swallows all DB exceptions** — a broken DB URL returns HTTP 200 with `results: []`, indistinguishable from "no matching content"; the smoke suite cannot detect this
+- **`index.py` is a local approximation** of the Vercel runtime; use `vercel dev` to catch runtime-specific bugs (query param encoding, `queryStringParameters` key name) before pushing
+- **Trailing quote in env var** — pasting a shell-quoted value (`"postgresql://...6543/postgres"`) into Vercel stores the quotes as literal characters; always paste the raw URL
+
+### Pending backlog items added
+- `/health` endpoint DB connectivity check — `SELECT 1` with non-200 on failure
+- Canary ingest→query smoke test — write known phrase, verify retrieval, catch silent DB failures
 
 ---
 
@@ -288,6 +310,10 @@ OCR quality eval added to multi-agent harness (`agents/ocr_eval.py`). Two scenar
 ## Future Considerations
 
 ### Near-Term
+
+- **`/health` DB connectivity check** — add `SELECT 1` to the health endpoint; return non-200 if DB is unreachable. Currently a broken `SUPABASE_DB_URL` is invisible — queries return HTTP 200 with empty results. A real health check makes this detectable by Vercel uptime monitoring and the smoke suite.
+
+- **Canary ingest→query smoke test** — ingest a known test phrase, immediately query for it, assert at least one result returns. Closes the gap where `retrieve_thoughts` swallows DB exceptions and the smoke suite can't distinguish "no content" from "DB broken."
 
 - **Weekly query eval automation** — schedule `scripts/test_query_harness.py` to run every Thursday (100-query pass first, then 1000). Results appended to `scripts/query_test_results.md`. Alert if pass rate drops below 90%. Currently manual; target: Claude Code scheduled agent, then K8s CronJob.
 
