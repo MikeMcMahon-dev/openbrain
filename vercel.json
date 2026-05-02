@@ -46,6 +46,18 @@
       "dest": "/api/index.py"
     },
     {
+      "src": "/.well-known/oauth-authorization-server",
+      "dest": "/api/index.py"
+    },
+    {
+      "src": "/authorize(/)?",
+      "dest": "/api/index.py"
+    },
+    {
+      "src": "/token(/)?",
+      "dest": "/api/index.py"
+    },
+    {
       "src": "/(.*)",
       "dest": "/public/index.html"
     }
