@@ -78,6 +78,10 @@ def _handle_jsonrpc(payload: dict, metadata: dict) -> dict[str, Any]:
             }
             return response_payload(200, _jsonrpc_response(result, request_id))
 
+        elif method and method.startswith("notifications/"):
+            # MCP notifications are one-way — no response body, just acknowledge
+            return response_payload(200, {})
+
         elif method == "tools/list":
             # List available tools
             tools = _list_tools()
