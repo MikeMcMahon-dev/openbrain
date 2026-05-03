@@ -1,10 +1,17 @@
 """HTTP handler for MCP protocol endpoint."""
+
 from __future__ import annotations
 
 import json
 from typing import Any
 
-from api._openbrain_api import _require_tool_auth, ingest_payload, parse_request, query_payload, response_payload
+from api._openbrain_api import (
+    _require_tool_auth,
+    ingest_payload,
+    parse_request,
+    query_payload,
+    response_payload,
+)
 from api.chatgpt import _inject_token_owner
 
 
@@ -148,7 +155,7 @@ def _list_tools() -> list[dict]:
                     },
                     "student_attempt": {
                         "type": "string",
-                        "description": "Optional: your attempt at answering. Tutor will respond to it.",
+                        "description": "Optional: your attempt at answering the question.",
                     },
                 },
             },
@@ -165,12 +172,12 @@ def _list_tools() -> list[dict]:
                 "properties": {
                     "source_type": {
                         "type": "string",
-                        "description": "Type of content: 'text' for inline notes, 'url' for webpages.",
+                        "description": "Content type: 'text' for inline notes, 'url' for webpages.",
                         "enum": ["text", "url"],
                     },
                     "source": {
                         "type": "string",
-                        "description": "For text: the verbatim content. For url: the full URL to fetch.",
+                        "description": "For text: the verbatim content. For url: the URL to fetch.",
                     },
                     "subject": {
                         "type": "string",
@@ -199,7 +206,7 @@ def _list_tools() -> list[dict]:
                     },
                     "n_results": {
                         "type": "integer",
-                        "description": "Number of knowledge chunks to draw questions from. Default: 5.",
+                        "description": "Knowledge chunks to draw questions from. Default: 5.",
                     },
                 },
             },
@@ -228,6 +235,12 @@ def _list_tools() -> list[dict]:
     ]
 
 
+def _wrap_content(body: Any) -> dict[str, Any]:
+    """Wrap tool result in MCP content envelope (spec 2024-11-05)."""
+    text = json.dumps(body, indent=2) if isinstance(body, dict) else str(body)
+    return {"content": [{"type": "text", "text": text}]}
+
+
 def _call_tool(name: str, arguments: dict, metadata: dict) -> dict[str, Any]:
     """Execute a tool and return result."""
     if name == "query":
@@ -239,7 +252,7 @@ def _call_tool(name: str, arguments: dict, metadata: dict) -> dict[str, Any]:
         }
         normalized = {k: v for k, v in normalized.items() if v is not None}
         status, body = query_payload(normalized, metadata)
-        return body if isinstance(body, dict) else json.loads(body)
+        return _wrap_content(body if isinstance(body, dict) else json.loads(body))
 
     elif name == "ingest":
         normalized = {
@@ -250,7 +263,7 @@ def _call_tool(name: str, arguments: dict, metadata: dict) -> dict[str, Any]:
         }
         normalized = {k: v for k, v in normalized.items() if v}
         status, body = ingest_payload(normalized, metadata)
-        return body if isinstance(body, dict) else json.loads(body)
+        return _wrap_content(body if isinstance(body, dict) else json.loads(body))
 
     elif name == "generate_quiz":
         normalized = {
@@ -259,7 +272,7 @@ def _call_tool(name: str, arguments: dict, metadata: dict) -> dict[str, Any]:
             "mode": "quiz",
         }
         status, body = query_payload(normalized, metadata)
-        return body if isinstance(body, dict) else json.loads(body)
+        return _wrap_content(body if isinstance(body, dict) else json.loads(body))
 
     elif name == "generate_flashcards":
         normalized = {
@@ -268,7 +281,7 @@ def _call_tool(name: str, arguments: dict, metadata: dict) -> dict[str, Any]:
             "mode": "flashcards",
         }
         status, body = query_payload(normalized, metadata)
-        return body if isinstance(body, dict) else json.loads(body)
+        return _wrap_content(body if isinstance(body, dict) else json.loads(body))
 
     else:
         raise ValueError(f"Unknown tool: {name}")
