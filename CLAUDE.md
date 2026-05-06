@@ -74,3 +74,68 @@ python scripts/smoke_checks.py --live https://openbrain-rouge.vercel.app
 | `docs/decisions/` | Architecture Decision Records |
 | `docs/OPENBRAIN_NEXT_STEPS.md` | Canonical backlog — update at end of every session |
 | `vercel.json` | Routes + cron schedule (0 3 * * * = 9pm MDT) |
+
+---
+
+## Session handoff
+
+For multi-session continuity, always start with:
+
+1. `docs/HANDOFF.md` — latest session state, validation results, risks, and next three actions
+2. `docs/OPENBRAIN_NEXT_STEPS.md` — canonical backlog
+
+Do not assume prior session state. Read `docs/HANDOFF.md` before making any changes.
+
+---
+
+## Dependency profile — deployment vs local
+
+Vercel API functions use a minimal dependency set in `requirements.txt` to stay within
+Lambda install limits. Do not add heavy dependencies here.
+
+Local/CLI development with full model tooling:
+
+```bash
+pip install -r requirements-full.txt
+```
+
+`requirements-full.txt` includes optional tooling for local ingestion experiments.
+Do not add `requirements-full.txt` dependencies to `requirements.txt`.
+
+---
+
+## Artifact hygiene
+
+If generated local artifacts are created during manual ingestion experiments,
+**do not commit them to git.**
+
+If local artifacts are modified by ingestion or CLI testing, restore from HEAD before committing:
+
+```bash
+git restore -- <artifact_path>
+```
+
+---
+
+## Security incident log
+
+Credentials have slipped into committed files twice. Both were caught and remediated,
+but the pattern must not repeat.
+
+| Date | File | What happened | Remediated |
+|------|------|---------------|------------|
+| 2026-05-01 | `docs/MCP_SETUP.md` | Real token committed in setup guide | Same session — replaced with placeholder |
+| 2026-05-06 | `CURRENT_STATE.md` (ai-engineering-plan) | Proxmox API token pasted in planning doc | Rotated and redacted |
+
+**Root cause:** Multiple agents (Claude Code + ChatGPT) contributing to the same codebase
+with different constraint models. Neither agent caught what the other introduced.
+
+**Standing rule:** Before committing any doc or config file, run:
+
+```bash
+git diff --staged
+```
+
+Review every line. If any real token, password, API key, or internal hostname appears — stop,
+replace with a placeholder, and commit the placeholder. The pre-commit hook catches some cases
+but is not a substitute for manual review of generated content.
