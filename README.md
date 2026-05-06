@@ -1,91 +1,157 @@
-# openbrain
+# OpenBrain
 
-## Session handoff
+A production RAG (Retrieval-Augmented Generation) system built to solve the AI cold-start problem: every session begins with no memory of prior decisions, architecture choices, or context. OpenBrain fixes that — ingest once, query on demand, every session starts warm.
 
-For multi-session continuity, start with:
+Documented at [mikemcmahon.dev](https://mikemcmahon.dev).
 
-- [docs/HANDOFF.md](/Users/mmcmahon/src/home-lab/open-brain/docs/HANDOFF.md)
-- [docs/OPENBRAIN_NEXT_STEPS.md](/Users/mmcmahon/src/home-lab/open-brain/docs/OPENBRAIN_NEXT_STEPS.md)
+---
 
-`docs/HANDOFF.md` contains the latest session state, validation results, risks, and the next three actions.
+## The Problem
 
-## Development checks (before review)
+AI assistants are stateless by design. Each session starts cold — no memory of what you built yesterday, what you decided last week, or why you made that architectural choice. The standard workaround is pasting context into each session manually. That doesn't scale, and it breaks continuity across long-running projects.
 
-Run these commands before code review so Python + Markdown lint issues are surfaced early:
+OpenBrain provides persistent, queryable context that travels with you across sessions, surfaces, and models.
 
-1) Install development tooling:
+---
 
-```bash
-pip install -r requirements-dev.txt
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────┐
+│                   Ingest Pipeline                    │
+│   PDF · DOCX · URL · Markdown · Slack · Plain Text  │
+└───────────────────────┬─────────────────────────────┘
+                        │ chunk_markdown() — 600-token ceiling
+                        ▼
+┌─────────────────────────────────────────────────────┐
+│                    Supabase                          │
+│         pgvector (text-embedding-3-small)           │
+│         tsvector (full-text search index)           │
+│         query_log (audit trail, every call)         │
+│         Row-level security per owner                │
+└───────────────────────┬─────────────────────────────┘
+                        │ Hybrid retrieval via RRF
+                        ▼
+┌─────────────────────────────────────────────────────┐
+│              Retrieval (RRF fusion)                  │
+│   pgvector cosine similarity                        │
+│ + Postgres full-text search (tsvector)              │
+│   Reciprocal Rank Fusion merges both result sets    │
+└───────────────────────┬─────────────────────────────┘
+                        │
+                        ▼
+┌─────────────────────────────────────────────────────┐
+│              Integration Surfaces                    │
+│   Claude Code — MCP stdio server (4 tools)          │
+│   Custom GPTs — OpenAPI 3.1.0 spec                 │
+│   Slack — Edge Function capture                     │
+│   REST API — bearer token authenticated             │
+└─────────────────────────────────────────────────────┘
 ```
 
-The markdown ruleset used by linter is:
+### Why hybrid retrieval
 
-- `.pymarkdownlnt.json`
+Pure vector search failed below the 90% pass rate threshold on the query harness — short documents were systematically underscored, and exact-match queries missed when embedding similarity wasn't high enough. Adding Postgres full-text search and fusing both result sets via Reciprocal Rank Fusion resolved both failure modes.
 
-```bash
-python -m pymarkdown --disable-rules MD025,MD022,MD029,MD013 --config .pymarkdownlnt.json scan README.md docs/AGENTS.md docs/OPENBRAIN_NEXT_STEPS.md docs/OPENBRAIN_ARCHITECTURE.md
-```
+### Why Supabase over ChromaDB
 
-2) Run lint:
+ChromaDB has no web-facing API, no multi-user tenancy model, and no serverless deployment path. Supabase provides all three out of the box, plus row-level security for owner isolation and a migration-controlled schema that evolves cleanly.
 
-```bash
-make lint
-```
+---
 
-That runs:
+## Measured Results
 
-- Python syntax compile check
-- Ruff Python lint + formatting check
-- Markdown lint via `pymarkdown` using `.pymarkdownlnt.json`
+| Metric | Result | Method |
+|--------|--------|--------|
+| Query pass rate | 96.9% | 1,000-query harness, RRF + LengthPenalty fusion |
+| Answer fidelity | 0.950 avg | Dual-judge eval (Claude Sonnet + GPT-4o independently) |
+| Judge disagreement | 12% | 3 disagreements fully analyzed in baseline |
+| Happy-path smoke tests | 26/26 green | Local + preview + production |
+| Hallucination detection | Per-response flag | Dual-judge cross-validation |
 
-3) Run preflight smoke checks:
+### Eval methodology
 
-```bash
-make smoke
-```
+The answer fidelity harness (`scripts/test_answer_fidelity.py`) uses two independent judges — Claude Sonnet and GPT-4o — scoring each response on retrieval accuracy, answer fidelity (0.0–1.0), and hallucination detection. Disagreements are flagged for manual review. The dual-judge design prevents any single model's biases from contaminating the baseline.
 
-This validates handler import and core API routes locally before pushing. For a live deployment smoke pass:
+Full methodology in [`docs/EVAL_METHODOLOGY.md`](docs/EVAL_METHODOLOGY.md).
 
-```bash
-make smoke-live SMOKE_URL=https://<project-domain>.vercel.app
-```
+---
 
-Run both lint and smoke together before deployment:
+## Security Architecture
 
-```bash
-make check
-```
+OpenBrain handles multi-user personal and professional context. The security layer was designed accordingly:
 
-Capture logs for easy review:
+**Authentication**
+- Bearer token auth enforced on all endpoints (`/query`, `/search`, `/ingest`, `/session_report`)
+- Token → owner mapping via `OPENBRAIN_TOKEN_OWNER_MAP`
+- Cross-tenant access guard: `require_auth_owner()` binds token identity to owner — mismatched owner returns 403
 
-```bash
-make check-log
-```
+**Injection Defense**
+- Two-layer SafeIngest gate: regex pattern check ($0.00) → optional Haiku classifier on match
+- `SOCrATIC_RULES` in `tutor.py` are hardcoded Python — injected content cannot override teaching behavior regardless of gate status
+- `OPENBRAIN_EXTENDED_CHECKS` toggle for additional validation
 
-```bash
-make smoke-live-log SMOKE_URL=https://<project-domain>.vercel.app
-```
+**Audit Trail**
+- `public.query_log` table — every call to `query_payload` writes a row with owner, timestamp, and query content
+- Foundation for behavioral analysis and anomaly detection
 
-## Repository hygiene
+**Session Reporting**
+- Nightly Vercel Cron (`0 3 * * *`) builds HTML session report from `query_log` and delivers via Resend API
+- Recipient config via `REPORT_CONFIGS` env var (JSON array, supports multiple recipients)
+- `CRON_SECRET` managed by Vercel
 
-- `requirements-full.txt` includes optional tooling for local ingestion experiments.
-- If generated local artifacts are created during manual experiments, do not commit them to git.
-- If local artifacts are modified by ingestion or CLI testing, restore from HEAD:
+---
 
-```bash
-git restore -- <artifact_path>
-```
+## Multi-User Tenancy
 
-## Dependency profile for deployment vs local use
+Three users, isolated namespaces. Bearer token determines owner on every request. Row-level security enforced at the Supabase layer — one user's data is structurally inaccessible via another user's token.
 
-- Vercel API functions use a minimal dependency set in `requirements.txt` to stay within Lambda install limits.
-- Local/CLI development using full model tooling can use:
+Each user has a dedicated integration surface:
+- **Claude Code** — MCP stdio server (`docs/MCP_CONTRACT.md`)
+- **Custom GPTs** — OpenAPI 3.1.0 spec with isolated bearer tokens per user (`docs/CUSTOM_GPT_ACTION_SPEC.yaml`)
+- **Claude.ai connector** — HTTP MCP endpoint (`docs/CLAUDE_ACTION_SPEC.yaml`)
 
-```bash
-pip install -r requirements-full.txt
-```
+---
 
-- If you need to run the full local ingestion/tuning toolchain after pulling a fresh environment, install from `requirements-full.txt`.
+## Ingest Pipeline
 
-to remove generated changes before committing.
+Six ingest paths, all producing normalized markdown for chunking:
+
+| Source | Handler | Notes |
+|--------|---------|-------|
+| Plain text / Markdown | Direct | Chunk via `chunk_markdown()` |
+| DOCX | Heading-preserving extractor | Maintains document structure |
+| PDF (text-layer) | Direct extraction | Skips OCR for text-dominant docs |
+| PDF (scanned) | Vision OCR — Haiku/Sonnet tiered | Sonnet for handwritten (0.846 recovery rate) |
+| URL / HTML | markdownify | Boilerplate stripped |
+| Slack | Edge Function capture | Real-time ingest on message |
+
+All paths route through `chunk_markdown()` with a 600-token ceiling and parent heading inheritance on sub-chunks.
+
+---
+
+## Deployment
+
+Deployed as a serverless Python application on Vercel. API functions use a minimal dependency set (`requirements.txt`) to stay within Lambda install limits. Full local toolchain available via `requirements-full.txt`.
+
+**Stack:** Python · Supabase (pgvector + PostgreSQL) · Vercel serverless · Resend (email)
+
+---
+
+## Development
+
+See [`CLAUDE.md`](CLAUDE.md) for agent-facing session continuity instructions, dev workflow commands, lint/smoke targets, and repository hygiene rules.
+
+Key docs:
+- [`docs/OPENBRAIN_ARCHITECTURE.md`](docs/OPENBRAIN_ARCHITECTURE.md) — full architecture narrative
+- [`docs/EVAL_METHODOLOGY.md`](docs/EVAL_METHODOLOGY.md) — eval harness design and baseline interpretation
+- [`docs/AGENTS.md`](docs/AGENTS.md) — agent contract specifications
+- [`docs/OPERATIONS_RUNBOOK.md`](docs/OPERATIONS_RUNBOOK.md) — day-2 operational procedures
+
+---
+
+## Related Projects
+
+- **[multi-agent-lab](https://github.com/MikeMcMahon-dev/multi-agent-lab)** — multi-agent infrastructure automation with LLM-assisted failure diagnosis
+- **[homelab-talos-cluster](https://github.com/MikeMcMahon-dev/homelab-talos-cluster)** — Talos Linux Kubernetes cluster (target deployment environment)
+- **[mikemcmahon.dev](https://mikemcmahon.dev)** — technical blog documenting this work
