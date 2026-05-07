@@ -33,6 +33,20 @@ See docs/decisions/ for full ADRs. Summary:
 - **Never write real credentials into any file.** Docs and setup guides use placeholders (`YOUR_TOKEN_HERE`). Real tokens live in `.env.local` (gitignored) and Vercel env vars only.
 - All changes go feature branch → PR → merge. The hook enforces the branch side; the rest is on you.
 
+## Security constraints — MANDATORY
+
+### Credential incidents
+| Date | File | What happened |
+|---|---|---|
+| 2026-05-01 | `docs/MCP_SETUP.md` | Real API token committed (Claude Code) — remediated same day |
+| 2026-05-06 | `ai-engineering-plan/CURRENT_STATE.md` | Proxmox token in multi-agent context |
+
+### Rules
+- **Before writing any doc or config**, `credential_scan.py` runs via PreToolUse hook. Do not bypass.
+- **Never write real credentials** — use `YOUR_TOKEN_HERE`, `<redacted>`, or `$ENV_VAR`.
+- **Haiku must not be used** for documentation or configuration file generation tasks.
+- Run `pre-commit run --all-files` before pushing (TruffleHog is configured in home-lab root).
+
 ## Critical constraints
 - SUPABASE_DB_URL in Vercel must be the **direct Postgres URI** (postgresql://), not the REST URL
 - psycopg uses port 6543 (transaction pooler) for serverless — not 5432
