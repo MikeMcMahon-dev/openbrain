@@ -233,12 +233,57 @@ Notes on notable entries:
 ```yaml
 mapping:
   # ── High-volume buckets (review carefully) ──────────────────────────────────
+
+  # engineering/notes (391 rows) — PATH-BASED CLASSIFICATION REQUIRED.
+  # subject='engineering' + topic='notes' is insufficient — sub-classify by source_uri prefix.
+  # load_domain_mapping() must return _path_rules for this key.
+  # classify_row() checks source_uri against prefixes IN ORDER (first match wins).
+  # NOTE: source_channel="text" (no file path) rule covers future text-ingest operational notes
+  #       only — zero existing rows have source_type='text' in this bucket today.
   "engineering":
-    domain: "Study"
-    environment: "Study"
-    system: null
-    tags: ["Engineering", "Reference"]
-    notes: "391 rows — Obsidian vault. Broad SRE/K8s/Terraform. All migrate as historical."
+    _path_rules:
+      - prefix: "vault/Homelab Notes/"
+        domain: "Network"
+        environment: "Lab"
+        system: null
+        tags: ["Network", "Lab", "Homelab"]
+        count: 11
+      - prefix: "vault/Infrastructure as Code Notes/NV Prep/"
+        domain: "Study"
+        environment: "Study"
+        system: null
+        tags: ["Study", "NV-Prep"]
+        count: 72
+      - prefix: "vault/Infrastructure as Code Notes/Bare-Metal/"
+        domain: "Study"
+        environment: "Lab"
+        system: null
+        tags: ["Study", "Bare-Metal"]
+        count: 16
+      - prefix: "vault/Infrastructure as Code Notes/"
+        domain: "Study"
+        environment: "Study"
+        system: null
+        tags: ["Study", "IaC"]
+        count: 279
+      - prefix: "vault/AI Study/"
+        domain: "Study"
+        environment: "Study"
+        system: null
+        tags: ["Study", "AI"]
+        count: 13
+    _text_source_rule:
+      note: "source_type=text with no file path — future operational state notes ingested from chat. Zero existing rows."
+      domain: "Network"
+      environment: "Production"
+      system: null
+      tags: ["Network", "Production"]
+    _default:
+      domain: "Study"
+      environment: "Study"
+      system: null
+      tags: ["Study", "Engineering"]
+      notes: "Fallback if no prefix matches. Should not occur for existing rows — investigate if hit."
 
   "project":
     domain: "OpenBrain"
@@ -581,5 +626,32 @@ mapping:
 6. `created_by` maps from `metadata->>'owner'` (preferred) then `created_by_user_login`.
 7. `source` = `"migration:thoughts:2026-05-13"` for all migrated rows.
 8. Verify: `COUNT(knowledge) == COUNT(thoughts)` before closing Stage 2.
+
+### Path-based classification (engineering bucket)
+
+When `mapping[subject]` contains a `_path_rules` key, `classify_row()` must apply
+path-based sub-classification instead of the flat domain/environment values:
+
+```python
+def classify_row(subject, topic, source_uri, source_type, mapping):
+    entry = mapping.get(subject) or mapping["__default__"]
+
+    if "_path_rules" in entry:
+        # Text-source rule checked first (no file path)
+        if source_type == "text" and not source_uri:
+            return entry["_text_source_rule"]
+        # Path prefix rules — first match wins
+        if source_uri:
+            for rule in entry["_path_rules"]:
+                if rule["prefix"] in source_uri:
+                    return rule
+        # Fallback
+        return entry["_default"]
+
+    return entry  # flat mapping — use directly
+```
+
+`classify_row()` signature must accept `source_uri` and `source_type` (in addition to
+`subject` and `topic`) since the engineering bucket cannot be classified from subject alone.
 
 **Human sign-off required on mapping before `--execute`.**
