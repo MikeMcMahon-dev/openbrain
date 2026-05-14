@@ -233,12 +233,95 @@ Notes on notable entries:
 ```yaml
 mapping:
   # ── High-volume buckets (review carefully) ──────────────────────────────────
+
+  # engineering/notes (391 rows) — PATH-BASED CLASSIFICATION REQUIRED.
+  # subject='engineering' + topic='notes' alone is insufficient.
+  # load_domain_mapping() must return _path_rules for this key.
+  # classify_row() checks source_uri against prefixes IN ORDER (first match wins).
+  # More-specific paths must come before their parent prefixes.
+  # NOTE: _text_source_rule covers future text-ingest operational notes only —
+  #       zero existing rows have source_type='text' in this bucket today.
+  #
+  # Confirmed counts (2026-05-14):
+  #   RedHat 127, NV Prep 72, BASH Scripting 63, Ansible 38, Terraform 27,
+  #   Bare-Metal 16, Python 1, IaC top-level files 23, Homelab Notes 11, AI Study 13
   "engineering":
-    domain: "Study"
-    environment: "Study"
-    system: null
-    tags: ["Engineering", "Reference"]
-    notes: "391 rows — Obsidian vault. Broad SRE/K8s/Terraform. All migrate as historical."
+    _path_rules:
+      # ── IaC named subfolders (most-specific first) ──────────────────────
+      - prefix: "vault/Infrastructure as Code Notes/NV Prep/"
+        domain: "Study"
+        environment: "Study"
+        system: null
+        tags: ["IaC", "NV-Prep"]
+        count: 72
+      - prefix: "vault/Infrastructure as Code Notes/Bare-Metal/"
+        domain: "Study"
+        environment: "Lab"
+        system: null
+        tags: ["IaC", "Bare-Metal"]
+        count: 16
+      - prefix: "vault/Infrastructure as Code Notes/RedHat/"
+        domain: "Study"
+        environment: "Study"
+        system: null
+        tags: ["IaC", "RedHat"]
+        count: 127
+      - prefix: "vault/Infrastructure as Code Notes/BASH Scripting/"
+        domain: "Study"
+        environment: "Study"
+        system: null
+        tags: ["IaC", "Bash"]
+        count: 63
+      - prefix: "vault/Infrastructure as Code Notes/Ansible/"
+        domain: "Study"
+        environment: "Study"
+        system: null
+        tags: ["IaC", "Ansible"]
+        count: 38
+      - prefix: "vault/Infrastructure as Code Notes/Terraform/"
+        domain: "Study"
+        environment: "Study"
+        system: null
+        tags: ["IaC", "Terraform"]
+        count: 27
+      - prefix: "vault/Infrastructure as Code Notes/Python/"
+        domain: "Study"
+        environment: "Study"
+        system: null
+        tags: ["IaC", "Python"]
+        count: 1
+      # ── IaC top-level files (catch-all — must follow all subfolder rules) ──
+      - prefix: "vault/Infrastructure as Code Notes/"
+        domain: "Study"
+        environment: "Study"
+        system: null
+        tags: ["IaC"]
+        count: 23
+      # ── Other vault sections ─────────────────────────────────────────────
+      - prefix: "vault/Homelab Notes/"
+        domain: "Network"
+        environment: "Lab"
+        system: null
+        tags: ["Homelab"]
+        count: 11
+      - prefix: "vault/AI Study/"
+        domain: "Study"
+        environment: "Study"
+        system: null
+        tags: ["AI"]
+        count: 13
+    _text_source_rule:
+      note: "source_type=text, no file path — future operational state notes ingested from chat. Zero existing rows."
+      domain: "Network"
+      environment: "Production"
+      system: null
+      tags: ["Network", "Production"]
+    _default:
+      domain: "Study"
+      environment: "Study"
+      system: null
+      tags: ["IaC"]
+      notes: "Fallback if no prefix matches. Should not occur for existing rows — investigate if hit."
 
   "project":
     domain: "OpenBrain"
@@ -581,5 +664,32 @@ mapping:
 6. `created_by` maps from `metadata->>'owner'` (preferred) then `created_by_user_login`.
 7. `source` = `"migration:thoughts:2026-05-13"` for all migrated rows.
 8. Verify: `COUNT(knowledge) == COUNT(thoughts)` before closing Stage 2.
+
+### Path-based classification (engineering bucket)
+
+When `mapping[subject]` contains a `_path_rules` key, `classify_row()` must apply
+path-based sub-classification instead of the flat domain/environment values:
+
+```python
+def classify_row(subject, topic, source_uri, source_type, mapping):
+    entry = mapping.get(subject) or mapping["__default__"]
+
+    if "_path_rules" in entry:
+        # Text-source rule checked first (no file path)
+        if source_type == "text" and not source_uri:
+            return entry["_text_source_rule"]
+        # Path prefix rules — first match wins
+        if source_uri:
+            for rule in entry["_path_rules"]:
+                if rule["prefix"] in source_uri:
+                    return rule
+        # Fallback
+        return entry["_default"]
+
+    return entry  # flat mapping — use directly
+```
+
+`classify_row()` signature must accept `source_uri` and `source_type` (in addition to
+`subject` and `topic`) since the engineering bucket cannot be classified from subject alone.
 
 **Human sign-off required on mapping before `--execute`.**
