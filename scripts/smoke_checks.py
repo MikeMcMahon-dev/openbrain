@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import argparse
-import os
 import json
+import os
 import ssl
 import sys
 import time
@@ -962,6 +962,224 @@ def smoke_local(idempotency_source: str | None = None, idempotency_owner: str | 
     # MCP endpoint smoke cases (cases 36–46)
     failed += _smoke_mcp_cases_local()
 
+    # OB2 knowledge/wiki smoke cases
+    failed += _smoke_ob2_cases_local()
+
+    return failed
+
+
+def _smoke_ob2_cases_local() -> int:
+    """OB2 knowledge and wiki endpoint smoke cases.
+
+    Validates auth enforcement, input validation, and basic query behavior.
+    DB-dependent cases are skipped when no DB URL is available.
+
+    Returns count of failures.
+    """
+    _token = os.getenv("OPENBRAIN_TOOL_ACCESS_TOKEN", "")
+    _auth = {"Authorization": f"Bearer {_token}"} if _token else {}
+    db_url = _supabase_url()
+    failed = 0
+
+    def _check(label: str, request: dict, expected: int) -> None:
+        nonlocal failed
+        ok, msg = run_case(request, expected)
+        print(f"{label}: {msg}")
+        if not ok:
+            failed += 1
+
+    # Auth rejection — only meaningful when token is configured
+    if _token:
+        _check(
+            "ingest_state no auth",
+            {
+                "path": "/api/ingest_state",
+                "method": "POST",
+                "body": json.dumps({
+                    "content": "x", "domain": "Network", "environment": "Production",
+                }),
+                "headers": {},
+            },
+            401,
+        )
+        _check(
+            "propose_supersession no auth",
+            {
+                "path": "/api/propose_supersession",
+                "method": "POST",
+                "body": json.dumps({}),
+                "headers": {},
+            },
+            401,
+        )
+        _check(
+            "confirm_supersession no auth",
+            {
+                "path": "/api/confirm_supersession",
+                "method": "POST",
+                "body": json.dumps({}),
+                "headers": {},
+            },
+            401,
+        )
+        _check(
+            "query_state no auth",
+            {"path": "/api/query_state", "method": "GET", "headers": {}},
+            401,
+        )
+        _check(
+            "compile_wiki no auth",
+            {
+                "path": "/api/compile_wiki",
+                "method": "POST",
+                "body": json.dumps({}),
+                "headers": {},
+            },
+            401,
+        )
+        _check(
+            "get_wiki no auth",
+            {"path": "/api/wiki/test-page", "method": "GET", "headers": {}},
+            401,
+        )
+
+    # Input validation (auth passes, no DB needed)
+    _check(
+        "ingest_state missing content",
+        {
+            "path": "/api/ingest_state",
+            "method": "POST",
+            "body": json.dumps({"domain": "Network", "environment": "Production"}),
+            "headers": _auth,
+        },
+        400,
+    )
+    _check(
+        "ingest_state missing domain",
+        {
+            "path": "/api/ingest_state",
+            "method": "POST",
+            "body": json.dumps({"content": "x", "environment": "Production"}),
+            "headers": _auth,
+        },
+        400,
+    )
+    _check(
+        "ingest_state missing environment",
+        {
+            "path": "/api/ingest_state",
+            "method": "POST",
+            "body": json.dumps({"content": "x", "domain": "Network"}),
+            "headers": _auth,
+        },
+        400,
+    )
+    _check(
+        "ingest_state invalid domain",
+        {
+            "path": "/api/ingest_state",
+            "method": "POST",
+            "body": json.dumps({
+                "content": "x", "domain": "NotADomain", "environment": "Production",
+            }),
+            "headers": _auth,
+        },
+        400,
+    )
+    _check(
+        "propose_supersession missing supersedes_id",
+        {
+            "path": "/api/propose_supersession",
+            "method": "POST",
+            "body": json.dumps({
+                "content": "x", "domain": "Network", "environment": "Production",
+            }),
+            "headers": _auth,
+        },
+        400,
+    )
+    _check(
+        "propose_supersession missing content",
+        {
+            "path": "/api/propose_supersession",
+            "method": "POST",
+            "body": json.dumps({
+                "supersedes_id": "00000000-0000-0000-0000-000000000000",
+                "domain": "Network",
+                "environment": "Production",
+            }),
+            "headers": _auth,
+        },
+        400,
+    )
+    _check(
+        "confirm_supersession missing proposal_id",
+        {
+            "path": "/api/confirm_supersession",
+            "method": "POST",
+            "body": json.dumps({}),
+            "headers": _auth,
+        },
+        400,
+    )
+    _check(
+        "compile_wiki missing page_name",
+        {
+            "path": "/api/compile_wiki",
+            "method": "POST",
+            "body": json.dumps({"domain": "Network"}),
+            "headers": _auth,
+        },
+        400,
+    )
+    _check(
+        "compile_wiki missing domain",
+        {
+            "path": "/api/compile_wiki",
+            "method": "POST",
+            "body": json.dumps({"page_name": "test-page"}),
+            "headers": _auth,
+        },
+        400,
+    )
+    _check(
+        "compile_wiki invalid page_type",
+        {
+            "path": "/api/compile_wiki",
+            "method": "POST",
+            "body": json.dumps({
+                "page_name": "p", "domain": "Network", "page_type": "invalid-type",
+            }),
+            "headers": _auth,
+        },
+        400,
+    )
+
+    # DB-dependent cases
+    if not db_url:
+        print("OB2 DB-dependent cases: SKIP — no DB URL available")
+        return failed
+
+    _check(
+        "query_state returns 200",
+        {
+            "path": "/api/query_state",
+            "method": "GET",
+            "body": json.dumps({"domain": "Network", "limit": 5}),
+            "headers": _auth,
+        },
+        200,
+    )
+    _check(
+        "get_wiki nonexistent page returns 404",
+        {
+            "path": "/api/wiki/nonexistent-xyloquartz-page-ob2-smoke",
+            "method": "GET",
+            "headers": _auth,
+        },
+        404,
+    )
+
     return failed
 
 
@@ -1212,7 +1430,6 @@ def smoke_oauth(base_url: str) -> int:
     """Test the OAuth 2.0 authorization flow end-to-end against a live deployment."""
     import base64
     import hashlib
-    import hmac
     import secrets
 
     failed = 0
