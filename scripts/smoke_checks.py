@@ -172,7 +172,9 @@ def _count_ingest_rows_for_source(source: str, tenant_id: str, owner: str) -> in
         return None
 
 
-def _run_local_ingest_call(source: str, owner: str | None, path: str = "/api/ingest") -> tuple[bool, str]:
+def _run_local_ingest_call(
+    source: str, owner: str | None, path: str = "/api/ingest"
+) -> tuple[bool, str]:
     body = {"source_type": "obsidian", "source": source}
     if owner:
         body["owner"] = owner
@@ -216,7 +218,10 @@ def _smoke_local_idempotency_check(source: str, owner: str | None) -> int:
     if after_second is None:
         return 0
 
-    print(f"Idempotency check for source='{source}', owner='{normalized_owner}': before={before}, after_first={after_first}, after_second={after_second}")
+    print(
+        f"Idempotency check for source='{source}', owner='{normalized_owner}': "
+        f"before={before}, after_first={after_first}, after_second={after_second}"
+    )
     if after_first < before:
         print("Idempotency check failed: first call reduced row count.")
         return 1
@@ -279,7 +284,9 @@ def _smoke_pdf_cases_local() -> int:
         if status_val == "accepted":
             print("/api/ingest [pdf accepted]: ok (accepted)")
         elif status_val == "queued":
-            print("/api/ingest [pdf accepted]: FAIL — status=queued (implementation not yet active)")
+            print(
+                "/api/ingest [pdf accepted]: FAIL — status=queued (implementation not yet active)"
+            )
             failed += 1
         else:
             print(f"/api/ingest [pdf accepted]: FAIL — status={status_val!r}")
@@ -323,7 +330,10 @@ def _smoke_pdf_cases_local() -> int:
         if body2.get("status") == "failed":
             print("/api/ingest [pdf missing file]: ok (failed)")
         else:
-            print(f"/api/ingest [pdf missing file]: FAIL — expected status=failed, got {body2.get('status')!r}")
+            print(
+                f"/api/ingest [pdf missing file]: FAIL — "
+                f"expected status=failed, got {body2.get('status')!r}"
+            )
             failed += 1
     else:
         print(f"/api/ingest [pdf missing file]: {msg2}")
@@ -349,9 +359,13 @@ def _smoke_pdf_cases_local() -> int:
             }),
             "headers": {"Content-Type": "application/json", **_auth},
         })
-        ingest_body = json.loads(ingest_resp.get("body", "{}")) if isinstance(ingest_resp.get("body"), str) else {}
+        _ibody = ingest_resp.get("body", "{}")
+        ingest_body = json.loads(_ibody) if isinstance(_ibody, str) else {}
         if ingest_body.get("status") != "accepted":
-            print(f"/api/ingest+query [pdf retrieval]: SKIP — ingest returned {ingest_body.get('status')!r} (not accepted)")
+            print(
+                f"/api/ingest+query [pdf retrieval]: SKIP — "
+                f"ingest returned {ingest_body.get('status')!r} (not accepted)"
+            )
         else:
             time.sleep(1)
             query_resp = _h({
@@ -360,13 +374,20 @@ def _smoke_pdf_cases_local() -> int:
                 "body": json.dumps({"query": unique_phrase, "owner": "mike.mcmahon67"}),
                 "headers": {"Content-Type": "application/json", **_auth},
             })
-            query_body = json.loads(query_resp.get("body", "{}")) if isinstance(query_resp.get("body"), str) else {}
+            _qbody = query_resp.get("body", "{}")
+            query_body = json.loads(_qbody) if isinstance(_qbody, str) else {}
             results = query_body.get("results", [])
-            found = any(unique_phrase in (r.get("text", "") or r.get("content", "")) for r in results)
+            found = any(
+                unique_phrase in (r.get("text", "") or r.get("content", ""))
+                for r in results
+            )
             if found:
                 print("/api/ingest+query [pdf retrieval]: ok (phrase found in results)")
             else:
-                print(f"/api/ingest+query [pdf retrieval]: FAIL — phrase not found in {len(results)} results")
+                print(
+                    f"/api/ingest+query [pdf retrieval]: FAIL — "
+                    f"phrase not found in {len(results)} results"
+                )
                 failed += 1
 
     return failed
@@ -391,7 +412,9 @@ def _smoke_docx_url_cases_local() -> int:
     docx_unique_phrase = "xyloquartz-retrieval-fixture-beta"
     url_unique_phrase = "Example Domain"
 
-    def _ingest_and_check_status(label: str, source_type: str, source: str, expected_status: str) -> tuple[bool, str]:
+    def _ingest_and_check_status(
+        label: str, source_type: str, source: str, expected_status: str
+    ) -> tuple[bool, str]:
         """Helper: call ingest and return (ok, actual_status)."""
         from api.app import handler as _h
         resp = _h({
@@ -424,7 +447,9 @@ def _smoke_docx_url_cases_local() -> int:
         failed += 1
 
     # Case 31: missing DOCX file → "failed"
-    ok31, _ = _ingest_and_check_status("docx missing file", "docx", "/nonexistent/smoke_test.docx", "failed")
+    ok31, _ = _ingest_and_check_status(
+        "docx missing file", "docx", "/nonexistent/smoke_test.docx", "failed"
+    )
     if not ok31:
         failed += 1
 
@@ -433,7 +458,10 @@ def _smoke_docx_url_cases_local() -> int:
     if not db_url:
         print("/api/ingest+query [docx retrieval]: SKIP — no DB URL available")
     elif status30 != "accepted":
-        print(f"/api/ingest+query [docx retrieval]: SKIP — ingest returned {status30!r} (not accepted)")
+        print(
+            f"/api/ingest+query [docx retrieval]: SKIP — "
+            f"ingest returned {status30!r} (not accepted)"
+        )
     else:
         from api.app import handler as _h
         time.sleep(1)
@@ -443,17 +471,26 @@ def _smoke_docx_url_cases_local() -> int:
             "body": json.dumps({"query": docx_unique_phrase, "owner": "mike.mcmahon67"}),
             "headers": {"Content-Type": "application/json", **_auth},
         })
-        query_body = json.loads(query_resp.get("body", "{}")) if isinstance(query_resp.get("body"), str) else {}
+        _qbody = query_resp.get("body", "{}")
+        query_body = json.loads(_qbody) if isinstance(_qbody, str) else {}
         results = query_body.get("results", [])
-        found = any(docx_unique_phrase in (r.get("text", "") or r.get("content", "")) for r in results)
+        found = any(
+            docx_unique_phrase in (r.get("text", "") or r.get("content", ""))
+            for r in results
+        )
         if found:
             print("/api/ingest+query [docx retrieval]: ok (phrase found in results)")
         else:
-            print(f"/api/ingest+query [docx retrieval]: FAIL — phrase not found in {len(results)} results")
+            print(
+                f"/api/ingest+query [docx retrieval]: FAIL — "
+                f"phrase not found in {len(results)} results"
+            )
             failed += 1
 
     # Case 33: valid URL → "accepted"
-    ok33, status33 = _ingest_and_check_status("url accepted", "url", "https://example.com", "accepted")
+    ok33, status33 = _ingest_and_check_status(
+        "url accepted", "url", "https://example.com", "accepted"
+    )
     if not ok33:
         failed += 1
 
@@ -466,7 +503,10 @@ def _smoke_docx_url_cases_local() -> int:
     if not db_url:
         print("/api/ingest+query [url retrieval]: SKIP — no DB URL available")
     elif status33 != "accepted":
-        print(f"/api/ingest+query [url retrieval]: SKIP — url ingest returned {status33!r} (not accepted)")
+        print(
+            f"/api/ingest+query [url retrieval]: SKIP — "
+            f"url ingest returned {status33!r} (not accepted)"
+        )
     else:
         from api.app import handler as _h
         time.sleep(1)
@@ -476,13 +516,20 @@ def _smoke_docx_url_cases_local() -> int:
             "body": json.dumps({"query": url_unique_phrase, "owner": "mike.mcmahon67"}),
             "headers": {"Content-Type": "application/json", **_auth},
         })
-        query_body = json.loads(query_resp.get("body", "{}")) if isinstance(query_resp.get("body"), str) else {}
+        _qbody = query_resp.get("body", "{}")
+        query_body = json.loads(_qbody) if isinstance(_qbody, str) else {}
         results = query_body.get("results", [])
-        found = any(url_unique_phrase in (r.get("text", "") or r.get("content", "")) for r in results)
+        found = any(
+            url_unique_phrase in (r.get("text", "") or r.get("content", ""))
+            for r in results
+        )
         if found:
             print("/api/ingest+query [url retrieval]: ok (phrase found in results)")
         else:
-            print(f"/api/ingest+query [url retrieval]: FAIL — phrase not found in {len(results)} results")
+            print(
+                f"/api/ingest+query [url retrieval]: FAIL — "
+                f"phrase not found in {len(results)} results"
+            )
             failed += 1
 
     return failed
@@ -844,7 +891,9 @@ def smoke_local(idempotency_source: str | None = None, idempotency_owner: str | 
             {
                 "path": "/claude_query",
                 "method": "POST",
-                "body": json.dumps({"type": "tool_use", "name": "claude_query", "input": {"query": "test"}}),
+                "body": json.dumps({
+                    "type": "tool_use", "name": "claude_query", "input": {"query": "test"},
+                }),
                 "headers": {"Content-Type": "application/json", **_auth},
             },
             200,
@@ -853,7 +902,11 @@ def smoke_local(idempotency_source: str | None = None, idempotency_owner: str | 
             {
                 "path": "/claude_generate_quiz",
                 "method": "POST",
-                "body": json.dumps({"type": "tool_use", "name": "claude_generate_quiz", "input": {"query": "test"}}),
+                "body": json.dumps({
+                    "type": "tool_use",
+                    "name": "claude_generate_quiz",
+                    "input": {"query": "test"},
+                }),
                 "headers": {"Content-Type": "application/json", **_auth},
             },
             200,
@@ -862,7 +915,11 @@ def smoke_local(idempotency_source: str | None = None, idempotency_owner: str | 
             {
                 "path": "/claude_generate_flashcards",
                 "method": "POST",
-                "body": json.dumps({"type": "tool_use", "name": "claude_generate_flashcards", "input": {"query": "test"}}),
+                "body": json.dumps({
+                    "type": "tool_use",
+                    "name": "claude_generate_flashcards",
+                    "input": {"query": "test"},
+                }),
                 "headers": {"Content-Type": "application/json", **_auth},
             },
             200,
@@ -871,7 +928,11 @@ def smoke_local(idempotency_source: str | None = None, idempotency_owner: str | 
             {
                 "path": "/claude_ingest",
                 "method": "POST",
-                "body": json.dumps({"type": "tool_use", "name": "claude_ingest", "input": {"source_type": "text", "source": "smoke test"}}),
+                "body": json.dumps({
+                    "type": "tool_use",
+                    "name": "claude_ingest",
+                    "input": {"source_type": "text", "source": "smoke test"},
+                }),
                 "headers": {"Content-Type": "application/json", **_auth},
             },
             200,
@@ -1271,13 +1332,21 @@ def smoke_live(base_url: str) -> int:
         ),
         (
             "/claude_generate_flashcards",
-            {"type": "tool_use", "name": "claude_generate_flashcards", "input": {"query": "terraform"}},
+            {
+                "type": "tool_use",
+                "name": "claude_generate_flashcards",
+                "input": {"query": "terraform"},
+            },
             200,
             {"Authorization": f"Bearer {os.getenv('OPENBRAIN_TOOL_ACCESS_TOKEN', '')}"},
         ),
         (
             "/claude_ingest",
-            {"type": "tool_use", "name": "claude_ingest", "input": {"source_type": "text", "source": "live smoke test note"}},
+            {
+                "type": "tool_use",
+                "name": "claude_ingest",
+                "input": {"source_type": "text", "source": "live smoke test note"},
+            },
             200,
             {"Authorization": f"Bearer {os.getenv('OPENBRAIN_TOOL_ACCESS_TOKEN', '')}"},
         ),
@@ -1409,7 +1478,10 @@ def smoke_live(base_url: str) -> int:
             if status == 200 and body_status == expected_status:
                 print(f"{label}: ok ({expected_status})")
             elif status == 200 and body_status == "queued":
-                print(f"{label}: FAIL — status=queued (PDF implementation not yet active on this deployment)")
+                print(
+                    f"{label}: FAIL — status=queued "
+                    "(PDF implementation not yet active on this deployment)"
+                )
                 failed += 1
             else:
                 print(f"{label}: FAIL — HTTP {status}, status={body_status!r}")
@@ -1458,7 +1530,9 @@ def smoke_oauth(base_url: str) -> int:
     # ── Case 1: Discovery document ────────────────────────────────────────────
     label = "oauth/.well-known"
     try:
-        status, body = _call_live(base_url, "GET", "/.well-known/oauth-authorization-server", None, None)
+        status, body = _call_live(
+            base_url, "GET", "/.well-known/oauth-authorization-server", None, None
+        )
         if status != 200:
             print(f"{label}: FAIL — HTTP {status}")
             failed += 1
@@ -1565,7 +1639,10 @@ def smoke_oauth(base_url: str) -> int:
         if qs.get("error") == "unauthorized_client":
             print(f"{label}: ok (302 with unauthorized_client)")
         else:
-            print(f"{label}: FAIL — expected unauthorized_client, got status={status} location={location[:80]}")
+            print(
+                f"{label}: FAIL — expected unauthorized_client, "
+                f"got status={status} location={location[:80]}"
+            )
             failed += 1
     except Exception as exc:
         print(f"{label}: FAIL — {exc}")
@@ -1586,7 +1663,10 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--idempotency-owner",
-        help="Expected owner for local /api/ingest idempotency check. Defaults to OPENBRAIN_DEFAULT_OWNER.",
+        help=(
+            "Expected owner for local /api/ingest idempotency check. "
+            "Defaults to OPENBRAIN_DEFAULT_OWNER."
+        ),
     )
     return parser.parse_args()
 
