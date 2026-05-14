@@ -235,45 +235,83 @@ mapping:
   # ── High-volume buckets (review carefully) ──────────────────────────────────
 
   # engineering/notes (391 rows) — PATH-BASED CLASSIFICATION REQUIRED.
-  # subject='engineering' + topic='notes' is insufficient — sub-classify by source_uri prefix.
+  # subject='engineering' + topic='notes' alone is insufficient.
   # load_domain_mapping() must return _path_rules for this key.
   # classify_row() checks source_uri against prefixes IN ORDER (first match wins).
-  # NOTE: source_channel="text" (no file path) rule covers future text-ingest operational notes
-  #       only — zero existing rows have source_type='text' in this bucket today.
+  # More-specific paths must come before their parent prefixes.
+  # NOTE: _text_source_rule covers future text-ingest operational notes only —
+  #       zero existing rows have source_type='text' in this bucket today.
+  #
+  # Confirmed counts (2026-05-14):
+  #   RedHat 127, NV Prep 72, BASH Scripting 63, Ansible 38, Terraform 27,
+  #   Bare-Metal 16, Python 1, IaC top-level files 23, Homelab Notes 11, AI Study 13
   "engineering":
     _path_rules:
-      - prefix: "vault/Homelab Notes/"
-        domain: "Network"
-        environment: "Lab"
-        system: null
-        tags: ["Network", "Lab", "Homelab"]
-        count: 11
+      # ── IaC named subfolders (most-specific first) ──────────────────────
       - prefix: "vault/Infrastructure as Code Notes/NV Prep/"
         domain: "Study"
         environment: "Study"
         system: null
-        tags: ["Study", "NV-Prep"]
+        tags: ["IaC", "NV-Prep"]
         count: 72
       - prefix: "vault/Infrastructure as Code Notes/Bare-Metal/"
         domain: "Study"
         environment: "Lab"
         system: null
-        tags: ["Study", "Bare-Metal"]
+        tags: ["IaC", "Bare-Metal"]
         count: 16
+      - prefix: "vault/Infrastructure as Code Notes/RedHat/"
+        domain: "Study"
+        environment: "Study"
+        system: null
+        tags: ["IaC", "RedHat"]
+        count: 127
+      - prefix: "vault/Infrastructure as Code Notes/BASH Scripting/"
+        domain: "Study"
+        environment: "Study"
+        system: null
+        tags: ["IaC", "Bash"]
+        count: 63
+      - prefix: "vault/Infrastructure as Code Notes/Ansible/"
+        domain: "Study"
+        environment: "Study"
+        system: null
+        tags: ["IaC", "Ansible"]
+        count: 38
+      - prefix: "vault/Infrastructure as Code Notes/Terraform/"
+        domain: "Study"
+        environment: "Study"
+        system: null
+        tags: ["IaC", "Terraform"]
+        count: 27
+      - prefix: "vault/Infrastructure as Code Notes/Python/"
+        domain: "Study"
+        environment: "Study"
+        system: null
+        tags: ["IaC", "Python"]
+        count: 1
+      # ── IaC top-level files (catch-all — must follow all subfolder rules) ──
       - prefix: "vault/Infrastructure as Code Notes/"
         domain: "Study"
         environment: "Study"
         system: null
-        tags: ["Study", "IaC"]
-        count: 279
+        tags: ["IaC"]
+        count: 23
+      # ── Other vault sections ─────────────────────────────────────────────
+      - prefix: "vault/Homelab Notes/"
+        domain: "Network"
+        environment: "Lab"
+        system: null
+        tags: ["Homelab"]
+        count: 11
       - prefix: "vault/AI Study/"
         domain: "Study"
         environment: "Study"
         system: null
-        tags: ["Study", "AI"]
+        tags: ["AI"]
         count: 13
     _text_source_rule:
-      note: "source_type=text with no file path — future operational state notes ingested from chat. Zero existing rows."
+      note: "source_type=text, no file path — future operational state notes ingested from chat. Zero existing rows."
       domain: "Network"
       environment: "Production"
       system: null
@@ -282,7 +320,7 @@ mapping:
       domain: "Study"
       environment: "Study"
       system: null
-      tags: ["Study", "Engineering"]
+      tags: ["IaC"]
       notes: "Fallback if no prefix matches. Should not occur for existing rows — investigate if hit."
 
   "project":
