@@ -9,6 +9,13 @@ from api.health import handler as health_handler
 from api.ingest import handler as ingest_handler
 from api.mcp_http import handler as mcp_handler
 from api.oauth import handle_authorize, handle_discovery, handle_token
+from api.ob2_state import (
+    handle_confirm_supersession,
+    handle_ingest_state,
+    handle_propose_supersession,
+    handle_query_state,
+)
+from api.ob2_wiki import handle_compile_wiki, handle_get_wiki
 from api.query import handler as query_handler
 from api.search import handler as search_handler
 from api.session_report import handler as session_report_handler
@@ -79,6 +86,18 @@ def handler(request):
         return session_report_handler(request)
     if path in {"/api/cron/session_report"}:
         return cron_session_report_handler(request)
+    if path in {"/api/ingest_state"}:
+        return handle_ingest_state(request)
+    if path in {"/api/propose_supersession"}:
+        return handle_propose_supersession(request)
+    if path in {"/api/confirm_supersession"}:
+        return handle_confirm_supersession(request)
+    if path in {"/api/query_state"}:
+        return handle_query_state(request)
+    if path in {"/api/compile_wiki"}:
+        return handle_compile_wiki(request)
+    if path.startswith("/api/wiki/") and len(path) > len("/api/wiki/"):
+        return handle_get_wiki(request, page_name=path[len("/api/wiki/"):])
 
     return {
         "statusCode": 404,
