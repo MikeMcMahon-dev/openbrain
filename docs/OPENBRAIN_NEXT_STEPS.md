@@ -22,11 +22,12 @@ Design complete. Stage 1 (ADR + Domain Discovery) done. Awaiting human sign-off 
 3. Confirm Supabase dashboard backups are enabled (Settings → Backups)
 4. Sign off → Stage 2 can proceed
 
-### Stage 2 — Database Migration 🔜 Pending human sign-off
-- Branch: `feat/ob2-schema-migration`
-- Schema SQL: `supabase/migrations/001_knowledge_table.sql`, `002_wiki_pages.sql`
-- Migration script: `scripts/migrate_thoughts.py` (dry-run first, `--execute` after approval)
-- Do NOT run `--execute` without explicit human confirmation
+### Stage 2 — Database Migration ✅ Complete (2026-05-14)
+- `public.knowledge` and `public.wiki_pages` applied to production
+- `scripts/test_migration.py`: 5/5 passing
+- `scripts/migrate_thoughts.py --execute` run: 699 rows migrated, COUNT verified
+- All rows at `status='historical'` — no auto-promotion
+- Rollback: `DELETE FROM public.knowledge WHERE source LIKE 'migration:thoughts:%'`
 
 ### Stage 3 — API Updates 🔜 Pending Stage 2
 - Branch: `feat/ob2-api-endpoints`
