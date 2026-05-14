@@ -6,6 +6,22 @@ Documented at [mikemcmahon.dev](https://mikemcmahon.dev).
 
 ---
 
+## OpenBrain 2.0 Status
+
+OB2 adds temporal lifecycle, domain separation, and a compounding wiki layer to the existing RAG system.
+
+| Stage | Status |
+|---|---|
+| Schema migration (`public.knowledge`, `public.wiki_pages`) | ✅ Complete — applied to production |
+| Data migration (699 rows from `thoughts` → `knowledge`) | ✅ Complete — all rows at `status='historical'` |
+| API endpoints (ingest_state, supersession, query_state, wiki) | ✅ Complete — 6 new endpoints live |
+| State promotion (historical → current for operational records) | ⏳ Pending human review |
+| Legacy endpoint cutover (retarget to `knowledge`) | ⏳ Pending migration validation |
+
+See [`docs/OB2-USER-GUIDE.md`](docs/OB2-USER-GUIDE.md) for the session startup protocol.
+
+---
+
 ## The Problem
 
 AI assistants are stateless by design. Each session starts cold — no memory of what you built yesterday, what you decided last week, or why you made that architectural choice. The standard workaround is pasting context into each session manually. That doesn't scale, and it breaks continuity across long-running projects.
