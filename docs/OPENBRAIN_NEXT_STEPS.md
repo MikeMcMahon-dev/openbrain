@@ -4,6 +4,47 @@ This document tracks planned improvements for the OpenBrain system.
 
 ---
 
+## OpenBrain 2.0 — Status (2026-05-13)
+
+Design complete. Stage 1 (ADR + Domain Discovery) done. Awaiting human sign-off before Stage 2.
+
+### Stage 1 — ADR + Domain Discovery ✅ Complete
+- **Branch:** `docs/ob2-architecture-decisions`
+- ADR-007: Unified knowledge table
+- ADR-008: Temporal lifecycle + `component:*` canonical tag deduplication
+- ADR-009: Wiki layer — explicit compilation only
+- ADR-010: Write safety — INSERT-only agents, two-step supersession
+- Domain discovery: `docs/migrations/001_domain_discovery.md`
+
+**HUMAN ACTION REQUIRED before Stage 2:**
+1. Review the YAML mapping block in `docs/migrations/001_domain_discovery.md`
+2. Verify the `engineering/notes` (391 rows) and `project/documentation` (113 rows) mappings
+3. Confirm Supabase dashboard backups are enabled (Settings → Backups)
+4. Sign off → Stage 2 can proceed
+
+### Stage 2 — Database Migration 🔜 Pending human sign-off
+- Branch: `feat/ob2-schema-migration`
+- Schema SQL: `supabase/migrations/001_knowledge_table.sql`, `002_wiki_pages.sql`
+- Migration script: `scripts/migrate_thoughts.py` (dry-run first, `--execute` after approval)
+- Do NOT run `--execute` without explicit human confirmation
+
+### Stage 3 — API Updates 🔜 Pending Stage 2
+- Branch: `feat/ob2-api-endpoints`
+- New endpoints: `/api/ingest_state`, `/api/propose_supersession`, `/api/confirm_supersession`,
+  `/api/query_state`, `/api/compile_wiki`, `/api/wiki/{page_name}`
+
+### Stage 4 — Portfolio Documentation 🔜 Pending Stage 3
+- Branch: `docs/ob2-portfolio-documentation`
+- Blog post: `project-openbrain-2-architecture.mdx` on mikemcmahon.dev
+- OB2 user guide for Claude session startup protocol
+
+### Key schema finding (Stage 1)
+`public.thoughts` does NOT have direct `subject`/`topic` columns. They live in `metadata` JSONB.
+Migration script must use `metadata->>'subject'` and `metadata->>'topic'`, not direct columns.
+The OB2 design spec SQL queries need this adaptation.
+
+---
+
 ## Last Successful Checks (2026-05-01)
 
 - Deployment smoke: `https://openbrain-rouge.vercel.app`
