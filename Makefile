@@ -6,7 +6,17 @@ NOW := $(shell date +%Y%m%d-%H%M%S)
 .PHONY: check-log smoke-log smoke-live-log
 .PHONY: pdf-fixtures pdf-unit pdf-eval pdf-eval-live
 .PHONY: docx-fixtures docx-unit url-unit docx-url-eval docx-url-eval-live
+.PHONY: migrate migrate-execute migrate-test
 .PHONY: install-hooks dev-install
+
+migrate:
+	@.venv/bin/python3 scripts/migrate_thoughts.py
+
+migrate-execute:
+	@.venv/bin/python3 scripts/migrate_thoughts.py --execute
+
+migrate-test:
+	@.venv/bin/python3 scripts/test_migration.py
 
 install-hooks:
 	@git config core.hooksPath scripts
