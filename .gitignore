@@ -9,3 +9,4 @@ brain_index/
 .vercel
 .env*.local
 .DS_Store
+backups/
