@@ -37,7 +37,7 @@ INSERT INTO public.tag_vocabulary (tag) VALUES
   -- People / personal
   ('Personal'), ('Mike'), ('Beth'), ('Annie'), ('Family'),
   -- Study subjects
-  ('Science'), ('Biology'), ('Geometry'), ('Math'), ('Study'),
+  ('Science'), ('Biology'), ('Geometry'), ('Math'), ('Study'), ('Linux'),
   -- Life
   ('Health'), ('Nutrition'), ('FoodLog'), ('Preferences'), ('Mental-health'),
   -- Career / interview (cross-cutting)

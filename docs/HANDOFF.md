@@ -1,7 +1,7 @@
 # OpenBrain — Session Handoff
 
-**Last updated:** 2026-06-17
-**Branch:** `cut/ob2-cutover` · **PR:** [#51](https://github.com/MikeMcMahon-dev/openbrain/pull/51) (open, staged, pre-flip)
+**Last updated:** 2026-06-17 (Phase-2 wiring session)
+**Branch:** `feat/ob2-phase2-wiring` · **PR #51 merged** (thoughts hotfix + cutover machinery live; flip still gated)
 **Read this before making changes.** Then `docs/OPENBRAIN_NEXT_STEPS.md` for the backlog.
 
 ---
@@ -43,12 +43,44 @@ wiring + the flip.
 - **Migration scripts (DRY-RUN only):** `scripts/cutover_migrate.py`, `scripts/retag_knowledge.py`.
 - **Docs:** ADR-011 (reframed), ADR-012, `docs/OB2-CUTOVER-PLAN.md`.
 
+## DONE — Phase-2 wiring (branch `feat/ob2-phase2-wiring`, this session 2026-06-17)
+- **Read dispatch:** `api/_openbrain_api.py` `retrieve_for_query()` routes `query_payload` +
+  `search_payload` → `retrieve_knowledge` when `OPENBRAIN_READ_TARGET=knowledge` (default
+  `thoughts`). `_adapt_knowledge_result()` is the tutor-packet adapter — synthesizes
+  `source/section` from `domain/system`, passes knowledge facets through additively, so the
+  tutor packet + `results` contract are backend-agnostic.
+- **Write dispatch:** `_write_text_ingest()` routes → `write_knowledge` when
+  `OPENBRAIN_WRITE_TARGET=knowledge` (default `thoughts`), deriving taxonomy from
+  (subject, topic) via `map_to_taxonomy`. A mapper `drop` is a silent curation no-op.
+- **Family-read status policy (IMPORTANT):** the knowledge read path retrieves across **all
+  statuses**, not just `current`. All 699 existing knowledge rows are `historical`; a
+  current-only filter would hide ~95% of Annie's (35) and Beth's (2) corpus after the flip — a
+  hard regression vs `thoughts`. Owner (`created_by`) scoping still isolates each member
+  (verified: 0 overlap Annie↔Mike). **Confirm this policy before the flip.**
+- **Mapper-gap fixes (`api/taxonomy_map.py`):** `mcp_smoke`→drop; `linux command line`→
+  Study/system=Annie/`[Annie,Linux]` (owned by `anneliesepaige` — her Ubuntu summer learning,
+  verified already her account); `git / workflow`→Study/`[Reference]`; `homelab notes`→
+  Study/`[Homelab,Reference]`; `homelab infrastructure`+`infrastructure`→**topic-split**
+  (k8s-migration→K8s/Production, DNS/topology→Network/Production, system=SpectreNet). Added
+  `Linux` to the canonical vocab seed + `003` DB seed.
+- **Migration-script authority fix:** `scripts/cutover_migrate.py` now `sys.path.insert`s the
+  repo root so it imports the governed `api.taxonomy_map` (single authority, ADR-012) instead
+  of silently falling back to its stale LOCAL rules — that fallback would have driven a real
+  `--execute` with the wrong taxonomy.
+
+## Custom GPT impact (Beth / Annie) — answer: NO action-spec change required
+- **Query:** response contract (`results`/`tutor_prompt`/`rules`/`context_used`) is preserved
+  by the adapter; the family GPTs keep working unchanged after the flip.
+- **Ingest:** family GPTs hit `/openbrain_ingest` (legacy `ingest_payload`), which derives
+  taxonomy from subject/topic. `domain`/`environment` are already optional in
+  `CUSTOM_GPT_ACTION_SPEC.yaml` (PR #51) and are currently **ignored** by this path — the GPTs
+  need not send them. **Open decision:** whether the legacy ingest path should *honor*
+  producer-supplied `domain`/`environment` (useful for Mike's GPT) or keep auto-deriving
+  (more robust for Annie). Left auto-deriving for now.
+
 ## NOT done (next build steps)
-1. **Phase-2 wiring** — route `query_payload` → `retrieve_knowledge` and `ingest_payload` →
-   `write_knowledge` behind env flags `OPENBRAIN_READ_TARGET` / `OPENBRAIN_WRITE_TARGET`
-   (default `thoughts`). Plus a tutor-packet adapter (knowledge results lack `source/file/
-   section/heading`). This is the only remaining *build* before a flip is possible.
-2. **The flip** (runtime, human-gated) — see sequence below.
+1. **The flip** (runtime, human-gated) — see sequence below. Set both target flags to
+   `knowledge`. Confirm the all-status family-read policy above first.
 
 ## Validation results (all green; DB untouched at 699 rows / 0 cutover-tagged)
 - `pytest tests/test_taxonomy_map.py tests/test_knowledge_retrieval.py` → **68 pass**
@@ -63,7 +95,8 @@ wiring + the flip.
 2. `retag_knowledge.py --execute` — **must precede** the `003` trigger.
 3. Apply migrations `003` + `004` (Supabase — not auto-applied).
 4. `cutover_migrate.py --execute`.
-5. Phase-2 wiring + set `OPENBRAIN_READ_TARGET=knowledge` / `WRITE_TARGET=knowledge`.
+5. Phase-2 wiring ✅ (done — `feat/ob2-phase2-wiring`). At flip: set
+   `OPENBRAIN_READ_TARGET=knowledge` / `WRITE_TARGET=knowledge` in Vercel env.
 6. Post-flip validation (`scripts/smoke_checks.py`, re-run Annie validate against `knowledge`,
    1000-query harness vs the ADR-002 96.9% baseline).
 
@@ -75,6 +108,19 @@ wiring + the flip.
   `68558fd7…` tag `Testing`, the two Ubuntu plans tag `Ubuntu Study`); mental-health → re-flag
   `Personal/Archive` tags `[Personal, Mental-health]`; interview content → `career`+`interview`
   tags via `retag`.
+
+## ✅ Pre-`--execute` mapper gaps — RESOLVED (2026-06-17 Phase-2 session)
+All gaps below are fixed in `api/taxonomy_map.py` and verified against the real gap rows; the
+`003` report is regenerated (0 flag). Dispositions came from Mike this session:
+- `Linux Command Line` (Annie's 31 cards) → Study, `system='Annie'`, tags `[Annie, Linux]`.
+  Verified these rows are **already owned by `anneliesepaige`** (her Ubuntu summer learning) —
+  they migrate under her account, not Mike's. Added `Linux` to the canonical vocab + `003` seed.
+- `Homelab Infrastructure` (5) + `Infrastructure` (4) → **topic-split** (Mike's call):
+  k8s-migration topics → K8s/Production, DNS/topology → Network/Production, system=SpectreNet.
+  Per-row: Homelab Infra = 4 K8s + 1 Net; Infrastructure = 1 K8s + 3 Net.
+- `mcp_smoke` → added to `api/taxonomy_map.py` drop-list (was only in the cutover script's set).
+- null "Summer break…" row → Mike confirmed **drop** (stays in curation drop-list).
+- `Git / Workflow` → Study/`[Reference]`; `Homelab Notes` → Study/`[Homelab, Reference]`.
 
 ## Risks / gotchas
 - **Merging PR #51 deploys the `thoughts` hotfix to prod** — it changes the shared
@@ -102,6 +148,9 @@ wiring + the flip.
 | `docs/decisions/ADR-011, ADR-012`, `docs/OB2-CUTOVER-PLAN.md` | decisions/plan |
 
 ## Next 3 actions
-1. Review/merge PR #51 (deploys the `thoughts` hotfix; rest stays dormant).
-2. Build **Phase-2 wiring** (flags default `thoughts`; A/B-able) — the last pre-flip step.
-3. Execute the gated flip sequence after signing off the migration report.
+1. ✅ PR #51 merged. ✅ Phase-2 wiring built (`feat/ob2-phase2-wiring`) — open its PR & review.
+2. Sign off the regenerated `003` migration report (mapper gaps now resolved; note the
+   by-subject table collapses the infra topic-split — per-row writes are 4 K8s+1 Net for
+   Homelab Infrastructure, 1 K8s+3 Net for Infrastructure). Confirm the all-status family-read
+   policy and the ingest domain/environment open decision above.
+3. Execute the gated flip sequence (backup → retag → 003/004 → cutover → set flags → validate).

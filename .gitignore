@@ -12,3 +12,6 @@ brain_index/
 backups/
 # Local content-ingestion + diagnostic tooling — not part of the deployed app
 ingest/
+
+# OB2 cutover migration report — contains sensitive row previews (handoff: excluded from git)
+docs/migrations/003_cutover_migration_report.md

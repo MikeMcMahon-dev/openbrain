@@ -37,6 +37,13 @@ import psycopg
 from psycopg.rows import dict_row
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+# Ensure the repo root is importable so `from api.taxonomy_map import ...` resolves
+# when this script is run directly (python scripts/cutover_migrate.py). Without this
+# the mapper import silently fails and the LOCAL fallback rules — which can lag the
+# governed api/taxonomy_map.py single authority (ADR-012) — would drive a real
+# --execute. The fallback must only trigger if the module genuinely does not exist.
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 REPORT_PATH = REPO_ROOT / "docs" / "migrations" / "003_cutover_migration_report.md"
 
 # The Stage-2 snapshot boundary. Membership in knowledge is determined by content
