@@ -1,9 +1,0 @@
-{
-  "mcpServers": {
-    "openbrain": {
-      "type": "stdio",
-      "command": "/Users/mmcmahon/src/home-lab/open-brain/.venv/bin/python",
-      "args": ["/Users/mmcmahon/src/home-lab/open-brain/mcp_server/openbrain.py"]
-    }
-  }
-}
