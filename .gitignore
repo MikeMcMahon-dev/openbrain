@@ -10,3 +10,5 @@ brain_index/
 .env*.local
 .DS_Store
 backups/
+# Local content-ingestion + diagnostic tooling — not part of the deployed app
+ingest/

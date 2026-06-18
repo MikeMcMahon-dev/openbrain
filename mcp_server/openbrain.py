@@ -96,6 +96,28 @@ async def list_tools() -> list[types.Tool]:
                     "source": {"type": "string", "description": "The content to save (for source_type 'text')."},
                     "subject": {"type": "string", "description": "Subject or domain label."},
                     "topic": {"type": "string", "description": "Topic tag."},
+                    "domain": {
+                        "type": "string",
+                        "description": "Canonical knowledge domain. Choose the closest existing value; do not invent new domains.",
+                        "enum": ["Network", "K8s", "Security", "Study", "OpenBrain", "Personal"],
+                    },
+                    "environment": {
+                        "type": "string",
+                        "description": "Canonical lifecycle environment. Choose the closest existing value; do not invent new environments.",
+                        "enum": ["Production", "Lab", "Study", "Archive"],
+                    },
+                    "tags": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "Optional topical tags from the controlled vocabulary, e.g. IaC, Terraform, "
+                            "Ansible, Bash, Python, K8s, CKA, Network, Security, Architecture, AI, Ops, "
+                            "Lab, Production, OpenBrain, Homelab, SpectreNet, Personal, Family, Annie, "
+                            "Science, Biology, Geometry, Math, Study, Health, Career, Interview. Use "
+                            "existing tags where possible; novel tags are queued for human approval, not "
+                            "auto-applied."
+                        ),
+                    },
                 },
             },
         ),

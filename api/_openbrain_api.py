@@ -521,6 +521,8 @@ def build_row_payload(row: Mapping[str, Any], source_channel: str) -> dict[str, 
         score_value = None
     return {
         "score": score_value,
+        "id": row.get("id"),
+        "document_id": row.get("document_id"),
         "file": metadata.get("file"),
         "source": metadata.get("source") or metadata.get("uri") or source_reference(row),
         "section": metadata.get("section") or source_reference(row),
@@ -673,6 +675,7 @@ def search_vector_candidates(
     query = f"""
     SELECT
       id,
+      document_id,
       content,
       tenant_id,
       source_type,
@@ -717,6 +720,7 @@ def search_keyword_candidates(
     query_sql = f"""
     SELECT
       id,
+      document_id,
       content,
       tenant_id,
       source_type,
@@ -810,12 +814,12 @@ def retrieve_thoughts(
     row_by_key: dict[tuple[Any, Any], dict[str, Any]] = {}
 
     for rank, row in enumerate(keyword_rows):
-        key = (row.get("file"), row.get("source"))
+        key = row.get("document_id") or f"id:{row.get('id')}"
         rrf_scores[key] = rrf_scores.get(key, 0.0) + 1.0 / (_RRF_K + rank + 1)
         row_by_key[key] = row
 
     for rank, row in enumerate(vector_rows):
-        key = (row.get("file"), row.get("source"))
+        key = row.get("document_id") or f"id:{row.get('id')}"
         rrf_scores[key] = rrf_scores.get(key, 0.0) + 1.0 / (_RRF_K + rank + 1)
         if key not in row_by_key:
             row_by_key[key] = row
