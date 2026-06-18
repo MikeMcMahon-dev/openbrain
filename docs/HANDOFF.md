@@ -85,7 +85,9 @@ wiring + the flip.
   default `mike.mcmahon67`) have explicit `domain`/`environment` **honored** when valid, with a
   **mismatch/typo alert** surfaced in the ingest response `details` (and invalid values fall
   back to derive + alert). Beth (`snapple01`) and Annie (`anneliesepaige`) **derive** from
-  subject/topic — their supplied values are ignored. The GPTs need no action-spec change.
+  subject/topic — their supplied values are ignored. The GPTs need no action-spec change;
+  `docs/gpt_instructions/mike_mcmahon67.md` was updated to pass `domain`/`environment` when
+  confident and heed the mismatch alert (Beth's/Annie's instruction files unchanged — derive).
 
 ## NOT done (next build steps)
 1. **The flip** (runtime, human-gated) — see sequence below. Set both target flags to

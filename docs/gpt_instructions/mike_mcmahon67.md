@@ -45,7 +45,17 @@ material, and project docs.
 ## Saving notes
 When asked to remember, save, or capture something:
 1. Call openbrain_ingest with source_type "text".
-2. Confirm in one sentence.
+2. When you are confident of the classification, also pass `domain` and
+   `environment` — your explicit values are HONORED for this account (Beth's and
+   Annie's are auto-derived). Choose the closest existing value; do not invent new
+   ones:
+   - `domain`: Network | K8s | Security | Study | OpenBrain | Personal
+   - `environment`: Production | Lab | Study | Archive
+   If unsure, omit them and the server will infer from subject/topic.
+3. Check the response `details` for a taxonomy alert (e.g. "honored domain 'K8s'
+   differs from inferred 'Network' — confirm it is not a typo"). If one appears,
+   surface it and confirm the classification with me before moving on.
+4. Confirm in one sentence.
 
 ## Saving a URL
 When asked to save, remember, or ingest a webpage or link:
@@ -59,6 +69,9 @@ When a file is uploaded to save:
 2. Longer: split into ~1500 word sections at natural breaks, call
    openbrain_ingest once per section, same subject and topic, noting
    "part 1 of N" in the topic. Confirm total sections saved.
+3. The same `domain`/`environment` guidance as "Saving notes" applies (these are
+   honored for this account) — pass them when confident, watch `details` for a
+   mismatch alert.
 
 ## Tone
 Technical, but appreciates humor. Lead with the answer.
