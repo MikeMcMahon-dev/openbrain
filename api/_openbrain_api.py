@@ -1143,21 +1143,40 @@ def _write_target() -> str:
     return (os.getenv("OPENBRAIN_WRITE_TARGET") or "thoughts").strip().lower()
 
 
+def _honor_owners() -> set[str]:
+    """Owners whose explicit ingest domain/environment are HONORED over the derived
+    taxonomy (Mike, 2026-06-17: he is more likely to supply a correct/explicit value
+    than Beth or Annie). Everyone else stays on derive-from-(subject,topic). Override
+    via OPENBRAIN_TAXONOMY_HONOR_OWNERS (comma-separated); default just the owner."""
+    raw = os.getenv("OPENBRAIN_TAXONOMY_HONOR_OWNERS", "mike.mcmahon67")
+    return {o.strip() for o in raw.split(",") if o.strip()}
+
+
 def _write_text_ingest_knowledge(
     content: str,
     owner: str,
     subject: str,
     topic: str,
+    domain_override: str | None = None,
+    environment_override: str | None = None,
+    warnings: list[str] | None = None,
 ) -> str | None:
     """Phase-2 write path into public.knowledge. Derives the OB2 taxonomy from the
     legacy (subject, topic) signals via api.taxonomy_map, then delegates field
     integrity + the INSERT to api.knowledge_ingest.write_knowledge.
 
+    Per-owner taxonomy policy (ADR-012 / Mike 2026-06-17): for owners in
+    _honor_owners(), a producer-supplied domain/environment is HONORED when valid,
+    and a mismatch vs the derived value is reported into `warnings` (so typos are
+    surfaced, not silently written). For everyone else the producer values are
+    ignored and the governed mapper derives the taxonomy. Invalid honored values
+    fall back to derive + a warning.
+
     Returns None on success (or a deliberate curation drop), or an error string on
     failure — matching the _write_text_ingest contract. Lazy imports avoid a
     circular dependency and keep the legacy path import-light."""
     from api.knowledge_ingest import write_knowledge
-    from api.taxonomy_map import map_to_taxonomy
+    from api.taxonomy_map import VALID_DOMAINS, VALID_ENVIRONMENTS, map_to_taxonomy
 
     tax = map_to_taxonomy(
         subject=subject, topic=topic, owner=owner, source_type="text", content=content
@@ -1167,11 +1186,47 @@ def _write_text_ingest_knowledge(
         # writing (mirrors the legacy SafeIngest silent-accept posture).
         return None
 
+    domain, environment = tax["domain"], tax["environment"]
+
+    # ── Honor-vs-derive (per owner) ──────────────────────────────────────────────
+    req_domain = (domain_override or "").strip() or None
+    req_environment = (environment_override or "").strip() or None
+    if owner in _honor_owners() and (req_domain or req_environment):
+        warn = warnings if warnings is not None else []
+        # Domain: honor when valid; flag a mismatch or an invalid (likely-typo) value.
+        if req_domain:
+            if req_domain not in VALID_DOMAINS:
+                warn.append(
+                    f"ingest: domain '{req_domain}' is not a valid domain — "
+                    f"derived '{domain}' instead (subject='{subject}')."
+                )
+            else:
+                if req_domain != domain:
+                    warn.append(
+                        f"ingest: honored domain '{req_domain}' differs from inferred "
+                        f"'{domain}' (subject='{subject}', topic='{topic}') — "
+                        "confirm it is not a typo."
+                    )
+                domain = req_domain
+        if req_environment:
+            if req_environment not in VALID_ENVIRONMENTS:
+                warn.append(
+                    f"ingest: environment '{req_environment}' is not valid — "
+                    f"derived '{environment}' instead (subject='{subject}')."
+                )
+            else:
+                if req_environment != environment:
+                    warn.append(
+                        f"ingest: honored environment '{req_environment}' differs from inferred "
+                        f"'{environment}' (subject='{subject}') — confirm it is not a typo."
+                    )
+                environment = req_environment
+
     result = write_knowledge(
         content,
         owner,
-        domain=tax["domain"],
-        environment=tax["environment"],
+        domain=domain,
+        environment=environment,
         system=tax.get("system"),
         tags=list(tax.get("tags") or []),
         shape=tax.get("shape"),
@@ -1192,6 +1247,9 @@ def _write_text_ingest(
     subject: str,
     topic: str,
     ingest_id: str,
+    domain_override: str | None = None,
+    environment_override: str | None = None,
+    warnings: list[str] | None = None,
 ) -> str | None:
     """Embed and upsert a single text chunk into public.thoughts.
 
@@ -1199,9 +1257,15 @@ def _write_text_ingest(
 
     OB2 Phase-2: when OPENBRAIN_WRITE_TARGET=knowledge, the write is routed to
     public.knowledge (taxonomy-validated) instead. Default stays 'thoughts'.
+    The domain_override/environment_override/warnings args carry the per-owner
+    honor-vs-derive policy and are only supplied by the direct text-ingest path
+    (pdf/docx chunk callers omit them and always derive).
     """
     if _write_target() == "knowledge":
-        return _write_text_ingest_knowledge(content, owner, subject, topic)
+        return _write_text_ingest_knowledge(
+            content, owner, subject, topic,
+            domain_override, environment_override, warnings,
+        )
     try:
         embedding = embedding_request(content)
     except Exception as exc:
@@ -1630,7 +1694,16 @@ def ingest_payload(
             status = "accepted"
             message = "Ingest request accepted."
         else:
-            write_error = _write_text_ingest(source, owner, _tenant_id, subject, topic, _text_ingest_id)
+            # Producer-supplied taxonomy (honored for _honor_owners(), derived for
+            # everyone else, inside the knowledge writer). Mismatch/typo alerts land
+            # in `tax_warnings` and are surfaced to the producer via `details`.
+            tax_warnings: list[str] = []
+            write_error = _write_text_ingest(
+                source, owner, _tenant_id, subject, topic, _text_ingest_id,
+                domain_override=payload.get("domain"),
+                environment_override=payload.get("environment"),
+                warnings=tax_warnings,
+            )
             if write_error:
                 status = "failed"
                 message = f"Ingest failed: {write_error}"
@@ -1638,6 +1711,7 @@ def ingest_payload(
             else:
                 status = "accepted"
                 message = "Ingest request accepted."
+            details.extend(tax_warnings)
     else:
         reachable, reason = _source_reachable(source_type, source)
         if not reachable:

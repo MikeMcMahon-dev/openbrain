@@ -79,12 +79,13 @@ wiring + the flip.
 ## Custom GPT impact (Beth / Annie) — answer: NO action-spec change required
 - **Query:** response contract (`results`/`tutor_prompt`/`rules`/`context_used`) is preserved
   by the adapter; the family GPTs keep working unchanged after the flip.
-- **Ingest:** family GPTs hit `/openbrain_ingest` (legacy `ingest_payload`), which derives
-  taxonomy from subject/topic. `domain`/`environment` are already optional in
-  `CUSTOM_GPT_ACTION_SPEC.yaml` (PR #51) and are currently **ignored** by this path — the GPTs
-  need not send them. **Open decision:** whether the legacy ingest path should *honor*
-  producer-supplied `domain`/`environment` (useful for Mike's GPT) or keep auto-deriving
-  (more robust for Annie). Left auto-deriving for now.
+- **Ingest:** family GPTs hit `/openbrain_ingest` (legacy `ingest_payload`). `domain`/
+  `environment` are optional in `CUSTOM_GPT_ACTION_SPEC.yaml` (PR #51). **Per-owner policy
+  (Mike-confirmed):** owners in `_honor_owners()` (env `OPENBRAIN_TAXONOMY_HONOR_OWNERS`,
+  default `mike.mcmahon67`) have explicit `domain`/`environment` **honored** when valid, with a
+  **mismatch/typo alert** surfaced in the ingest response `details` (and invalid values fall
+  back to derive + alert). Beth (`snapple01`) and Annie (`anneliesepaige`) **derive** from
+  subject/topic — their supplied values are ignored. The GPTs need no action-spec change.
 
 ## NOT done (next build steps)
 1. **The flip** (runtime, human-gated) — see sequence below. Set both target flags to
@@ -165,7 +166,7 @@ All gaps below are fixed in `api/taxonomy_map.py` and verified against the real 
 1. ✅ PR #51 merged. ✅ Phase-2 wiring built (`feat/ob2-phase2-wiring`) — open its PR & review.
 2. Sign off the regenerated `003` migration report (mapper gaps resolved; the by-subject table
    collapses the infra topic-split — per-row writes are 4 K8s+1 Net for Homelab Infrastructure,
-   1 K8s+3 Net for Infrastructure — per-row topics confirmed with Mike). One open decision left:
-   whether the legacy ingest path should honor producer-supplied `domain`/`environment` or keep
-   auto-deriving (left auto-deriving). Read-policy + promotion are Mike-confirmed.
+   1 K8s+3 Net for Infrastructure — per-row topics confirmed with Mike). Read-policy,
+   promotion, and the per-owner ingest honor/derive policy are all Mike-confirmed — no open
+   decisions remain before the flip.
 3. Execute the gated flip sequence (backup → retag → 003/004 → cutover → set flags → validate).
