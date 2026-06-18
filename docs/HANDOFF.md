@@ -1,8 +1,50 @@
 # OpenBrain — Session Handoff
 
-**Last updated:** 2026-06-17 (flip-execution session)
-**Status:** ✅ **OB2 FLIP EXECUTED — `knowledge` is LIVE in production.** PRs #51–#55 merged.
+**Last updated:** 2026-06-18 (post-flip session)
+**Status:** ✅ **OB2 FLIP IS LIVE** — `knowledge` serves prod. Post-flip: deploy pipeline
+restored, smoke content check added, session notes ingested, ADR-013 (keyword retrieval)
+**approved & awaiting merge**.
 **Read this before making changes.** Then `docs/OPENBRAIN_NEXT_STEPS.md` for the backlog.
+
+---
+
+## ⏩ WHERE WE ARE NOW (2026-06-18, post-flip) — start here
+
+OB2 is live and healthy on `public.knowledge`. Everything below the next `---` is the
+flip-execution history; this block is the current state.
+
+### Open — needs owner action
+- **openbrain PR #59 — ADR-013 OR-ranked keyword retrieval. APPROVED by Mike; awaiting
+  MERGE** (assistant can't `gh pr merge`). Merging auto-deploys it. Tag enrichment already
+  run. After merge: live smoke (content check stays green) + re-run the ADR-013 A/B queries.
+- **portfolio-blog PRs** (separate repo at `/Users/Shared/portfolio-blog`, Astro;
+  `draft:true` ⇒ "Coming Soon"/inactive in the sidebar): **#54** OB2 cutover war story,
+  **#55** sidebar date-ordering fix, **#56** failure-detection session post. #54/#56 are
+  `draft:false` on-branch for preview; review tone, then merge to publish.
+
+### Done & live since the flip
+- **Auto-deploy restored.** The Vercel↔GitHub App had silently lost repo access (no deploys
+  for weeks) — re-granted. Plus the `.vercelignore` `/app.py` root-anchor fix (a bare
+  `app.py` had also excluded `api/app.py`, 500-ing every route). PR previews + prod-on-merge
+  both work now.
+- **Smoke content check (PR #57, merged).** `_smoke_live_content_check` fails on
+  HTTP-200-but-empty and reports the serving backend (catches broken DB / silent flip-revert).
+- **Session notes in the brain.** 6 rows (`source='live:text'`, owner mike.mcmahon67):
+  Failure Detection Dashboard monitoring (3) + OB2 cutover lessons & two interview stories
+  (3, tagged `Career`/`Interview` for interview prep). Tags enriched via
+  `scripts/enrich_session_tags.py` (executed 2026-06-18).
+
+### Key facts for a fresh session
+- Vercel flags `OPENBRAIN_READ_TARGET` / `OPENBRAIN_WRITE_TARGET` = `knowledge`. Rollback =
+  set both to `thoughts` + redeploy; `thoughts` is the untouched hot standby.
+- Family read is **temporal-aware**: prefer `status='current'`, broaden to `historical` on
+  low-confidence/empty (NOT a hard current-only filter).
+- **Per-owner ingest**: mike.mcmahon67's explicit `domain`/`environment` are *honored* (with a
+  mismatch/typo alert in the ingest response `details`); family accounts *derive*. Producer
+  `tags` are NOT honored — derived from subject/topic (ADR-013 "Related finding").
+- **ADR-013** (keyword OR-ranking) replaces `websearch_to_tsquery`'s implicit AND with a
+  stemmed OR-ranked tsquery — fixes the recall cliff (8-term queries matched 0 under AND).
+  Lives on `feat/keyword-or-retrieval-adr` until #59 merges.
 
 ---
 
