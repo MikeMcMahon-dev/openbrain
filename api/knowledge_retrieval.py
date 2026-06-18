@@ -23,6 +23,7 @@ from api._openbrain_api import (
     _RRF_K,
     MAX_RESULTS,
     _confidence_label,
+    _or_tsquery_fragment,
     _ts_query,
     _vector_param,
     _word_count,
@@ -118,28 +119,35 @@ def search_knowledge_keyword_candidates(
     max_results: int,
     filters: dict | None = None,
 ) -> list[dict[str, Any]]:
-    """Full-text candidates via websearch_to_tsquery over knowledge.content."""
-    ts_query = _ts_query(query)
+    """Full-text candidates over knowledge.content.
+
+    ADR-013: uses an OR-ranked, stemmed tsquery (one plainto_tsquery per term,
+    OR-combined) so multi-term queries surface partial matches instead of requiring
+    ALL terms (the websearch_to_tsquery AND default). Falls back to
+    websearch_to_tsquery only when the query yields no usable terms.
+    """
     filter_clause, filter_params = _build_filter_clause(owner, filters)
+
+    or_frag, or_params = _or_tsquery_fragment(query)
+    if or_frag is not None:
+        tsq, tsq_params = or_frag, or_params
+    else:
+        tsq, tsq_params = "websearch_to_tsquery('english', %s)", [_ts_query(query)]
 
     query_sql = f"""
     SELECT
     {_SELECT_COLS},
-      ts_rank(
-        to_tsvector('english', coalesce(content, '')),
-        websearch_to_tsquery('english', %s)
-      ) AS score
+      ts_rank(to_tsvector('english', coalesce(content, '')), {tsq}) AS score
     FROM public.knowledge
-    WHERE to_tsvector('english', coalesce(content, '')) @@ websearch_to_tsquery('english', %s)
+    WHERE to_tsvector('english', coalesce(content, '')) @@ {tsq}
       {filter_clause}
     ORDER BY score DESC NULLS LAST
     LIMIT %s;
     """
 
-    # Param order must match placeholder order in the SQL:
-    #   ts_query (SELECT ts_rank), ts_query (WHERE @@),
-    #   filter_params (WHERE facets, appended after the @@ clause), max_results.
-    params = [ts_query, ts_query, *filter_params, max_results]
+    # Param order matches placeholder order: tsq (SELECT ts_rank), tsq (WHERE @@),
+    # filter_params (WHERE facets), max_results. tsq is bound twice.
+    params = [*tsq_params, *tsq_params, *filter_params, max_results]
 
     with get_db_conn() as conn:
         rows = conn.execute(query_sql, params).fetchall()
