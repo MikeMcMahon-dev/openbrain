@@ -1,5 +1,5 @@
 # OpenBrain
-#test
+
 A production RAG (Retrieval-Augmented Generation) system built to solve the AI cold-start problem: every session begins with no memory of prior decisions, architecture choices, or context. OpenBrain fixes that — ingest once, query on demand, every session starts warm.
 
 Documented at [mikemcmahon.dev](https://mikemcmahon.dev).
