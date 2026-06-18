@@ -912,14 +912,22 @@ def retrieve_for_query(
     if _read_target() == "knowledge":
         from api.knowledge_retrieval import retrieve_knowledge
 
-        # Retrieve across ALL statuses, not just 'current'. The family vault's
-        # entire corpus is currently status='historical' (the OB2 'current'
-        # promotion only covers live operational state + evergreen reference), so a
-        # current-only filter would hide ~95% of each user's notes — a hard
-        # regression vs the legacy `thoughts` path, which has no status concept.
-        # Owner scoping (created_by) still isolates each family member's content.
-        raw = retrieve_knowledge(query, n_results, owner, filters={"status": None})
-        return [_adapt_knowledge_result(r) for r in raw]
+        # Temporal-awareness retrieval (Mike, 2026-06-17): `status` prioritizes
+        # 'current' over 'historical' so stale operational state (e.g. an old
+        # homelab config) never masquerades as live — but it is NOT a hard filter.
+        # Prefer 'current'; if that yields a confident hit, return it. Otherwise
+        # (low-confidence or empty current — common for sparse/young corpora like
+        # Beth's notes) broaden across ALL statuses so historical content still
+        # surfaces. Owner scoping (created_by) isolates each family member.
+        current = retrieve_knowledge(
+            query, n_results, owner, filters={"status": "current"}
+        )
+        if current and current[0].get("confidence") in ("high", "medium"):
+            return [_adapt_knowledge_result(r) for r in current]
+        broadened = retrieve_knowledge(
+            query, n_results, owner, filters={"status": None}
+        )
+        return [_adapt_knowledge_result(r) for r in broadened]
     return retrieve_thoughts(query, n_results, owner, tenant_id)
 
 

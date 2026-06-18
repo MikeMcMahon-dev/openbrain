@@ -52,11 +52,19 @@ wiring + the flip.
 - **Write dispatch:** `_write_text_ingest()` routes → `write_knowledge` when
   `OPENBRAIN_WRITE_TARGET=knowledge` (default `thoughts`), deriving taxonomy from
   (subject, topic) via `map_to_taxonomy`. A mapper `drop` is a silent curation no-op.
-- **Family-read status policy (IMPORTANT):** the knowledge read path retrieves across **all
-  statuses**, not just `current`. All 699 existing knowledge rows are `historical`; a
-  current-only filter would hide ~95% of Annie's (35) and Beth's (2) corpus after the flip — a
-  hard regression vs `thoughts`. Owner (`created_by`) scoping still isolates each member
-  (verified: 0 overlap Annie↔Mike). **Confirm this policy before the flip.**
+- **Family-read status policy (temporal-aware, Mike-confirmed 2026-06-17):** `status` is a
+  *priority* signal, not a hard filter — it exists so stale OPERATIONAL state (old homelab
+  config) is never served as live. The read path queries `current` first; a high/medium-
+  confidence current hit is returned as-is, otherwise it **broadens across all statuses** so
+  sparse/young corpora (e.g. Beth's) still surface historical content. Owner (`created_by`)
+  scoping isolates each member (verified 0 overlap Annie↔Mike; broaden path verified returning
+  Annie's historical rows).
+- **Study/personal promotion (`scripts/promote_study_current.py`, gated):** the Stage-2 corpus
+  is all `historical`. Study/personal content (`system IS NULL`) is never superseded, so it is
+  promoted `historical→current` at flip time (dry-run: 638 rows — Annie 34, Beth 2, Mike 594,
+  mmcmahon 8). Operational rows (`system` set: OpenBrain 48 / SpectreNet 12 / PMX-01 1 /
+  tenant-a 9, 61 total) stay historical — their live version is governed by supersession /
+  wiki compilation, not a blanket promotion.
 - **Mapper-gap fixes (`api/taxonomy_map.py`):** `mcp_smoke`→drop; `linux command line`→
   Study/system=Annie/`[Annie,Linux]` (owned by `anneliesepaige` — her Ubuntu summer learning,
   verified already her account); `git / workflow`→Study/`[Reference]`; `homelab notes`→
@@ -89,12 +97,18 @@ wiring + the flip.
 - `cutover_migrate.py` dry-run → **63 migrate (49 current / 14 historical), 2 drop, 0 flag**.
 - `retag_knowledge.py` dry-run → **37 updates, 19 SmokeTest deletes**.
 - `audit_taxonomy.py` → 0 unknown drift (vocabulary was harvested from real usage).
+- `promote_study_current.py` dry-run → **638 promote (Annie 34 / Beth 2 / Mike 594 / mmcmahon 8),
+  61 operational left historical**.
+- Read path verified end-to-end vs live DB: temporal-priority (current-first, broaden-on-low-
+  confidence) returns Annie's historical rows; owner isolation 0 overlap Annie↔Mike.
 
 ## Gated execution order (the flip — post-merge, human-gated)
 1. ✅ Backup taken → `~/ob_backup_20260617_194224/` (`knowledge.copy`, `thoughts.copy`).
 2. `retag_knowledge.py --execute` — **must precede** the `003` trigger.
 3. Apply migrations `003` + `004` (Supabase — not auto-applied).
 4. `cutover_migrate.py --execute`.
+4b. `promote_study_current.py --execute` — promote study/personal (`system IS NULL`)
+    historical rows → current (638 rows; operational state stays historical).
 5. Phase-2 wiring ✅ (done — `feat/ob2-phase2-wiring`). At flip: set
    `OPENBRAIN_READ_TARGET=knowledge` / `WRITE_TARGET=knowledge` in Vercel env.
 6. Post-flip validation (`scripts/smoke_checks.py`, re-run Annie validate against `knowledge`,
@@ -149,8 +163,9 @@ All gaps below are fixed in `api/taxonomy_map.py` and verified against the real 
 
 ## Next 3 actions
 1. ✅ PR #51 merged. ✅ Phase-2 wiring built (`feat/ob2-phase2-wiring`) — open its PR & review.
-2. Sign off the regenerated `003` migration report (mapper gaps now resolved; note the
-   by-subject table collapses the infra topic-split — per-row writes are 4 K8s+1 Net for
-   Homelab Infrastructure, 1 K8s+3 Net for Infrastructure). Confirm the all-status family-read
-   policy and the ingest domain/environment open decision above.
+2. Sign off the regenerated `003` migration report (mapper gaps resolved; the by-subject table
+   collapses the infra topic-split — per-row writes are 4 K8s+1 Net for Homelab Infrastructure,
+   1 K8s+3 Net for Infrastructure — per-row topics confirmed with Mike). One open decision left:
+   whether the legacy ingest path should honor producer-supplied `domain`/`environment` or keep
+   auto-deriving (left auto-deriving). Read-policy + promotion are Mike-confirmed.
 3. Execute the gated flip sequence (backup → retag → 003/004 → cutover → set flags → validate).
