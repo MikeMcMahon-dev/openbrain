@@ -100,11 +100,13 @@ def test_filter_clause_ignores_unknown_keys():
 # --------------------------------------------------------------------------- #
 
 @needs_db
-def test_current_status_empty():
-    """Default status='current' filter returns nothing today (0 'current' rows).
-    Confirms the default filter is actually applied."""
+def test_current_status_filter_applied():
+    """The default status='current' filter is actually applied: every returned row is
+    'current'. (Pre-flip this asserted emptiness against 0 'current' rows; the OB2
+    cutover+promote created current rows, so we assert the filter holds rather than a
+    transient row count.)"""
     results = retrieve_knowledge("network configuration", n_results=10, owner=None)
-    assert results == []
+    assert all(r.get("status") == "current" for r in results)
 
 
 @needs_db

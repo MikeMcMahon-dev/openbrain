@@ -706,9 +706,18 @@ def search_keyword_candidates(
     tenant_id: str,
     max_results: int,
 ) -> list[dict[str, Any]]:
+    # ADR-013: OR-ranked, stemmed tsquery so multi-term queries surface partial
+    # matches instead of requiring ALL terms; fall back to websearch on empty terms.
+    or_frag, or_params = _or_tsquery_fragment(query)
+    if or_frag is not None:
+        tsq, tsq_params = or_frag, or_params
+    else:
+        tsq, tsq_params = "websearch_to_tsquery('english', %s)", [_ts_query(query)]
+
     owner_condition = ""
-    ts_query = _ts_query(query)
-    params: list[Any] = [ts_query, tenant_id, ts_query]
+    # Placeholder order: tsq (SELECT ts_rank), tenant_id (WHERE), tsq (WHERE @@),
+    # [owner, owner] (owner_condition), max_results.
+    params: list[Any] = [*tsq_params, tenant_id, *tsq_params]
     if owner:
         owner_condition = (
             " AND (COALESCE(created_by_user_login, created_by_user_id, "
@@ -731,13 +740,10 @@ def search_keyword_candidates(
       created_by_user_login,
       slack_username,
       metadata,
-      ts_rank(
-        to_tsvector('english', coalesce(content, '')),
-        websearch_to_tsquery('english', %s)
-      ) AS score
+      ts_rank(to_tsvector('english', coalesce(content, '')), {tsq}) AS score
     FROM public.thoughts
     WHERE COALESCE(tenant_id, 'family') = %s
-      AND to_tsvector('english', coalesce(content, '')) @@ websearch_to_tsquery('english', %s)
+      AND to_tsvector('english', coalesce(content, '')) @@ {tsq}
       {owner_condition}
     ORDER BY score DESC NULLS LAST
     LIMIT %s;
@@ -751,6 +757,33 @@ def search_keyword_candidates(
 def _ts_query(query: str) -> str:
     cleaned = re.sub(r"\s+", " ", (query or "").strip())
     return cleaned
+
+
+_MAX_OR_TERMS = 16  # cap query terms fed to the OR tsquery (bounds SQL size)
+
+
+def _or_tsquery_fragment(query: str, placeholder: str = "%s") -> tuple[str | None, list[str]]:
+    """Build an OR-combined, stemmed tsquery SQL fragment from a query's terms.
+
+    ``websearch_to_tsquery`` ANDs every unquoted term, so a multi-word query only
+    matches documents containing ALL terms — a bar few documents clear, which
+    silently zeroes the keyword path on natural-language queries (see ADR-013). This
+    builds a fragment that ORs one ``plainto_tsquery()`` per term (``plainto_tsquery``
+    stems each term to match the english-stemmed tsvector), so partial matches
+    survive and ``ts_rank`` orders by how many / how well terms match. The hybrid RRF
+    fusion + the vector path recover the precision the OR gives up.
+
+    Returns ``(sql_fragment, params)``: the fragment is a parenthesized tsquery
+    expression using ``placeholder`` once per term; ``params`` is the ordered term
+    list to bind. Returns ``(None, [])`` when no usable terms remain — the caller
+    falls back to ``websearch_to_tsquery`` (original AND behaviour).
+    """
+    terms = [t for t in re.findall(r"[A-Za-z0-9_]+", (query or "").lower()) if len(t) >= 2]
+    terms = terms[:_MAX_OR_TERMS]
+    if not terms:
+        return None, []
+    fragment = "(" + " || ".join(f"plainto_tsquery('english', {placeholder})" for _ in terms) + ")"
+    return fragment, terms
 
 
 _RRF_K = 60  # standard RRF constant; higher = flatter score curve
