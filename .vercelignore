@@ -1,0 +1,53 @@
+# Vercel deploy bundle control.
+#
+# `vercel --prod` (CLI) bundles the whole WORKING DIRECTORY, not just git-tracked
+# files — so it picks up local caches written by another user (the cross-session
+# ownership scheme) and fails with EACCES, and would otherwise upload secrets and
+# multi-MB local artifacts. The GitHub-integration build only sees git-tracked
+# files so it never hit these. This list makes both paths bundle the same minimal
+# set: the function needs only api/, public/, requirements.txt, vercel.json, and
+# scripts/tutor.py (imported by api/_openbrain_api.py at runtime).
+
+# ── Caches / build cruft (cross-owned -> EACCES, and pure bloat) ──
+.git
+.venv
+venv
+__pycache__
+*.pyc
+.ruff_cache
+.pytest_cache
+.mypy_cache
+
+# ── Secrets — never upload local env files (Vercel uses dashboard env vars) ──
+.env
+.env.*
+
+# ── Broken local symlink (iCloud Obsidian vault) — absent in the build env ──
+vault
+
+# ── Large local artifacts not used by the API ──
+brain_index/
+test-fixtures/
+backups/
+ingest/
+upload_target/
+
+# ── Local-only tooling / standalone servers (KEEP scripts/tutor.py) ──
+scripts/*
+!scripts/tutor.py
+brain_server/
+mcp_server/
+/app.py          # root dev entrypoint ONLY — leading slash so it does NOT also match api/app.py
+config/
+
+# ── Migrations, tests, docs — not needed at runtime ──
+supabase/
+tests/
+docs/
+
+# ── Dev / meta ──
+Makefile
+pyrightconfig.json
+requirements-dev.txt
+requirements-full.txt
+*.md
