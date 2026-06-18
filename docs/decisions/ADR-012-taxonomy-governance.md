@@ -64,15 +64,27 @@ the chokepoint, and grow the vocabulary only by explicit human approval.
    near-duplicate tags and out-of-enum domain/environment, surfacing drift that slips through and
    when the vocabulary genuinely needs to grow.
 
+9. **Seed ↔ DB relationship (single authority, no two-way sync).** The DB `tag_vocabulary` is the
+   sole runtime authority; the live path reads it (`write_knowledge` → `_load_tag_vocabulary` →
+   `normalize_tags(allowed=…)`, seed as fallback). The Python seed is extracted to a flat,
+   machine-editable `api/canonical_tags.py` (not a set literal buried in logic) and exists only to
+   bootstrap a fresh DB (`003` is generated from it) and as the offline fallback. There is **no
+   two-way sync**: `tag_review.py --approve` writes the DB first (authoritative), then **best-effort
+   appends the tag to `api/canonical_tags.py`** (fail-soft; if it can't, the approval still stands)
+   and reminds the human to commit it via PR — a script never commits to `main`. The seed is allowed
+   to lag without affecting correctness; the nightly audit flags any DB-vs-seed gap from out-of-band
+   `tag_vocabulary` edits (the only path approve-time sync can't cover).
+
 ## Consequences
 
 - Drift is stopped at the source; the one-time `scripts/retag_knowledge.py` corrects existing rows
   (normalize casings, add `Career`/`Interview`, re-flag mental-health, drop `SmokeTest` rows) and
   must run **before** the `003` trigger is installed (else the trigger rejects existing drift).
 - New tags now require a human approval step — intended friction, the whole point of "extend-by-intent".
-- **Dual-maintenance** of `CANONICAL_TAGS` (Python seed) vs `tag_vocabulary` (DB authority): the
-  DB is the runtime truth; the seed only bootstraps. Approvals write the DB; periodic sync of the
-  seed from the table is a housekeeping task, not a runtime dependency.
+- **No dual-authority.** The DB `tag_vocabulary` is the single runtime truth; `api/canonical_tags.py`
+  is a derived seed/fallback kept current by approve-time best-effort append (decision 9). A lagging
+  seed is harmless because nothing authoritative reads it at runtime — so there is nothing to "sync"
+  for correctness, only housekeeping the audit surfaces.
 - The `component:*` carve-out is a deliberate hole in validation — namespaced functional tags are
   trusted by prefix. Audit should still report their cardinality.
 

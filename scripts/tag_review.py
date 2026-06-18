@@ -144,6 +144,29 @@ def _find_proposal(conn, raw: str):
     ).fetchone()
 
 
+SEED_FILE = ROOT / "api" / "canonical_tags.py"
+_SEED_MARKER = "    # ── approved via scripts/tag_review.py append below this line ──"
+
+
+def _append_seed_tag(tag: str) -> str:
+    """Best-effort: mirror an approved tag into the canonical_tags.py seed so the code
+    tracks the DB authority. Never raises — the DB write is what makes the tag effective;
+    this only keeps the bootstrap/fallback seed current (ADR-012)."""
+    try:
+        text = SEED_FILE.read_text()
+    except Exception as exc:
+        return f"seed NOT updated (unreadable: {exc})"
+    if f'"{tag}"' in text:
+        return "seed already current"
+    if _SEED_MARKER not in text:
+        return "seed NOT updated (append marker missing — add the tag manually)"
+    try:
+        SEED_FILE.write_text(text.replace(_SEED_MARKER, f'    "{tag}",\n{_SEED_MARKER}'))
+    except Exception as exc:
+        return f"seed NOT updated (write failed: {exc})"
+    return "seed updated -> commit api/canonical_tags.py via /commit + PR"
+
+
 def cmd_approve(conn, tag: str, yes: bool) -> int:
     """INSERT tag into tag_vocabulary and mark its proposal approved."""
     tag = tag.strip()
@@ -169,7 +192,9 @@ def cmd_approve(conn, tag: str, yes: bool) -> int:
             "UPDATE public.tag_proposals SET status = 'approved' WHERE normalized_key = %s",
             [key],
         )
-    print(f"  done: {tag!r} is now canonical.")
+    seed_status = _append_seed_tag(tag)
+    print(f"  done: {tag!r} is now canonical in tag_vocabulary (DB authority).")
+    print(f"  seed: {seed_status}")
     return 0
 
 

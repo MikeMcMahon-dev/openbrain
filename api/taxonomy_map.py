@@ -49,28 +49,13 @@ _SHAPE_BY_SOURCE_TYPE = {
 _DEFAULT_SHAPE = "note"
 
 # ── Controlled tag vocabulary (taxonomy governance, ADR-012) ────────────────────────
-# Single source of truth for tags. Harvested from live knowledge.tags (2026-06-17),
-# which had drifted across two schemes (Stage-2 tech tags + the mapper's domain tags)
-# plus casing dups. Producers propose; this normalizes. Closed-by-default: unknown
-# tags are returned separately for review, never silently kept. Grows by intent (edit
-# this set), not by producer guess.
-CANONICAL_TAGS: frozenset[str] = frozenset({
-    # Tech / skills (Stage-2 content tags — the valuable searchable facets)
-    "IaC", "Terraform", "Ansible", "Bash", "Python", "RedHat", "Bare-Metal",
-    "Proxmox", "K8s", "CKA", "Network", "Security", "Architecture", "AI",
-    "Engineering", "Reference", "Ops", "Lab", "Production",
-    # Systems / projects
-    "OpenBrain", "Homelab", "SpectreNet", "PMX-01", "ProjectDocs", "AgentLab",
-    "MultiAgentLab", "PortfolioBlog", "Session",
-    # People / personal
-    "Personal", "Mike", "Beth", "Annie", "Family",
-    # Study subjects
-    "Science", "Biology", "Geometry", "Math", "Study",
-    # Life
-    "Health", "Nutrition", "FoodLog", "Preferences", "Mental-health",
-    # Career / interview (cross-cutting)
-    "Career", "Interview", "NV-Prep", "Testing", "Ubuntu Study", "Schooling",
-})
+# The SEED lives in api/canonical_tags.py (a flat, machine-editable list). The DB table
+# public.tag_vocabulary is the runtime source of truth (extended via tag_review.py);
+# this seed bootstraps it and is the offline fallback. Producers propose; normalize_tags
+# disposes. Closed-by-default: unknown tags are returned for review, never silently kept.
+from api.canonical_tags import CANONICAL_TAGS as _SEED_TAGS  # noqa: E402
+
+CANONICAL_TAGS: frozenset[str] = frozenset(_SEED_TAGS)
 
 # Variant key -> canonical. Keys are _tag_key-normalized (lowercase, -/_ /space folded).
 # A canonical value of None means DROP (the tag is retired, e.g. smoke-test scaffolding).
