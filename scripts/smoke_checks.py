@@ -1275,6 +1275,78 @@ def _call_live(
         return status, response_body
 
 
+def _live_post_as_token_owner(
+    base_url: str, path: str, body: dict[str, Any], token: str
+) -> tuple[int, Any]:
+    """POST to a live endpoint authenticated by token only — WITHOUT the
+    `x-openbrain-owner: tenant-a-owner` header that _call_live forces. Owner then
+    resolves from the token binding (the real family owner with content), which is
+    what a content-level check needs. Returns (status, parsed_body)."""
+    target = urllib.parse.urljoin(base_url.rstrip("/") + "/", path.lstrip("/"))
+    data = json.dumps(body).encode("utf-8")
+    req = urllib.request.Request(
+        target,
+        data=data,
+        method="POST",
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
+    )
+    ctx = ssl.create_default_context()
+    try:
+        with urllib.request.urlopen(req, context=ctx, timeout=20) as resp:
+            return getattr(resp, "status", 200), json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        try:
+            return exc.code, json.loads(exc.read().decode("utf-8"))
+        except Exception:
+            return exc.code, {}
+
+
+def _smoke_live_content_check(base_url: str) -> int:
+    """Content-level retrieval check (cluster of HTTP-200-but-empty blind spots).
+
+    A 200 with `results: []` is indistinguishable from a broken DB / wrong backend /
+    failed retrieval — the plain status checks miss all of it. Query a broad term as
+    the token's real owner (the other query cases use `tenant-a-owner`, which has no
+    content) and assert: real rows come back AND the top row carries non-empty text.
+    Also reports which backend served it (knowledge facets present vs legacy thoughts),
+    so a silent flip-revert (READ_TARGET back to thoughts) is visible too.
+    """
+    token = os.getenv("OPENBRAIN_TOOL_ACCESS_TOKEN", "")
+    if not token:
+        print("/api/query [content]: SKIP — OPENBRAIN_TOOL_ACCESS_TOKEN not set")
+        return 0
+    try:
+        status, body = _live_post_as_token_owner(
+            base_url, "/api/query", {"query": "network", "n_results": 5}, token
+        )
+    except Exception as exc:
+        print(f"/api/query [content]: FAIL — request error: {exc}")
+        return 1
+
+    if status != 200:
+        print(f"/api/query [content]: FAIL — HTTP {status}")
+        return 1
+    results = body.get("results", []) if isinstance(body, dict) else []
+    if not results:
+        print(
+            "/api/query [content]: FAIL — HTTP 200 but EMPTY results "
+            "(DB unreachable, retrieval broken, or owner mis-scoped — the exact blind "
+            "spot status-only checks miss)"
+        )
+        return 1
+    top = results[0]
+    text = (top.get("text") or top.get("content") or "").strip()
+    if not text:
+        print("/api/query [content]: FAIL — results returned but top row has empty text")
+        return 1
+    backend = "knowledge" if ("status" in top and "domain" in top) else "thoughts"
+    print(
+        f"/api/query [content]: ok — {len(results)} results, "
+        f"top conf={top.get('confidence')}, backend={backend}"
+    )
+    return 0
+
+
 def smoke_live(base_url: str) -> int:
     _token = os.getenv("OPENBRAIN_TOOL_ACCESS_TOKEN", "")
     _auth = {"Authorization": f"Bearer {_token}"} if _token else {}
@@ -1494,6 +1566,7 @@ def smoke_live(base_url: str) -> int:
             print(f"{label}: FAIL — {exc}")
             failed += 1
 
+    failed += _smoke_live_content_check(base_url)
     failed += smoke_oauth(base_url)
     return failed
 
