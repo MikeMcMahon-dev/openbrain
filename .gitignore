@@ -15,3 +15,8 @@ ingest/
 
 # OB2 cutover migration report — contains sensitive row previews (handoff: excluded from git)
 docs/migrations/003_cutover_migration_report.md
+
+# Machine-specific MCP server config (absolute venv/script paths differ per
+# checkout; no shared value, no secrets — the OpenBrain token is read from
+# .env.local at runtime). Untracked to stop per-environment churn.
+.mcp.json
