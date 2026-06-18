@@ -1,6 +1,6 @@
 # OpenBrain Taxonomy Drift Audit — public.knowledge
 
-_Generated: 2026-06-18 02:57 UTC (READ-ONLY; SELECT only)_
+_Generated: 2026-06-18 04:02 UTC (READ-ONLY; SELECT only)_
 
 Source of truth: `api/taxonomy_map.py` (CANONICAL_TAGS, TAG_ALIASES, normalize_tags). ADR-012.
 
@@ -9,7 +9,7 @@ Source of truth: `api/taxonomy_map.py` (CANONICAL_TAGS, TAG_ALIASES, normalize_t
 - Total rows: **699**
 - Rows carrying >=1 tag: **669**
 - Distinct tags in use: **45**
-- Canonical vocabulary size: 49 (+13 alias keys)
+- Canonical vocabulary size: 50 (+13 alias keys)
 
 ## 1 + 2. Tag classification (via normalize_tags)
 

@@ -135,6 +135,7 @@ def normalize_tags(
 _DROP_SUBJECTS = {
     "live smoke test note",
     "smoke test",
+    "mcp_smoke",
     "mcp_smoke_test",
     "pdf_smoke_test",
     "docx_url_smoke_test",
@@ -175,6 +176,10 @@ _SUBJECT_RULES: dict[str, tuple[str, str, str | None, list[str]]] = {
     "agent-lab": ("OpenBrain", "Study", None, ["AgentLab"]),
     "multi-agent-lab": ("OpenBrain", "Study", None, ["MultiAgentLab"]),
     "home-lab": ("Study", "Study", None, ["HomeLab", "Reference"]),
+    "homelab notes": ("Study", "Study", None, ["HomeLab", "Reference"]),
+    "git / workflow": ("Study", "Study", None, ["Reference"]),
+    # ── Annie's Linux study cards (31) — family-visible Study, system=Annie ──
+    "linux command line": ("Study", "Study", "Annie", ["Annie", "Linux"]),
     # ── Personal (default environment Study; mental-health override -> Archive) ──
     "mike": ("Personal", "Study", None, ["Personal", "Mike"]),
     "personal": ("Personal", "Study", None, ["Personal"]),
@@ -349,6 +354,18 @@ def map_to_taxonomy(
                           reason=f"engineering w/ path -> Network/Production, system={system}")
         return result(domain, environment, system, tags, drop=False,
                       reason="engineering text-source rule (no path) -> Network/Production")
+
+    # 5b. Homelab/SpectreNet infrastructure — split by topic (owner decision 2026-06-17):
+    #     k8s-migration topics -> K8s/Production; DNS/topology operational state ->
+    #     Network/Production. system stays SpectreNet in both (same infrastructure).
+    if subj.lower() in ("homelab infrastructure", "infrastructure"):
+        if re.search(r"kubernetes|k8s|\bmigration\b", top.lower()):
+            return result("K8s", "Production", "SpectreNet", ["K8s", "Production"],
+                          drop=False,
+                          reason=f"infra k8s-migration topic '{top[:40]}' -> K8s/Production")
+        return result("Network", "Production", "SpectreNet", ["Network", "Production"],
+                      drop=False,
+                      reason=f"infra DNS/topology topic '{top[:40]}' -> Network/Production")
 
     # 6. Flat subject rules.
     rule = _SUBJECT_RULES.get(subj.lower())

@@ -859,6 +859,78 @@ def retrieve_thoughts(
     return final
 
 
+def _read_target() -> str:
+    """Active read backend (OB2 Phase-2). Default 'thoughts' keeps the legacy path
+    live until the flip; set OPENBRAIN_READ_TARGET=knowledge to serve from OB2."""
+    return (os.getenv("OPENBRAIN_READ_TARGET") or "thoughts").strip().lower()
+
+
+def _adapt_knowledge_result(kr: Mapping[str, Any]) -> dict[str, Any]:
+    """Map a retrieve_knowledge() result to the thoughts-style payload shape.
+
+    Knowledge rows carry {id, text, score, confidence, domain, environment,
+    system, tags, status} but no source/file/section/heading — fields the tutor
+    packet (run_tutor_payload) and the API `results` contract expect. We synthesize
+    a provenance string from domain/system so downstream consumers (tutor context,
+    Custom GPTs) keep working, and pass the knowledge facets through additively.
+    """
+    domain = kr.get("domain")
+    system = kr.get("system")
+    provenance = "/".join(p for p in (domain, system) if p) or "knowledge"
+    return {
+        "score": kr.get("score"),
+        "id": kr.get("id"),
+        "document_id": kr.get("id"),
+        "file": None,
+        "source": provenance,
+        "section": provenance,
+        "heading": None,
+        "content_type": "knowledge",
+        "owner": kr.get("created_by"),
+        "source_channel": "knowledge",
+        "text": kr.get("text", ""),
+        "confidence": kr.get("confidence", "low"),
+        # ── OB2 knowledge facets (additive — legacy consumers ignore unknown keys) ──
+        "domain": domain,
+        "environment": kr.get("environment"),
+        "system": system,
+        "tags": list(kr.get("tags") or []),
+        "status": kr.get("status"),
+    }
+
+
+def retrieve_for_query(
+    query: str,
+    n_results: int,
+    owner: str,
+    tenant_id: str,
+) -> list[dict[str, Any]]:
+    """Phase-2 read dispatch. Routes to OB2 `knowledge` when OPENBRAIN_READ_TARGET
+    is 'knowledge', else the legacy `thoughts` path. Knowledge results are adapted
+    to the thoughts-style shape so the tutor packet and `results` contract are
+    backend-agnostic. Lazy import avoids a circular dependency."""
+    if _read_target() == "knowledge":
+        from api.knowledge_retrieval import retrieve_knowledge
+
+        # Temporal-awareness retrieval (Mike, 2026-06-17): `status` prioritizes
+        # 'current' over 'historical' so stale operational state (e.g. an old
+        # homelab config) never masquerades as live — but it is NOT a hard filter.
+        # Prefer 'current'; if that yields a confident hit, return it. Otherwise
+        # (low-confidence or empty current — common for sparse/young corpora like
+        # Beth's notes) broaden across ALL statuses so historical content still
+        # surfaces. Owner scoping (created_by) isolates each family member.
+        current = retrieve_knowledge(
+            query, n_results, owner, filters={"status": "current"}
+        )
+        if current and current[0].get("confidence") in ("high", "medium"):
+            return [_adapt_knowledge_result(r) for r in current]
+        broadened = retrieve_knowledge(
+            query, n_results, owner, filters={"status": None}
+        )
+        return [_adapt_knowledge_result(r) for r in broadened]
+    return retrieve_thoughts(query, n_results, owner, tenant_id)
+
+
 def run_tutor_payload(
     query: str,
     mode: str,
@@ -926,7 +998,7 @@ def query_payload(
     n_results = normalize_results_count(payload.get("n_results"), DEFAULT_RESULTS)
     owner, tenant_id = request_context(method_metadata)
     student_attempt = payload.get("student_attempt")
-    results = retrieve_thoughts(query, n_results, owner, tenant_id)
+    results = retrieve_for_query(query, n_results, owner, tenant_id)
 
     (
         normalized_mode,
@@ -983,7 +1055,7 @@ def search_payload(
 
     n_results = normalize_results_count(payload.get("n_results"), DEFAULT_RESULTS)
     owner, tenant_id = request_context(method_metadata)
-    results = retrieve_thoughts(query, n_results, owner, tenant_id)
+    results = retrieve_for_query(query, n_results, owner, tenant_id)
     return 200, {"results": results, "count": len(results)}
 
 
@@ -1065,6 +1137,109 @@ def _normalize_bulk_items(
     return normalized_items, errors
 
 
+def _write_target() -> str:
+    """Active write backend (OB2 Phase-2). Default 'thoughts' keeps the legacy
+    writer live until the flip; set OPENBRAIN_WRITE_TARGET=knowledge to write OB2."""
+    return (os.getenv("OPENBRAIN_WRITE_TARGET") or "thoughts").strip().lower()
+
+
+def _honor_owners() -> set[str]:
+    """Owners whose explicit ingest domain/environment are HONORED over the derived
+    taxonomy (Mike, 2026-06-17: he is more likely to supply a correct/explicit value
+    than Beth or Annie). Everyone else stays on derive-from-(subject,topic). Override
+    via OPENBRAIN_TAXONOMY_HONOR_OWNERS (comma-separated); default just the owner."""
+    raw = os.getenv("OPENBRAIN_TAXONOMY_HONOR_OWNERS", "mike.mcmahon67")
+    return {o.strip() for o in raw.split(",") if o.strip()}
+
+
+def _write_text_ingest_knowledge(
+    content: str,
+    owner: str,
+    subject: str,
+    topic: str,
+    domain_override: str | None = None,
+    environment_override: str | None = None,
+    warnings: list[str] | None = None,
+) -> str | None:
+    """Phase-2 write path into public.knowledge. Derives the OB2 taxonomy from the
+    legacy (subject, topic) signals via api.taxonomy_map, then delegates field
+    integrity + the INSERT to api.knowledge_ingest.write_knowledge.
+
+    Per-owner taxonomy policy (ADR-012 / Mike 2026-06-17): for owners in
+    _honor_owners(), a producer-supplied domain/environment is HONORED when valid,
+    and a mismatch vs the derived value is reported into `warnings` (so typos are
+    surfaced, not silently written). For everyone else the producer values are
+    ignored and the governed mapper derives the taxonomy. Invalid honored values
+    fall back to derive + a warning.
+
+    Returns None on success (or a deliberate curation drop), or an error string on
+    failure — matching the _write_text_ingest contract. Lazy imports avoid a
+    circular dependency and keep the legacy path import-light."""
+    from api.knowledge_ingest import write_knowledge
+    from api.taxonomy_map import VALID_DOMAINS, VALID_ENVIRONMENTS, map_to_taxonomy
+
+    tax = map_to_taxonomy(
+        subject=subject, topic=topic, owner=owner, source_type="text", content=content
+    )
+    if tax.get("drop"):
+        # Smoke-test / malformed content — curation drop. Silently succeed without
+        # writing (mirrors the legacy SafeIngest silent-accept posture).
+        return None
+
+    domain, environment = tax["domain"], tax["environment"]
+
+    # ── Honor-vs-derive (per owner) ──────────────────────────────────────────────
+    req_domain = (domain_override or "").strip() or None
+    req_environment = (environment_override or "").strip() or None
+    if owner in _honor_owners() and (req_domain or req_environment):
+        warn = warnings if warnings is not None else []
+        # Domain: honor when valid; flag a mismatch or an invalid (likely-typo) value.
+        if req_domain:
+            if req_domain not in VALID_DOMAINS:
+                warn.append(
+                    f"ingest: domain '{req_domain}' is not a valid domain — "
+                    f"derived '{domain}' instead (subject='{subject}')."
+                )
+            else:
+                if req_domain != domain:
+                    warn.append(
+                        f"ingest: honored domain '{req_domain}' differs from inferred "
+                        f"'{domain}' (subject='{subject}', topic='{topic}') — "
+                        "confirm it is not a typo."
+                    )
+                domain = req_domain
+        if req_environment:
+            if req_environment not in VALID_ENVIRONMENTS:
+                warn.append(
+                    f"ingest: environment '{req_environment}' is not valid — "
+                    f"derived '{environment}' instead (subject='{subject}')."
+                )
+            else:
+                if req_environment != environment:
+                    warn.append(
+                        f"ingest: honored environment '{req_environment}' differs from inferred "
+                        f"'{environment}' (subject='{subject}') — confirm it is not a typo."
+                    )
+                environment = req_environment
+
+    result = write_knowledge(
+        content,
+        owner,
+        domain=domain,
+        environment=environment,
+        system=tax.get("system"),
+        tags=list(tax.get("tags") or []),
+        shape=tax.get("shape"),
+        source="live:text",
+        source_type="text",
+    )
+    status = result.get("status")
+    if status == "accepted":
+        return None
+    # rejected / conflict / error all surface as a failure string to the caller.
+    return result.get("message") or f"knowledge write {status}"
+
+
 def _write_text_ingest(
     content: str,
     owner: str,
@@ -1072,11 +1247,25 @@ def _write_text_ingest(
     subject: str,
     topic: str,
     ingest_id: str,
+    domain_override: str | None = None,
+    environment_override: str | None = None,
+    warnings: list[str] | None = None,
 ) -> str | None:
     """Embed and upsert a single text chunk into public.thoughts.
 
     Returns None on success, or an error message string on failure.
+
+    OB2 Phase-2: when OPENBRAIN_WRITE_TARGET=knowledge, the write is routed to
+    public.knowledge (taxonomy-validated) instead. Default stays 'thoughts'.
+    The domain_override/environment_override/warnings args carry the per-owner
+    honor-vs-derive policy and are only supplied by the direct text-ingest path
+    (pdf/docx chunk callers omit them and always derive).
     """
+    if _write_target() == "knowledge":
+        return _write_text_ingest_knowledge(
+            content, owner, subject, topic,
+            domain_override, environment_override, warnings,
+        )
     try:
         embedding = embedding_request(content)
     except Exception as exc:
@@ -1505,7 +1694,16 @@ def ingest_payload(
             status = "accepted"
             message = "Ingest request accepted."
         else:
-            write_error = _write_text_ingest(source, owner, _tenant_id, subject, topic, _text_ingest_id)
+            # Producer-supplied taxonomy (honored for _honor_owners(), derived for
+            # everyone else, inside the knowledge writer). Mismatch/typo alerts land
+            # in `tax_warnings` and are surfaced to the producer via `details`.
+            tax_warnings: list[str] = []
+            write_error = _write_text_ingest(
+                source, owner, _tenant_id, subject, topic, _text_ingest_id,
+                domain_override=payload.get("domain"),
+                environment_override=payload.get("environment"),
+                warnings=tax_warnings,
+            )
             if write_error:
                 status = "failed"
                 message = f"Ingest failed: {write_error}"
@@ -1513,6 +1711,7 @@ def ingest_payload(
             else:
                 status = "accepted"
                 message = "Ingest request accepted."
+            details.extend(tax_warnings)
     else:
         reachable, reason = _source_reachable(source_type, source)
         if not reachable:
