@@ -89,9 +89,28 @@ CREATE TRIGGER knowledge_tags_validation
   BEFORE INSERT OR UPDATE ON public.knowledge
   FOR EACH ROW EXECUTE FUNCTION public.validate_knowledge_tags();
 
+-- ── Row Level Security ──────────────────────────────────────────────────────--
+-- Mirror tag_proposals/wiki_pages: service_role full access; anon read-only so the
+-- controlled vocabulary is inspectable (tag names are non-sensitive). All ingest-path
+-- reads (_load_tag_vocabulary) and the knowledge tag-validation trigger run over the
+-- direct service connection, which bypasses RLS — so enabling RLS here does not affect
+-- write validation; it only locks out unauthenticated PostgREST mutation.
+
+ALTER TABLE public.tag_vocabulary ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS tag_vocabulary_service ON public.tag_vocabulary;
+CREATE POLICY tag_vocabulary_service ON public.tag_vocabulary
+  FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS tag_vocabulary_anon_read ON public.tag_vocabulary;
+CREATE POLICY tag_vocabulary_anon_read ON public.tag_vocabulary
+  FOR SELECT TO anon USING (true);
+
 -- ── Rollback ──────────────────────────────────────────────────────────────────
 -- Run these statements (in this order) to fully reverse this migration:
 --
+--   DROP POLICY IF EXISTS tag_vocabulary_anon_read ON public.tag_vocabulary;
+--   DROP POLICY IF EXISTS tag_vocabulary_service ON public.tag_vocabulary;
 --   DROP TRIGGER IF EXISTS knowledge_tags_validation ON public.knowledge;
 --   DROP FUNCTION IF EXISTS public.validate_knowledge_tags();
 --   DROP TABLE IF EXISTS public.tag_vocabulary;
