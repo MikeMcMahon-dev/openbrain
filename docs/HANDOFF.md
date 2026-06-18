@@ -1,19 +1,36 @@
 # OpenBrain — Session Handoff
 
-**Last updated:** 2026-06-17 (Phase-2 wiring session)
-**Branch:** `feat/ob2-phase2-wiring` · **PR #51 merged** (thoughts hotfix + cutover machinery live; flip still gated)
+**Last updated:** 2026-06-17 (flip-execution session)
+**Status:** ✅ **OB2 FLIP EXECUTED — `knowledge` is LIVE in production.** PRs #51–#55 merged.
 **Read this before making changes.** Then `docs/OPENBRAIN_NEXT_STEPS.md` for the backlog.
 
 ---
 
-## TL;DR
-OB2 was discovered **stalled before cutover** — production still runs on legacy
-`public.thoughts`; `public.knowledge` was built but has **no semantic retrieval** and is
-never written by the family ingest path. This branch lands the machinery to finish the
-cutover **behind gates**, plus a **taxonomy-governance** layer. **Nothing has been executed
-against the DB and nothing is flipped.** Merging PR #51 deploys only the live-`thoughts`
-retrieval hotfix (an improvement for everyone); the new modules stay dormant until Phase-2
-wiring + the flip.
+## TL;DR — the flip is DONE
+OB2 was stalled before cutover (prod ran legacy `public.thoughts`; `public.knowledge` had no
+retrieval and was never written by the family path). This is now **complete and live**:
+- **Code** (PRs #51–#55): thoughts hotfix, Phase-2 read/write wiring, taxonomy governance,
+  mapper-gap fixes, per-owner ingest honor/derive, temporal-aware read, `.vercelignore`.
+- **DB migration executed (2026-06-17):** retag (37 updates / 19 deletes) → migrations `003`+`004`
+  applied (incl. `tag_vocabulary` RLS policies) → `cutover_migrate --execute` (63 rows) →
+  `promote_study_current --execute` (638 study/personal rows → `current`).
+- **Flags flipped:** Vercel `OPENBRAIN_READ_TARGET=knowledge` + `OPENBRAIN_WRITE_TARGET=knowledge`.
+- **Verified live:** prod serves `knowledge` (`status=current`, facets present); Annie's 31 Linux
+  cards `current` under `anneliesepaige`; per-owner current/historical isolation intact.
+- **Rollback if ever needed:** set both flags back to `thoughts` + redeploy (instant); `thoughts`
+  is untouched, and every migrated row is tagged `source='cutover:%'` for a one-line DELETE.
+
+### Open follow-ups (non-urgent; family is fully live)
+1. **Vercel Git auto-deploy** — was broken (GitHub App lacked `openbrain` repo access; now granted).
+   Confirm a merge produces a "via GitHub" build; until then deploy with `vercel --prod`.
+2. Session-report cron already repointed to `knowledge` (#54). Nightly job reads OB2 now.
+
+<details><summary>Original pre-flip TL;DR (historical)</summary>
+
+OB2 was discovered **stalled before cutover** — production ran legacy `public.thoughts`;
+`public.knowledge` was built but had no semantic retrieval and was never written by the family
+ingest path. The cutover machinery landed behind gates, dormant until Phase-2 wiring + the flip.
+</details>
 
 ## How we got here (the arc)
 1. Task: ingest Annie's 31-card Linux reference into her isolated vault + validate retrieval.
