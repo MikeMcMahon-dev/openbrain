@@ -44,7 +44,16 @@ def _fetch_session_rows(owner: str, date: str) -> list[dict[str, Any]]:
 
 
 def _fetch_study_notes(owner: str, date: str) -> list[dict[str, Any]]:
-    """Pull thoughts rows for owner on a given date (YYYY-MM-DD)."""
+    """Pull study-note rows for owner on a given date (YYYY-MM-DD).
+
+    OB2 post-flip: study notes are written to public.knowledge (not public.thoughts),
+    so the nightly report reads from knowledge. The report's note-card label is
+    `subject · topic`, which knowledge has no direct columns for — so we synthesize
+    them from the taxonomy: subject = domain, topic = the plain descriptive tags
+    (namespaced shape:/component: tags are dropped from the label). owner is the
+    knowledge.created_by column. created_at is preserved verbatim (migrated rows keep
+    their original timestamp), so date-scoping still resolves notes to the day made.
+    """
     if connect is None:
         return []
     try:
@@ -53,11 +62,17 @@ def _fetch_study_notes(owner: str, date: str) -> list[dict[str, Any]]:
                 """
                 SELECT
                     content,
-                    metadata->>'subject' AS subject,
-                    metadata->>'topic'   AS topic,
+                    domain AS subject,
+                    NULLIF(
+                        array_to_string(
+                            ARRAY(SELECT t FROM unnest(tags) t WHERE position(':' IN t) = 0),
+                            ', '
+                        ),
+                        ''
+                    ) AS topic,
                     created_at
-                FROM public.thoughts
-                WHERE LOWER(COALESCE(created_by_user_login, metadata->>'owner', '')) = LOWER(%s)
+                FROM public.knowledge
+                WHERE LOWER(created_by) = LOWER(%s)
                   AND created_at::date = %s::date
                 ORDER BY created_at ASC
                 """,
