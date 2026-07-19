@@ -31,6 +31,8 @@ CANONICAL_TAGS: list[str] = [
     "Health", "Nutrition", "FoodLog", "Preferences", "Mental-health",
     # Career / interview (cross-cutting)
     "Career", "Interview", "NV-Prep", "Testing", "Ubuntu Study", "Schooling",
+    "Monitoring",
+    "LabInfra",
     # ── approved via scripts/tag_review.py append below this line ──
 ]
 # fmt: on
