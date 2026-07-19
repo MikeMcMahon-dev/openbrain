@@ -289,6 +289,12 @@ def _call_tool(name: str, arguments: dict, metadata: dict) -> dict[str, Any]:
             "source": arguments.get("source"),
             "subject": arguments.get("subject", ""),
             "topic": arguments.get("topic", ""),
+            # The inputSchema advertises domain/environment/tags; forward them so the
+            # per-owner honor/derive policy (ingest_payload) can honor the override.
+            # Omitting them silently misfiled technical content into the Study default.
+            "domain": arguments.get("domain"),
+            "environment": arguments.get("environment"),
+            "tags": arguments.get("tags"),
         }
         normalized = {k: v for k, v in normalized.items() if v}
         status, body = ingest_payload(normalized, metadata)
