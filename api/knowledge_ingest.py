@@ -153,12 +153,24 @@ def write_knowledge(
     source: str = "cutover:ingest",
     source_type: str | None = None,
     supersedes_id: str | None = None,
+    auto_supersede: bool = True,
 ) -> dict[str, Any]:
     """Embed ``content`` and INSERT one row into ``public.knowledge``.
 
     Field integrity (ADR-011 decision 3): reject empty content/owner and require
     a valid domain + environment. Never silently substitute junk — a bad taxonomy
     is a hard 400, not a default.
+
+    Living-doc auto-supersession (ADR-008): a note carrying a ``component:*`` tag
+    declares itself the canonical record for ``(system, component)``. When
+    ``auto_supersede`` is on (default), a new ``current`` write for an identity that
+    already has a ``current`` row atomically flips the prior row(s) to
+    ``superseded`` (stamping ``valid_until``) and links the new row via
+    ``supersedes_id`` — so an "overwrite" replaces in place instead of piling up a
+    second ``current`` competitor. Notes WITHOUT a ``component:*`` tag are
+    append-only event/history and never supersede anything. This branch is a no-op
+    unless a ``component:*`` tag + non-null ``system`` are present, so append-only
+    callers are unaffected.
 
     Handles the duplicate-current trigger by returning a 409-style dict instead
     of crashing (matches handle_ingest_state). Study content (system IS NULL) is
@@ -227,6 +239,37 @@ def write_knowledge(
             if shape_tag not in tag_list:
                 tag_list.append(shape_tag)
 
+            # ── Living-doc auto-supersession (ADR-008) ────────────────────────
+            # If this is a `current` write for a keyed living doc (has a
+            # component:* identity tag + a system) and the caller did not pin a
+            # supersedes_id, retire the prior current row(s) for that exact
+            # (system, component) in the SAME transaction and link this row to
+            # the most-recent one. Same atomicity as the INSERT below, so a
+            # failure rolls back both. No component tag => append-only => skipped.
+            if auto_supersede and status == "current" and system and not supersedes_id:
+                component_tag = next(
+                    (t for t in tag_list if t.startswith("component:")), None
+                )
+                if component_tag is not None:
+                    prior = conn.execute(
+                        """
+                        SELECT id FROM public.knowledge
+                        WHERE system = %s AND status = 'current' AND tags @> ARRAY[%s]
+                        ORDER BY valid_from DESC
+                        """,
+                        [system, component_tag],
+                    ).fetchall()
+                    if prior:
+                        supersedes_id = str(prior[0]["id"])
+                        conn.execute(
+                            """
+                            UPDATE public.knowledge
+                            SET status = 'superseded', valid_until = now()
+                            WHERE system = %s AND status = 'current' AND tags @> ARRAY[%s]
+                            """,
+                            [system, component_tag],
+                        )
+
             embedding_val = _vector_param(embedding) if embedding else None
             row = conn.execute(
                 """
@@ -242,7 +285,8 @@ def write_knowledge(
             new_id = str(row["id"]) if row else None
     except Exception as exc:
         msg = str(exc)
-        if "duplicate Current record" in msg or "Cannot create duplicate" in msg:
+        _low = msg.lower()
+        if "duplicate current record" in _low or "cannot create duplicate" in _low:
             return {
                 "status": "conflict",
                 "code": 409,
@@ -265,4 +309,6 @@ def write_knowledge(
         "environment": environment,
         "shape": resolved_shape,
         "tags": tag_list,
+        # Non-null when living-doc auto-supersession retired a prior current row.
+        "superseded_id": supersedes_id,
     }
