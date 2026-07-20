@@ -4,6 +4,25 @@ This document tracks planned improvements for the OpenBrain system.
 
 ---
 
+## Retrieval ranking — boost component:*-keyed current-state (2026-07-19)
+
+`component:*` auto-supersession shipped (PR#63): living-doc current-state notes now replace in place
+instead of piling up as duplicate `current` rows. But retrieval (RRF hybrid) is recency- and
+status-blind at *ranking*, so obsolete **event** notes (session wraps, completed-migration notes —
+especially any with a "Current State" heading) can still out-rank the canonical `component:*`-keyed
+doc. Stopgap today was manual curation (retiring obsolete event notes to `status='historical'`).
+
+**Backlog:**
+- Make current-state queries prefer the keyed canonical doc — a retrieval boost for rows carrying a
+  `component:*` tag (or a mild recency tiebreak in the RRF fusion) so a keyed current-state row wins
+  over an unkeyed event note of similar lexical match. Decide vs. staying on manual curation.
+- A periodic "current-state audit" (list all `component:*`-keyed rows + flag stale ones) to make
+  curation cheap.
+- Consider a domain/owner down-weight so cross-domain noise (e.g. Study/Personal chunks) stops
+  appearing in operational current-state results.
+
+---
+
 ## OpenBrain 2.0 — Status (2026-05-13)
 
 Design complete. Stage 1 (ADR + Domain Discovery) done. Awaiting human sign-off before Stage 2.
