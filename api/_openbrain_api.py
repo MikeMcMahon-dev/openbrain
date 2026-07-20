@@ -875,6 +875,14 @@ def retrieve_thoughts(
     final: list[dict[str, Any]] = []
     for i, key in enumerate(ranked_keys):
         row = dict(row_by_key[key])
+        # Coerce UUID id/document_id to str so the payload is JSON-serializable
+        # regardless of the psycopg runtime's type adaptation. Some drivers hand
+        # back UUID objects (local pyenv) while others stringify (Vercel), which
+        # is why this only surfaced in the local smoke harness. Mirrors the
+        # knowledge path (_shape_result already does str(id)).
+        for _idk in ("id", "document_id"):
+            if row.get(_idk) is not None:
+                row[_idk] = str(row[_idk])
         row["score"] = rrf_scores[key]
         wc = _word_count(row.get("text", ""))
         if i == 0:
