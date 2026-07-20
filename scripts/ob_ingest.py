@@ -17,6 +17,20 @@ USAGE:
   echo "note text" | python scripts/ob_ingest.py --subject session-context --topic session-wrap
   python scripts/ob_ingest.py --file wrap.md --subject session-context --topic session-wrap \
       --domain Network --environment Production --tags SpectreNet,Ops
+
+LIVING DOCS vs EVENT NOTES (ADR-008):
+  A "living" current-state doc (topology, inventory, config-of-record) should carry a
+  --component IDENTITY so a re-ingest REPLACES the prior current row in place instead of
+  piling up a second competing 'current' note. Everything else (session wraps, incident
+  reports) omits --component and is append-only history.
+
+    # living doc — replaces the prior SpectreNet DNS current-state row:
+    python scripts/ob_ingest.py --file dns-state.md --subject spectrenet-dns \
+        --domain Network --environment Production --component dns-current-state
+
+  --component X  adds the tag `component:X` (ADR-008 identity key). The note's `system` is
+  still derived from --subject/--topic, and the (system, component:X) pair is the identity.
+  --no-supersede disables the auto-retire (append even if a current row exists — rarely wanted).
 """
 import argparse
 import json
@@ -54,6 +68,12 @@ def main() -> None:
     p.add_argument("--domain", help="Network|K8s|Security|Study|OpenBrain|Personal")
     p.add_argument("--environment", help="Production|Lab|Study|Archive")
     p.add_argument("--tags", help="comma-separated tags")
+    p.add_argument("--component",
+                   help="ADR-008 living-doc identity: adds tag component:<val> so a re-ingest "
+                        "replaces the prior current row for this (system, component) in place")
+    p.add_argument("--no-supersede", dest="supersede", action="store_false",
+                   help="disable living-doc auto-supersede (append even if a current row exists)")
+    p.set_defaults(supersede=True)
     p.add_argument("--endpoint", default="/api/ingest")
     p.add_argument("--base", default=DEFAULT_BASE)
     p.add_argument("--token", help="override; else $OPENBRAIN_TOOL_ACCESS_TOKEN or .env.local")
@@ -77,8 +97,16 @@ def main() -> None:
         payload["domain"] = args.domain
     if args.environment:
         payload["environment"] = args.environment
-    if args.tags:
-        payload["tags"] = [t.strip() for t in args.tags.split(",") if t.strip()]
+    tags = [t.strip() for t in (args.tags or "").split(",") if t.strip()]
+    if args.component:
+        comp = args.component.strip()
+        comp_tag = comp if comp.startswith("component:") else f"component:{comp}"
+        if comp_tag not in tags:
+            tags.append(comp_tag)
+    if tags:
+        payload["tags"] = tags
+    if not args.supersede:
+        payload["auto_supersede"] = False
 
     req = urllib.request.Request(
         args.base.rstrip("/") + args.endpoint,

@@ -1193,10 +1193,18 @@ def _write_text_ingest_knowledge(
     domain_override: str | None = None,
     environment_override: str | None = None,
     warnings: list[str] | None = None,
+    producer_tags: list[str] | None = None,
+    auto_supersede: bool = True,
 ) -> str | None:
     """Phase-2 write path into public.knowledge. Derives the OB2 taxonomy from the
     legacy (subject, topic) signals via api.taxonomy_map, then delegates field
     integrity + the INSERT to api.knowledge_ingest.write_knowledge.
+
+    ``producer_tags`` are merged on top of the derived taxonomy tags — this is how
+    a caller attaches a ``component:*`` identity tag to key a living doc (ADR-008).
+    They still pass through the tag-governance folding in write_knowledge (unknown
+    descriptive tags are queued, not written; ``component:*``/``shape:*`` pass
+    through). ``auto_supersede`` forwards the living-doc replace-in-place behavior.
 
     Per-owner taxonomy policy (ADR-012 / Mike 2026-06-17): for owners in
     _honor_owners(), a producer-supplied domain/environment is HONORED when valid,
@@ -1255,16 +1263,23 @@ def _write_text_ingest_knowledge(
                     )
                 environment = req_environment
 
+    merged_tags = list(tax.get("tags") or [])
+    for t in producer_tags or []:
+        t = str(t).strip()
+        if t and t not in merged_tags:
+            merged_tags.append(t)
+
     result = write_knowledge(
         content,
         owner,
         domain=domain,
         environment=environment,
         system=tax.get("system"),
-        tags=list(tax.get("tags") or []),
+        tags=merged_tags,
         shape=tax.get("shape"),
         source="live:text",
         source_type="text",
+        auto_supersede=auto_supersede,
     )
     status = result.get("status")
     if status == "accepted":
@@ -1283,6 +1298,8 @@ def _write_text_ingest(
     domain_override: str | None = None,
     environment_override: str | None = None,
     warnings: list[str] | None = None,
+    producer_tags: list[str] | None = None,
+    auto_supersede: bool = True,
 ) -> str | None:
     """Embed and upsert a single text chunk into public.thoughts.
 
@@ -1292,12 +1309,16 @@ def _write_text_ingest(
     public.knowledge (taxonomy-validated) instead. Default stays 'thoughts'.
     The domain_override/environment_override/warnings args carry the per-owner
     honor-vs-derive policy and are only supplied by the direct text-ingest path
-    (pdf/docx chunk callers omit them and always derive).
+    (pdf/docx chunk callers omit them and always derive). ``producer_tags`` /
+    ``auto_supersede`` carry the ADR-008 living-doc identity + replace-in-place
+    signals into the knowledge path (ignored by the legacy thoughts path, which is
+    append-only and untagged).
     """
     if _write_target() == "knowledge":
         return _write_text_ingest_knowledge(
             content, owner, subject, topic,
             domain_override, environment_override, warnings,
+            producer_tags=producer_tags, auto_supersede=auto_supersede,
         )
     try:
         embedding = embedding_request(content)
@@ -1731,11 +1752,15 @@ def ingest_payload(
             # everyone else, inside the knowledge writer). Mismatch/typo alerts land
             # in `tax_warnings` and are surfaced to the producer via `details`.
             tax_warnings: list[str] = []
+            _p_tags = payload.get("tags")
+            _p_tags = _p_tags if isinstance(_p_tags, list) else None
             write_error = _write_text_ingest(
                 source, owner, _tenant_id, subject, topic, _text_ingest_id,
                 domain_override=payload.get("domain"),
                 environment_override=payload.get("environment"),
                 warnings=tax_warnings,
+                producer_tags=_p_tags,
+                auto_supersede=payload.get("auto_supersede", True) is not False,
             )
             if write_error:
                 status = "failed"
