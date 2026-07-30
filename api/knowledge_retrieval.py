@@ -32,6 +32,7 @@ from api._openbrain_api import (
     embedding_request,
     get_db_conn,
 )
+from api.chunking import collapse_chunks
 
 # Filter keys callers may supply via `filters` to AND against the semantic search.
 # `status` defaults to 'current'; the rest are optional equality facets.
@@ -82,16 +83,22 @@ def _has_component_tag(tags: Any) -> bool:
     """True when any tag is a `component:*` key (the living-doc supersession key)."""
     return any(isinstance(t, str) and t.startswith("component:") for t in (tags or []))
 
-# Columns selected from public.knowledge for both candidate queries.
-_SELECT_COLS = """
-      id,
-      content,
-      domain,
-      environment,
-      system,
-      tags,
-      status
-"""
+# Physical read table (ADR-017). Default 'knowledge'; set OPENBRAIN_KNOWLEDGE_TABLE
+# =knowledge_chunked to serve chunked sections (adds document_id/heading and triggers
+# retrieval-side collapse). Resolved at call time so the flag flips without a redeploy.
+_CHUNK_TABLE = "knowledge_chunked"
+
+
+def _knowledge_table() -> str:
+    t = (os.getenv("OPENBRAIN_KNOWLEDGE_TABLE") or "knowledge").strip().lower()
+    return _CHUNK_TABLE if t in (_CHUNK_TABLE, "chunked") else "knowledge"
+
+
+def _select_cols(table: str) -> str:
+    cols = "id, content, domain, environment, system, tags, status"
+    if table == _CHUNK_TABLE:
+        cols += ", document_id, chunk_index, heading"
+    return cols
 
 
 def _build_filter_clause(
@@ -133,8 +140,10 @@ def search_knowledge_vector_candidates(
     owner: str | None,
     max_results: int,
     filters: dict | None = None,
+    table: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Nearest-neighbour candidates by cosine distance over knowledge.embedding."""
+    """Nearest-neighbour candidates by cosine distance over <table>.embedding."""
+    table = table or _knowledge_table()
     vector_param = _vector_param(query_embedding)
     filter_clause, filter_params = _build_filter_clause(owner, filters)
 
@@ -145,9 +154,9 @@ def search_knowledge_vector_candidates(
 
     query_sql = f"""
     SELECT
-    {_SELECT_COLS},
+    {_select_cols(table)},
       (embedding <=> %s::vector) AS score
-    FROM public.knowledge
+    FROM public.{table}
     WHERE embedding IS NOT NULL
       {filter_clause}
     ORDER BY embedding <=> %s::vector
@@ -168,14 +177,16 @@ def search_knowledge_keyword_candidates(
     owner: str | None,
     max_results: int,
     filters: dict | None = None,
+    table: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Full-text candidates over knowledge.content.
+    """Full-text candidates over <table>.content.
 
     ADR-013: uses an OR-ranked, stemmed tsquery (one plainto_tsquery per term,
     OR-combined) so multi-term queries surface partial matches instead of requiring
     ALL terms (the websearch_to_tsquery AND default). Falls back to
     websearch_to_tsquery only when the query yields no usable terms.
     """
+    table = table or _knowledge_table()
     filter_clause, filter_params = _build_filter_clause(owner, filters)
 
     or_frag, or_params = _or_tsquery_fragment(query)
@@ -186,9 +197,9 @@ def search_knowledge_keyword_candidates(
 
     query_sql = f"""
     SELECT
-    {_SELECT_COLS},
+    {_select_cols(table)},
       ts_rank(to_tsvector('english', coalesce(content, '')), {tsq}) AS score
-    FROM public.knowledge
+    FROM public.{table}
     WHERE to_tsvector('english', coalesce(content, '')) @@ {tsq}
       {filter_clause}
     ORDER BY score DESC NULLS LAST
@@ -210,7 +221,7 @@ def _shape_result(
     confidence: str,
     signals: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return {
+    shaped = {
         "id": str(row.get("id")),
         "text": row.get("content", ""),
         "score": score,
@@ -225,6 +236,12 @@ def _shape_result(
         # constant reciprocal. Additive — existing keys are unchanged.
         "signals": signals or {},
     }
+    # Chunk identity (ADR-017) when reading the chunked store — drives collapse.
+    if row.get("document_id") is not None:
+        shaped["document_id"] = str(row.get("document_id"))
+        shaped["chunk_index"] = row.get("chunk_index")
+        shaped["heading"] = row.get("heading")
+    return shaped
 
 
 def retrieve_knowledge(
@@ -232,6 +249,7 @@ def retrieve_knowledge(
     n_results: int,
     owner: str | None,
     filters: dict | None = None,
+    table: str | None = None,
 ) -> list[dict[str, Any]]:
     """Hybrid (vector + keyword) retrieval over public.knowledge.
 
@@ -252,6 +270,7 @@ def retrieve_knowledge(
         list of dicts with keys:
         {id, text, score, confidence, domain, environment, system, tags, status}
     """
+    table = table or _knowledge_table()
     max_results = min(max(max(1, n_results) * 2, _VECTOR_POOL_FLOOR), MAX_RESULTS)
 
     vector_rows: list[dict[str, Any]] = []
@@ -259,7 +278,7 @@ def retrieve_knowledge(
         embedding = embedding_request(query)
         if embedding is not None:
             vector_rows = search_knowledge_vector_candidates(
-                embedding, owner, max_results, filters
+                embedding, owner, max_results, filters, table
             )
     except Exception:
         vector_rows = []
@@ -267,7 +286,7 @@ def retrieve_knowledge(
     keyword_rows: list[dict[str, Any]] = []
     try:
         keyword_rows = search_knowledge_keyword_candidates(
-            query, owner, max_results, filters
+            query, owner, max_results, filters, table
         )
     except Exception:
         keyword_rows = []
@@ -395,6 +414,12 @@ def retrieve_knowledge(
         sig = signals[key]
         sig["final_score"] = score
         final.append(_shape_result(row, score, confidence, sig))
+
+    # Chunked store (ADR-017): collapse chunk rows to one per parent document so a
+    # multi-section living doc presents once, not N times. No-op on `knowledge` (rows
+    # have no document_id). Collapse BEFORE truncating to n_results.
+    if table == _CHUNK_TABLE:
+        final = collapse_chunks(final)
 
     return final[: max(1, n_results)]
 
