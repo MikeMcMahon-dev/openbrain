@@ -61,6 +61,12 @@ smoke-live:
 	fi
 	@python scripts/smoke_checks.py --live "$(SMOKE_URL)"
 
+test:
+	@# Must run from tests/: the repo root holds a `vault/` symlink into an iCloud
+	@# store that is unreadable for some users, so pytest's rootdir scandir crashes
+	@# if it starts at the root. tests/conftest.py puts the repo on sys.path.
+	@cd tests && python -m pytest -q
+
 check: lint smoke
 
 check-log:
