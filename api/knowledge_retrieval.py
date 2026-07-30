@@ -63,6 +63,19 @@ _COMPONENT_BOOST = _env_float("OPENBRAIN_COMPONENT_BOOST", 1.0)
 # (suppress nothing) until an empirical floor is set from the baseline distribution.
 _VECTOR_SUPPRESSION_FLOOR = _env_float("OPENBRAIN_VECTOR_SUPPRESSION_FLOOR", 0.0)
 
+# IVFFlat recall (ADR-015). The knowledge.embedding index is ivfflat(lists=100).
+# pgvector's default ivfflat.probes=1 scans a SINGLE list (~8 of 800 rows), so a
+# genuinely top-similarity doc in another list is never considered — that, not
+# embedding dilution, is why long current-state docs were missing from vector
+# results. probes=10 (=sqrt(lists)) restores near-exact recall at negligible cost
+# on a table this small. SET LOCAL keeps it transaction-scoped (pooler-safe).
+_IVFFLAT_PROBES = int(_env_float("OPENBRAIN_IVFFLAT_PROBES", 10))
+
+# Candidate-pool floor: fuse from at least this many candidates per retriever
+# (capped at MAX_RESULTS) instead of just n_results*2. Cheap insurance so a
+# borderline high-similarity doc isn't dropped before fusion even sees it.
+_VECTOR_POOL_FLOOR = int(_env_float("OPENBRAIN_VECTOR_POOL_FLOOR", 50))
+
 
 def _has_component_tag(tags: Any) -> bool:
     """True when any tag is a `component:*` key (the living-doc supersession key)."""
@@ -141,6 +154,10 @@ def search_knowledge_vector_candidates(
     """
 
     with get_db_conn() as conn:
+        # Raise ivfflat.probes for THIS transaction so the approximate index scans
+        # enough lists to actually surface top-similarity rows (see _IVFFLAT_PROBES).
+        if _IVFFLAT_PROBES and _IVFFLAT_PROBES > 0:
+            conn.execute(f"SET LOCAL ivfflat.probes = {int(_IVFFLAT_PROBES)}")
         rows = conn.execute(query_sql, params).fetchall()
     return [dict(row) for row in rows]
 
@@ -234,7 +251,7 @@ def retrieve_knowledge(
         list of dicts with keys:
         {id, text, score, confidence, domain, environment, system, tags, status}
     """
-    max_results = min(max(1, n_results) * 2, MAX_RESULTS)
+    max_results = min(max(max(1, n_results) * 2, _VECTOR_POOL_FLOOR), MAX_RESULTS)
 
     vector_rows: list[dict[str, Any]] = []
     try:
