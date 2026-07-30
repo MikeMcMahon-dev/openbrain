@@ -161,3 +161,56 @@ def test_shape_fetch_carries_chunk_identity_when_present():
     plain = kr._shape_fetch({"id": "k1", "content": "b", "domain": "K8s", "system": None,
                              "status": "current", "tags": [], "environment": "Lab"})
     assert "document_id" not in plain       # unchunked row stays clean
+
+
+# --- 4.2: chunked flag + headingless heading must not leak provenance ---------
+def test_adapt_sets_chunked_flag_from_raw_document_id():
+    # a genuine chunk carries document_id out of _shape_result -> chunked True
+    chunk = {"id": "c1", "document_id": "docA", "chunk_index": 2, "heading": "Recovery",
+             "text": "body", "score": 0.03, "domain": "K8s", "tags": [], "status": "current"}
+    a = ob._adapt_knowledge_result(chunk)
+    assert a["chunked"] is True and a["chunk_index"] == 2
+    # an unchunked knowledge row has no document_id -> chunked False, but document_id
+    # still gets the id-fallback so downstream fetch-by-id keeps working
+    plain = {"id": "k1", "text": "body", "score": 0.03, "domain": "K8s",
+             "tags": [], "status": "current"}
+    b = ob._adapt_knowledge_result(plain)
+    assert b["chunked"] is False
+    assert b["document_id"] == "k1"
+
+
+def test_skim_headingless_chunk_heading_is_none_not_provenance():
+    # a real headingless chunk: _adapt set chunked=True, heading=None, section=provenance.
+    # The skim must NOT surface "Personal" as a heading — that was the 4.2 leak.
+    adapted = {"id": "c1", "document_id": "docA", "chunk_index": 0, "chunked": True,
+               "heading": None, "section": "Personal", "text": "w " * 50,
+               "score": 0.03, "signals": {}}
+    skim = ob._skim_result(adapted)
+    assert skim["chunked"] is True
+    assert skim["heading"] is None          # not "Personal"
+
+
+def test_skim_legacy_row_still_falls_back_to_section():
+    # non-chunked (legacy thoughts) row: no chunked flag, heading comes from section
+    legacy = {"id": "t1", "section": "DNS Notes", "text": "w " * 50, "score": 0.03}
+    skim = ob._skim_result(legacy)
+    assert skim["chunked"] is False
+    assert skim["heading"] == "DNS Notes"
+
+
+# --- 4.3: confidence keys off vector_similarity (boost-independent) -----------
+def test_confidence_from_signals_prefers_vector_similarity():
+    # strong cosine match reads high regardless of fused-score separation (boost-proof)
+    assert ob._confidence_from_signals(0.72, 0.033, 0.0325, 150) == "high"
+    assert ob._confidence_from_signals(0.50, 0.033, 0.0325, 150) == "medium"
+    assert ob._confidence_from_signals(0.20, 0.033, None, 150) == "low"
+
+
+def test_confidence_from_signals_short_content_is_low():
+    assert ob._confidence_from_signals(0.9, 0.033, None, 5) == "low"
+
+
+def test_confidence_from_signals_falls_back_to_rrf_without_similarity():
+    # keyword-only hit (no vector similarity) uses the fused-RRF separation heuristic
+    assert ob._confidence_from_signals(None, 0.033, 0.020, 150) == "high"
+    assert ob._confidence_from_signals(None, 0.010, None, 150) == "low"

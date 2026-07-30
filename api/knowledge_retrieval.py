@@ -24,7 +24,7 @@ from api._openbrain_api import (
     _LENGTH_PENALTY_THRESHOLD,
     _RRF_K,
     MAX_RESULTS,
-    _confidence_label,
+    _confidence_from_signals,
     _or_tsquery_fragment,
     _ts_query,
     _vector_param,
@@ -393,25 +393,24 @@ def retrieve_knowledge(
 
     ranked_keys = ranked_keys[:max_results]
 
-    top_score = rrf_scores[ranked_keys[0]] if ranked_keys else 0.0
     second_score = rrf_scores[ranked_keys[1]] if len(ranked_keys) > 1 else None
 
     final: list[dict[str, Any]] = []
     for i, key in enumerate(ranked_keys):
         row = row_by_key[key]
         score = rrf_scores[key]
-        wc = signals[key]["word_count"]
-        if i == 0:
-            confidence = _confidence_label(top_score, second_score, wc)
-        elif i == 1:
-            confidence = _confidence_label(
-                score,
-                rrf_scores[ranked_keys[2]] if len(ranked_keys) > 2 else None,
-                wc,
-            )
-        else:
-            confidence = _confidence_label(score, None, wc)
         sig = signals[key]
+        wc = sig["word_count"]
+        # Confidence keys off cosine vector_similarity (boost-independent), with the
+        # fused score + neighbour retained for the keyword-only fallback (no similarity).
+        vsim = sig.get("vector_similarity")
+        if i == 0:
+            neighbour = second_score
+        elif i == 1:
+            neighbour = rrf_scores[ranked_keys[2]] if len(ranked_keys) > 2 else None
+        else:
+            neighbour = None
+        confidence = _confidence_from_signals(vsim, score, neighbour, wc)
         sig["final_score"] = score
         final.append(_shape_result(row, score, confidence, sig))
 

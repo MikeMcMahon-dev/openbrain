@@ -792,6 +792,14 @@ _CONFIDENCE_HIGH_SCORE = 0.020  # RRF score threshold for "high" confidence
 _CONFIDENCE_HIGH_SEP = 0.004   # min gap between rank-1 and rank-2 for "high"
 _CONFIDENCE_HIGH_WORDS = 100   # min word count for "high"
 _CONFIDENCE_MED_SCORE = 0.012  # RRF score threshold for "medium" confidence
+# Vector-similarity confidence (cosine, 0–1). Preferred over the fused-RRF separation
+# heuristic because it is boost-independent: the ×2 component boost compresses the gap
+# between adjacent fused scores (0.0008 vs the 0.004 "high" bar), so a genuinely strong
+# top hit read "medium". Cosine similarity carries magnitude and is untouched by the
+# boost, so a strong match reads "high" on its own merit — no rank-separation needed.
+# Calibration values; tune against the signal harness like the retrieval knobs.
+_CONFIDENCE_SIM_HIGH = 0.62  # cosine similarity for "high"
+_CONFIDENCE_SIM_MED = 0.45   # cosine similarity for "medium"
 
 
 def _word_count(text: str) -> int:
@@ -813,6 +821,27 @@ def _confidence_label(
     ):
         return "high"
     return "medium"
+
+
+def _confidence_from_signals(
+    vector_similarity: float | None,
+    score: float,
+    second_score: float | None,
+    word_count: int,
+) -> str:
+    """Confidence for the knowledge path (ADR-017). Prefers cosine vector similarity —
+    boost-independent, so the ×2 component boost no longer compresses a strong top hit
+    down to "medium". Falls back to the fused-RRF separation heuristic for keyword-only
+    hits (no vector similarity). The word-count floor still applies either way."""
+    if word_count < _LENGTH_PENALTY_THRESHOLD:
+        return "low"
+    if vector_similarity is None:
+        return _confidence_label(score, second_score, word_count)
+    if vector_similarity >= _CONFIDENCE_SIM_HIGH and word_count >= _CONFIDENCE_HIGH_WORDS:
+        return "high"
+    if vector_similarity >= _CONFIDENCE_SIM_MED:
+        return "medium"
+    return "low"
 
 
 def retrieve_thoughts(
@@ -924,6 +953,12 @@ def _adapt_knowledge_result(kr: Mapping[str, Any]) -> dict[str, Any]:
         # Chunked reads (ADR-017) carry the parent document_id + section heading;
         # unchunked rows fall back to the row id and synthesized provenance.
         "document_id": kr.get("document_id") or kr.get("id"),
+        # `chunked` is computed from the RAW document_id BEFORE the id-fallback above —
+        # only genuine chunk rows carry document_id out of _shape_result, so this is the
+        # only reliable chunked/unchunked signal once the fallback fires. chunk_index is
+        # carried through so the skim/sibling path can order sections.
+        "chunked": kr.get("document_id") is not None,
+        "chunk_index": kr.get("chunk_index"),
         "file": None,
         "source": provenance,
         "section": kr.get("heading") or provenance,
@@ -1049,10 +1084,19 @@ def _skim_result(result: Mapping[str, Any]) -> dict[str, Any]:
     `id` is the chunk to fetch for that section, `document_id` fetches the whole doc,
     and `sibling_chunks` shows the other sections available."""
     text = result.get("text", "")
+    # `chunked` distinguishes a real section from a whole (unchunked) doc. A chunk row
+    # may legitimately have no heading (headingless content) — in that case heading is
+    # None, NOT the synthesized provenance string, so the agent isn't told "Personal" is
+    # a section title. Legacy (non-chunked) rows still fall back to `section` for heading.
+    chunked = bool(result.get("chunked")) or result.get("chunk_index") is not None
+    heading = result.get("heading")
+    if not heading and not chunked:
+        heading = result.get("section")
     skim = {
         "id": result.get("id") or result.get("document_id"),
         "document_id": result.get("document_id"),
-        "heading": result.get("heading") or result.get("section"),
+        "heading": heading,
+        "chunked": chunked,
         "system": result.get("system"),
         "domain": result.get("domain"),
         "status": result.get("status"),

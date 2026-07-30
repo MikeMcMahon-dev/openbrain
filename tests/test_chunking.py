@@ -135,3 +135,46 @@ def test_oversized_section_is_subsplit():
     chunks = chunk_document(big, max_words=200)
     assert len(chunks) > 1
     assert all(len(c["content"].split()) <= 260 for c in chunks)  # ~max + one paragraph
+
+
+# --- 4.1: headingless long content must not survive as one diluted blob (Chat's audit) ---
+
+def test_headingless_long_doc_is_windowed():
+    # No markdown headings, multiple paragraphs, well over the headless target: this is
+    # the shape that used to emit one 800w multi-topic chunk. It must split.
+    body = "\n\n".join(f"Topic {i} paragraph " + "word " * 80 for i in range(6))
+    assert len(body.split()) > 400
+    chunks = chunk_document(body, headless_max_words=200)
+    assert len(chunks) > 1
+    assert all(len(c["content"].split()) <= 260 for c in chunks)
+    assert [c["chunk_index"] for c in chunks] == list(range(len(chunks)))
+
+
+def test_headingless_wall_no_blank_lines_is_sentence_split():
+    # A single paragraph with no blank lines (numbered prose "1) ... 2) ...") — paragraph
+    # splitting alone can't break it; sentence windowing must. This is the 1009w case.
+    wall = " ".join(f"Item number {i} does a distinct thing here." for i in range(120))
+    assert len(wall.split()) > 400
+    chunks = chunk_document(wall, headless_max_words=150)
+    assert len(chunks) > 1
+    assert all(len(c["content"].split()) <= 200 for c in chunks)
+
+
+def test_single_unbreakable_sentence_stays_whole():
+    # No sentence boundaries and no blank lines — nothing to split on. Must not loop or
+    # crash; returns the content as one chunk rather than mangling it.
+    blob = "word " * 500
+    chunks = chunk_document(blob.strip(), headless_max_words=150)
+    assert len(chunks) == 1
+    assert len(chunks[0]["content"].split()) == 500
+
+
+def test_headed_sections_keep_global_ceiling_not_headless_target():
+    # A doc WITH headings should still chunk by heading; a ~300w headed section stays
+    # whole (under the 800 ceiling) even though it exceeds the 400 headless target.
+    doc = ("# Title\n\n" + "intro " * 50 + "\n\n## S1\n" + "word " * 300
+           + "\n\n## S2\n" + "word " * 300)
+    chunks = chunk_document(doc)
+    s1 = [c for c in chunks if c["heading"] == "S1"]
+    assert len(s1) == 1  # not windowed — headed sections use the 800w ceiling
+    assert len(s1[0]["content"].split()) >= 300

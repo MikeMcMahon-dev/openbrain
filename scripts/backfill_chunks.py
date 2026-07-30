@@ -104,10 +104,24 @@ ON CONFLICT (document_id, chunk_index) DO NOTHING
 """
 
 
-def execute_backfill(owner: str | None, status: str | None, limit: int | None) -> None:
+def execute_backfill(
+    owner: str | None,
+    status: str | None,
+    limit: int | None,
+    rechunk: bool = False,
+) -> None:
     """Chunk + re-embed every knowledge row into knowledge_chunked, inheriting all
-    parent fields (status/supersedes chains + created_by scoping preserved). Idempotent
-    via ON CONFLICT (document_id, chunk_index) — safe to re-run / resume."""
+    parent fields (status/supersedes chains + created_by scoping preserved).
+
+    Two modes:
+    - default (resume/backfill): idempotent via ON CONFLICT (document_id, chunk_index)
+      DO NOTHING — safe to re-run to fill gaps, but it will NOT re-split a document whose
+      chunk boundaries changed (the old chunk_index=0 already exists, so a new split that
+      turns 1 chunk into 3 would leave the old fat chunk_0 and only append the tail).
+    - --rechunk: delete each document's existing chunked rows before inserting the fresh
+      split, so a chunker change (e.g. headingless windowing) actually replaces the old
+      chunks. Delete+insert+commit is per-document, so an interrupted run leaves every
+      document either fully-old or fully-new, never a hybrid."""
     from api._openbrain_api import _vector_param, embedding_request  # noqa: E402
 
     where, params = [], []
@@ -124,12 +138,20 @@ def execute_backfill(owner: str | None, status: str | None, limit: int | None) -
 
     with get_db_conn() as conn:
         docs = conn.execute(sel, params).fetchall()
-    print(f"backfilling {len(docs)} documents into public.knowledge_chunked ...")
+    mode = "re-chunking (delete + replace)" if rechunk else "backfilling"
+    print(f"{mode} {len(docs)} documents into public.knowledge_chunked ...")
 
     chunk_total = 0
     with get_db_conn() as conn:
         for di, d in enumerate(docs):
             chunks = chunk_document(d["content"], infer_title(d["content"]))
+            if rechunk:
+                # Replace this document's chunks wholesale so changed boundaries take
+                # effect. Same transaction as the re-insert + per-doc commit below.
+                conn.execute(
+                    "DELETE FROM public.knowledge_chunked WHERE document_id = %s",
+                    [str(d["id"])],
+                )
             for ch in chunks:
                 emb = None
                 try:
@@ -160,11 +182,17 @@ def main() -> int:
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--execute", action="store_true",
                     help="write chunks into public.knowledge_chunked (re-embeds; idempotent)")
+    ap.add_argument("--rechunk", action="store_true",
+                    help="with --execute: delete each doc's existing chunks first so a "
+                         "chunker change re-splits them (default only fills gaps)")
     args = ap.parse_args()
 
     if args.execute:
-        execute_backfill(args.owner, args.status, args.limit)
+        execute_backfill(args.owner, args.status, args.limit, rechunk=args.rechunk)
     else:
+        if args.rechunk:
+            print("note: --rechunk has no effect without --execute (dry-run plans fresh "
+                  "chunks already).")
         plan(args.owner, args.status, args.limit)
     return 0
 

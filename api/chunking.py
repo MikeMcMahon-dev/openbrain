@@ -15,8 +15,15 @@ import re
 from typing import Any
 
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(\S.*)$")
+_SENT_RE = re.compile(r"(?<=[.!?])\s+")  # sentence boundary for last-resort windowing
 _MIN_CHUNK_WORDS = 40   # sections shorter than this merge into a neighbour
-_MAX_CHUNK_WORDS = 800  # sections longer than this are sub-split (rare in this corpus)
+_MAX_CHUNK_WORDS = 800  # any section longer than this is sub-split (hard ceiling)
+# Headingless content (no markdown `#` structure — e.g. numbered prose "1) 2) 3)")
+# collapses into a single section that split_sections can't divide. Left whole, an
+# 800-word multi-topic blob gets one diluted embedding (the precise defect Chat's
+# row-level audit surfaced: 20 solo chunks >400w, one at 1009w). So a headingless
+# section over this target is windowed down even below the 800-word ceiling.
+_HEADLESS_MAX_WORDS = 400
 
 
 def _wc(text: str) -> int:
@@ -84,28 +91,63 @@ def _merge_tiny(
     return out
 
 
+def _window_sentences(text: str, max_words: int) -> list[str]:
+    """Last-resort split of a single oversized paragraph (a wall of prose with no
+    blank lines — e.g. numbered items on one line) into <= max_words sentence groups.
+    Returns [text] unchanged when there is nothing to break on (one long sentence)."""
+    sents = [s.strip() for s in _SENT_RE.split(text) if s.strip()]
+    if len(sents) <= 1:
+        return [text.strip()]
+    out: list[str] = []
+    buf: list[str] = []
+    n = 0
+    for s in sents:
+        sw = _wc(s)
+        if buf and n + sw > max_words:
+            out.append(" ".join(buf))
+            buf, n = [], 0
+        buf.append(s)
+        n += sw
+    if buf:
+        out.append(" ".join(buf))
+    return out
+
+
 def _split_large(
     heading: str | None,
     text: str,
     max_words: int,
 ) -> list[tuple[str | None, str]]:
     """Greedily pack paragraphs of an oversized section into <= max_words groups,
-    each keeping the section heading. Rare on this corpus; keeps embeddings in-window."""
+    each keeping the section heading. A single paragraph that alone exceeds max_words
+    (no blank lines to split on) is windowed by sentence so a headingless wall still
+    breaks instead of surviving whole — the case row-level audit caught."""
     if _wc(text) <= max_words:
         return [(heading, text)]
     paras = [p for p in re.split(r"\n\s*\n", text) if p.strip()]
     groups: list[tuple[str | None, str]] = []
     buf: list[str] = []
     n = 0
-    for p in paras:
-        pw = _wc(p)
-        if buf and n + pw > max_words:
+
+    def flush() -> None:
+        nonlocal buf, n
+        if buf:
             groups.append((heading, "\n\n".join(buf).strip()))
             buf, n = [], 0
+
+    for p in paras:
+        pw = _wc(p)
+        if pw > max_words:
+            # Oversized single paragraph: emit buffered paras, then sentence-window it.
+            flush()
+            for w in _window_sentences(p, max_words):
+                groups.append((heading, w))
+            continue
+        if buf and n + pw > max_words:
+            flush()
         buf.append(p)
         n += pw
-    if buf:
-        groups.append((heading, "\n\n".join(buf).strip()))
+    flush()
     return groups
 
 
@@ -128,12 +170,15 @@ def chunk_document(
     *,
     min_words: int = _MIN_CHUNK_WORDS,
     max_words: int = _MAX_CHUNK_WORDS,
+    headless_max_words: int = _HEADLESS_MAX_WORDS,
 ) -> list[dict[str, Any]]:
     """Split a document into chunk dicts.
 
-    Returns a list of {chunk_index, heading, content, embed_text}. A document with no
-    headings (or one short section) yields a single chunk equal to the whole doc, so
-    short notes behave exactly as pre-chunking. Empty content yields [].
+    Returns a list of {chunk_index, heading, content, embed_text}. A short document
+    (below the headless target, or one small section) yields a single chunk equal to
+    the whole doc, so short notes behave exactly as pre-chunking. A long headingless
+    document is windowed by paragraph/sentence rather than left as one diluted blob.
+    Empty content yields [].
     """
     content = (content or "").strip()
     if not content:
@@ -148,7 +193,11 @@ def chunk_document(
     sections = _merge_tiny(sections, min_words)
     expanded: list[tuple[str | None, str]] = []
     for h, t in sections:
-        expanded.extend(_split_large(h, t, max_words))
+        # Headingless sections (preamble / unstructured docs) have no markdown boundary
+        # to split on, so cap them harder than the global ceiling — otherwise a
+        # multi-topic wall under 800w keeps one diluted embedding.
+        section_max = max_words if h is not None else min(max_words, headless_max_words)
+        expanded.extend(_split_large(h, t, section_max))
 
     return [
         {

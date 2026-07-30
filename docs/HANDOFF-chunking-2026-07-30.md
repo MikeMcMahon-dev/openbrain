@@ -22,24 +22,49 @@ ADR-017 chunking pipeline + read path + fetch fix. PRs #66,67,68,69,70,71 merged
   (idempotent) OR set `OPENBRAIN_CHUNK_ON_INGEST=1`.
 
 ## Remaining actions (verified, prioritized)
-1. **Merge PR #72** (ingest-time chunking). If actively ingesting during the trial, set
-   `OPENBRAIN_CHUNK_ON_INGEST=1` after merge so reads stay fresh.
-2. **[small] 4.2 heading/chunked flag.** `_skim_result` falls back `heading or section`, so
-   no-heading chunks return the provenance string ("Personal") as a heading. Fix: `heading`
-   = the real heading or null; add `"chunked": document_id is not None`. Touch `_skim_result`
-   (+ maybe `_adapt_knowledge_result`) in `api/_openbrain_api.py`.
-3. **[small] 4.3 confidence.** Top boosted result reads `medium` because `_confidence_label`
-   needs rank1↔rank2 separation ≥ 0.004 on the FUSED RRF score, which the ×2 boost compresses
-   (0.03279 vs 0.03200 = 0.0008). Decide: compute confidence on `vector_similarity` instead of
-   the fused ordinal, or relax separation for boosted/chunked rows. `_confidence_label` in
-   `api/_openbrain_api.py`.
-4. **[optional] §5 measurement.** Broad harness run capturing chunked-vs-unchunked spread —
-   but coverage already verified good (0 long docs unchunked), so low priority.
+1. **Merge PR #72** (ingest-time chunking). ✅ MERGED. If actively ingesting during the trial,
+   set `OPENBRAIN_CHUNK_ON_INGEST=1` so reads stay fresh — **still a pending Vercel env flip.**
 
-## REFUTED by data (do NOT act on Chat's report for these)
-- 4.1 "coverage gap / add numbered-list detection" — 0 docs ≥400w unchunked. Not needed.
-- 4.4 "collapse floods with siblings" — max 1 chunk/doc per result set. Already safe.
-- Chat's reports need verification; its headline items here were over-stated (pre-cutover data).
+## Shortfall pass — branch `feat/chunking-shortfalls` (2026-07-30, CC + Chat reconciled)
+All four of Chat's points re-adjudicated against the store (row-level, post-backfill). Chat's
+4.1 held on the RIGHT metric; 4.4 was already built. Net: 4 real items, 0 refuted.
+
+- **4.1 headingless fat chunks — FIXED in code (chunker).** The refutation was a definitional
+  mismatch: "0 docs ≥400w *unchunked*" counted document-level presence in the chunk table, not
+  section *splitting*. Row-level truth: 25 chunk rows >400w, **20 are the sole chunk of their
+  doc**, max 1009w — headingless multi-topic blobs the `#`-only splitter never divided.
+  Fix (`api/chunking.py`): (a) `_split_large` now sentence-windows a single oversized paragraph
+  with no blank lines (the 1009w wall); (b) headingless sections are capped at
+  `_HEADLESS_MAX_WORDS=400` instead of the 800 ceiling. Dry-run: 800 docs → 1266 chunks (was
+  1241), sane +25. **Prod realization = re-chunk backfill (see below) — NOT yet run.**
+- **4.2 heading/chunked flag — DONE + verified live.** `_adapt_knowledge_result` now sets
+  `chunked` from the RAW document_id (before the id-fallback, which always populates it) +
+  carries `chunk_index`. `_skim_result` no longer falls a headingless chunk back to the
+  provenance string ("Personal") — heading is real-or-None; adds `chunked`. Legacy rows still
+  fall back to `section`.
+- **4.3 confidence — DONE + verified live.** New `_confidence_from_signals` keys off cosine
+  `vector_similarity` (boost-independent), falls back to the fused-RRF heuristic for keyword-
+  only hits. Live check: the query that read `medium` now reads `high` (vsim 0.707).
+- **4.4 sibling hint — ALREADY BUILT.** `collapse_chunks` attaches `sibling_chunks`, `_skim_result`
+  surfaces it. Known limit: lists only *retrieved* siblings, so a caller seeing 1 of 6 sections
+  can't tell 5 more exist. Cheap future add: carry the doc's total chunk count. Not built (adds
+  a per-query count roundtrip for marginal value).
+
+Tests: `tests/test_chunking.py` (+5 windowing) and `tests/test_two_stage_retrieval.py` (+6 for
+4.2/4.3). Full suite 110 green.
+
+### PENDING PROD OPS (Mike's go/no-go — both mutate prod, neither auto-runs)
+1. **Re-chunk backfill for 4.1.** `scripts/backfill_chunks.py --execute --rechunk`. The plain
+   `--execute` uses `ON CONFLICT DO NOTHING` and would leave the old fat chunk_0 + only append
+   the new tail = corrupt hybrid. `--rechunk` (added this branch) deletes each doc's chunks
+   before re-inserting; delete+insert+commit is per-doc so an interrupted run is never hybrid.
+   Re-embeds ~1266 chunks (embedding API cost). Dry-run first: `backfill_chunks.py` (no flags).
+2. **`OPENBRAIN_CHUNK_ON_INGEST=1`** in Vercel — makes new notes self-chunk on ingest (else the
+   chunked store goes stale vs `knowledge`). Independent of #1.
+
+## §5 measurement (optional, low priority)
+Broad harness run capturing chunked-vs-unchunked spread. Coverage now measured directly, so low
+priority — but re-run after the re-chunk backfill to confirm the 20 fat chunks actually split.
 
 ## Gotchas for the next session
 - **Migrations:** apply via Supabase SQL editor, NOT `supabase db push` (CLI history stale at
