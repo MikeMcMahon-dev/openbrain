@@ -117,6 +117,19 @@ def test_collapse_chunks_noop_without_document_id():
     assert all("sibling_chunks" not in r for r in out)
 
 
+def test_knowledge_table_flag_resolution(monkeypatch):
+    from api import knowledge_retrieval as kr
+    monkeypatch.delenv("OPENBRAIN_KNOWLEDGE_TABLE", raising=False)
+    assert kr._knowledge_table() == "knowledge"          # default: prod path unchanged
+    monkeypatch.setenv("OPENBRAIN_KNOWLEDGE_TABLE", "knowledge_chunked")
+    assert kr._knowledge_table() == "knowledge_chunked"
+    monkeypatch.setenv("OPENBRAIN_KNOWLEDGE_TABLE", "chunked")
+    assert kr._knowledge_table() == "knowledge_chunked"   # alias
+    # chunked SELECT carries the chunk-identity columns; base does not
+    assert "document_id" in kr._select_cols("knowledge_chunked")
+    assert "document_id" not in kr._select_cols("knowledge")
+
+
 def test_oversized_section_is_subsplit():
     big = "# T\n\n" + "\n\n".join(f"Paragraph {i} " + "word " * 60 for i in range(20))
     chunks = chunk_document(big, max_words=200)

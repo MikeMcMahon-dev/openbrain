@@ -921,11 +921,13 @@ def _adapt_knowledge_result(kr: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "score": kr.get("score"),
         "id": kr.get("id"),
-        "document_id": kr.get("id"),
+        # Chunked reads (ADR-017) carry the parent document_id + section heading;
+        # unchunked rows fall back to the row id and synthesized provenance.
+        "document_id": kr.get("document_id") or kr.get("id"),
         "file": None,
         "source": provenance,
-        "section": provenance,
-        "heading": None,
+        "section": kr.get("heading") or provenance,
+        "heading": kr.get("heading"),
         "content_type": "knowledge",
         "owner": kr.get("created_by"),
         "source_channel": "knowledge",
