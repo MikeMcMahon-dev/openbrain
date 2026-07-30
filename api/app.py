@@ -3,6 +3,7 @@ from __future__ import annotations
 from api.chatgpt import handler as chatgpt_handler
 from api.claude import handler as claude_handler
 from api.cron_session_report import handler as cron_session_report_handler
+from api.fetch import handler as fetch_handler
 from api.generate_flashcards import handler as flashcards_handler
 from api.generate_quiz import handler as quiz_handler
 from api.health import handler as health_handler
@@ -50,6 +51,8 @@ def handler(request):
         return health_handler(request)
     if path in {"/search", "/api/search"}:
         return search_handler(request)
+    if path in {"/fetch", "/api/fetch"}:
+        return fetch_handler(request)
     if path in {"/query", "/api/query"}:
         return query_handler(request)
     if path in {"/generate_quiz", "/api/generate_quiz"}:

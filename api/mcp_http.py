@@ -7,10 +7,12 @@ from typing import Any
 
 from api._openbrain_api import (
     _require_tool_auth,
+    fetch_payload,
     ingest_payload,
     parse_request,
     query_payload,
     response_payload,
+    search_payload,
 )
 from api.chatgpt import _inject_token_owner
 
@@ -161,6 +163,48 @@ def _list_tools() -> list[dict]:
             },
         },
         {
+            "name": "search",
+            "description": (
+                "Skim your vault: returns lightweight PREVIEWS (heading, ~40-word snippet, "
+                "and relevance signals) for the top matches WITHOUT their full text. Use this "
+                "FIRST to cheaply see what's available, then call `fetch` with the id(s) you "
+                "actually need in full. Prefer search+fetch over `query` when you only need "
+                "one or two specific notes — it keeps far less text in context."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "required": ["query"],
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The question or topic to look up in your vault.",
+                    },
+                    "n_results": {
+                        "type": "integer",
+                        "description": "Maximum number of previews to return. Default: 5.",
+                    },
+                },
+            },
+        },
+        {
+            "name": "fetch",
+            "description": (
+                "Fetch the FULL text of specific vault notes by id. Pass the id(s) returned "
+                "by `search`. Owner-scoped — you can only fetch your own notes."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "required": ["ids"],
+                "properties": {
+                    "ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Note ids from a prior `search` result (max 20).",
+                    },
+                },
+            },
+        },
+        {
             "name": "ingest",
             "description": (
                 "Save new content to your knowledge vault. Use source_type='text' to save "
@@ -281,6 +325,19 @@ def _call_tool(name: str, arguments: dict, metadata: dict) -> dict[str, Any]:
         }
         normalized = {k: v for k, v in normalized.items() if v is not None}
         status, body = query_payload(normalized, metadata)
+        return _wrap_content(body if isinstance(body, dict) else json.loads(body))
+
+    elif name == "search":
+        normalized = {
+            "query": arguments.get("query"),
+            "n_results": arguments.get("n_results", 5),
+        }
+        normalized = {k: v for k, v in normalized.items() if v is not None}
+        status, body = search_payload(normalized, metadata)
+        return _wrap_content(body if isinstance(body, dict) else json.loads(body))
+
+    elif name == "fetch":
+        status, body = fetch_payload({"ids": arguments.get("ids")}, metadata)
         return _wrap_content(body if isinstance(body, dict) else json.loads(body))
 
     elif name == "ingest":

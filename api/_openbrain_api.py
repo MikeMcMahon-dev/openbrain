@@ -1019,6 +1019,72 @@ def run_tutor_payload(
     )
 
 
+# --- Two-stage retrieval (ADR-016): skim previews cheaply, fetch full text by id. ---
+_SNIPPET_WORDS = 40
+_MAX_FETCH_IDS = 20
+
+
+def _snippet(text: str, words: int = _SNIPPET_WORDS) -> str:
+    """First `words` words of text, ellipsized — a preview, not the full body."""
+    toks = (text or "").split()
+    if len(toks) <= words:
+        return text or ""
+    return " ".join(toks[:words]) + " …"
+
+
+def _slim_result(result: Mapping[str, Any]) -> dict[str, Any]:
+    """A query result with full `text` replaced by a snippet. The full grounding
+    text lives once in `context_used`; `results` becomes a structured sidecar
+    (ids, scores, signals) with a preview — removing the ~50% text duplication."""
+    slim = dict(result)
+    slim["text"] = _snippet(result.get("text", ""))
+    return slim
+
+
+def _skim_result(result: Mapping[str, Any]) -> dict[str, Any]:
+    """Stage-1 skim projection: metadata + snippet + signals, NO full text. Agents
+    read these to choose which notes to fetch by id."""
+    text = result.get("text", "")
+    return {
+        "id": result.get("id") or result.get("document_id"),
+        "heading": result.get("heading") or result.get("section"),
+        "system": result.get("system"),
+        "domain": result.get("domain"),
+        "status": result.get("status"),
+        "tags": list(result.get("tags") or []),
+        "snippet": _snippet(text),
+        "word_count": len((text or "").split()),
+        "score": result.get("score"),
+        "confidence": result.get("confidence"),
+        "signals": result.get("signals", {}),
+    }
+
+
+def fetch_payload(
+    payload: Mapping[str, Any],
+    method_metadata: Mapping[str, Any] | None = None,
+) -> tuple[int, Any]:
+    """Stage-2 fetch (ADR-016): return FULL text for specific ids, OWNER-SCOPED.
+    The owner is the authenticated owner from request_context — never
+    client-supplied — so a caller can never fetch another tenant's note by id."""
+    if not isinstance(payload, Mapping):
+        return 400, {"error": "validation_error",
+                     "message": "Malformed JSON payload.", "status": 400}
+    ids = payload.get("ids")
+    if ids is None and payload.get("id"):
+        ids = [payload["id"]]
+    if not isinstance(ids, list) or not ids:
+        return 400, {"error": "validation_error",
+                     "message": "One or more note ids are required.", "status": 400}
+    ids = [i for i in ids][:_MAX_FETCH_IDS]
+    owner, _tenant_id = request_context(method_metadata)
+
+    from api.knowledge_retrieval import fetch_knowledge_by_ids
+
+    notes = fetch_knowledge_by_ids(ids, owner)
+    return 200, {"notes": notes, "count": len(notes)}
+
+
 def query_payload(
     payload: Mapping[str, Any],
     method_metadata: Mapping[str, Any] | None = None,
@@ -1070,8 +1136,11 @@ def query_payload(
         "query_confidence": query_confidence,
         "rules": tutor_packet.get("rules", []),
         "tutor_prompt": tutor_packet.get("tutor_prompt", ""),
+        # Full grounding text lives here, once. `results` carries the same rows as a
+        # structured sidecar (ids/scores/signals) with snippets, not a second full
+        # copy — the text was duplicated across both blocks (ADR-016 Phase 0).
         "context_used": context_chunks,
-        "results": results,
+        "results": [_slim_result(r) for r in results],
     }
 
 
@@ -1100,7 +1169,9 @@ def search_payload(
     n_results = normalize_results_count(payload.get("n_results"), DEFAULT_RESULTS)
     owner, tenant_id = request_context(method_metadata)
     results = retrieve_for_query(query, n_results, owner, tenant_id)
-    return 200, {"results": results, "count": len(results)}
+    # Stage-1 skim (ADR-016): previews only — metadata + snippet + signals, no full
+    # text. The caller reads these and fetches the full note(s) by id via /fetch.
+    return 200, {"results": [_skim_result(r) for r in results], "count": len(results)}
 
 
 def _normalize_bulk_items(
