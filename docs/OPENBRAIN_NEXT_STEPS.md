@@ -6,6 +6,11 @@ This document tracks planned improvements for the OpenBrain system.
 
 ## Retrieval ranking — boost component:*-keyed current-state (2026-07-19)
 
+> **Update (2026-07-30): the boost shipped in PR #66 / ADR-014** — env-gated
+> (`OPENBRAIN_COMPONENT_BOOST`, default off), status-gated to `current` rows,
+> swept weight **2.0**. See the "Retrieval Signal Instrument — follow-ups" section
+> below for what's left (enable in prod, re-point post-ingest validation).
+
 `component:*` auto-supersession shipped (PR#63): living-doc current-state notes now replace in place
 instead of piling up as duplicate `current` rows. But retrieval (RRF hybrid) is recency- and
 status-blind at *ranking*, so obsolete **event** notes (session wraps, completed-migration notes —
@@ -409,6 +414,30 @@ When a Claude agent is running on a K8s/Linux VM node, the following scripts are
 User receiving two identical session reports 7 minutes apart nightly. Confirmed: single vercel.json cron entry, single REPORT_CONFIGS, _send_email sends one call with all recipients in `to` array simultaneously. 7-minute gap is consistent with Vercel retrying a slow/timed-out cron invocation (Hobby tier behavior). Cannot confirm — Hobby logs only retained 1 hour.
 
 **To investigate next time report fires:** check Vercel logs immediately after 9pm MDT. Look for two cron invocations vs. one invocation + one retry. If retry: add response time logging to cron_session_report.py, or optimize the report build to respond faster (Resend call is the likely slow path).
+
+---
+
+## Retrieval Signal Instrument — follow-ups (2026-07-30, PR #66 / ADR-014)
+
+Instrument shipped (raw `signals` per result), boost + suppression added env-gated
+and default-off. Remaining:
+
+- [ ] **Enable the component boost in prod.** Set `OPENBRAIN_COMPONENT_BOOST=2.0` in
+  Vercel env once PR #66 merges. Weight 2.0 is the swept minimum that lifts the
+  contested `dns-current-state` current doc rank 3→0 with no over-promotion. Re-run
+  `scripts/knowledge_signal_harness.py --sweep` against prod after enabling.
+- [ ] **Re-point post-ingest validation at `vector_similarity`.** The queued
+  validation enhancement must read `result["signals"]["vector_similarity"]`, not the
+  fused ordinal (which is a constant reciprocal per rank).
+- [ ] **Do NOT enable the suppression floor yet.** Measurement shows no safe static
+  floor (min relevant 0.2271 vs max noise 0.1787). Revisit only after embedding/chunk
+  quality improves.
+- [ ] **Retriever coverage gap.** Harness found a legit K8s query (`etcd raft`)
+  returning zero results and vector/lexical retrievers barely overlapping (0–2 of 5).
+  Worth a look — the fused score hid this.
+- [ ] **Chunking (spec Finding C)** remains future work; now has a signal baseline to
+  measure against. If it lands, collapse multi-chunk living docs by `(system,
+  component)` before return so the per-row boost doesn't flood results.
 
 ---
 
