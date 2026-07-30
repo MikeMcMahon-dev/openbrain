@@ -4,6 +4,23 @@ This document tracks planned improvements for the OpenBrain system.
 
 ---
 
+## Two-stage retrieval — Phase 3 rollout (2026-07-30, ADR-016)
+
+Phases 0–2 shipped (de-dup, `/search` skim + `/fetch` endpoints, MCP `search`/`fetch`
+tools). Per-query token cost measured down ~79% (12.7k → 2.6k for skim+fetch). Remaining:
+
+- [ ] **Phase 3 — Custom GPT rollout (Mike).** Add `openbrain_search` + `openbrain_fetch`
+  to `docs/CUSTOM_GPT_ACTION_SPEC.yaml`, re-import the Action schema into the 3 Custom
+  GPTs, and update their instructions to skim-then-fetch. No API for GPT config — manual.
+  (Claude I can produce the exact schema + instruction text on request.)
+- [ ] **Phase 4 — measure end-to-end** token savings across real GPT/MCP traffic; retire
+  the full-dump `query` path if it goes unused (keep as backstop otherwise).
+- [ ] **Chunking** stays deferred (ADR-016): skim→fetch means full-text tokens are paid
+  only for the chosen note, so chunking's case narrows to multi-topic precision — revisit
+  only if the ADR-014 instrument flags a real precision miss.
+
+---
+
 ## Retrieval ranking — boost component:*-keyed current-state (2026-07-19)
 
 > **Update (2026-07-30): the boost shipped in PR #66 / ADR-014** — env-gated

@@ -16,6 +16,7 @@ Public contract (Phase-2 integration depends on this — keep stable):
 from __future__ import annotations
 
 import os
+import uuid
 from collections.abc import Mapping
 from typing import Any
 
@@ -396,3 +397,61 @@ def retrieve_knowledge(
         final.append(_shape_result(row, score, confidence, sig))
 
     return final[: max(1, n_results)]
+
+
+def _shape_fetch(row: Mapping[str, Any]) -> dict[str, Any]:
+    """Full-note payload for stage-2 fetch — same provenance synthesis as the
+    query adapter so a fetched note looks identical to one surfaced by query."""
+    domain = row.get("domain")
+    system = row.get("system")
+    provenance = "/".join(p for p in (domain, system) if p) or "knowledge"
+    created = row.get("created_at")
+    return {
+        "id": str(row.get("id")),
+        "text": row.get("content", ""),
+        "domain": domain,
+        "environment": row.get("environment"),
+        "system": system,
+        "status": row.get("status"),
+        "tags": list(row.get("tags") or []),
+        "source": provenance,
+        "section": provenance,
+        "created_at": str(created) if created is not None else None,
+    }
+
+
+def fetch_knowledge_by_ids(
+    ids: list[Any],
+    owner: str | None,
+) -> list[dict[str, Any]]:
+    """Stage-2 fetch (ADR-016): return FULL text for specific knowledge rows,
+    OWNER-SCOPED. `created_by` must equal the caller's authenticated owner, so a
+    caller can never fetch another tenant's row by id. Non-UUID and foreign/unknown
+    ids are silently dropped (returns [] rather than raising), so a bad id from a
+    skim result never errors the whole fetch. Read-only, SELECT only."""
+    clean: list[str] = []
+    for i in ids or []:
+        try:
+            clean.append(str(uuid.UUID(str(i))))
+        except (ValueError, AttributeError, TypeError):
+            continue
+    if not clean:
+        return []
+
+    sql = """
+    SELECT id, content, domain, environment, system, tags, status, created_at
+    FROM public.knowledge
+    WHERE id = ANY(%s::uuid[])
+    """
+    params: list[Any] = [clean]
+    # Owner scoping is mandatory for cross-tenant isolation; the caller passes the
+    # AUTHENTICATED owner (never client-supplied). A falsy owner scopes to nothing.
+    if owner:
+        sql += " AND created_by = %s"
+        params.append(owner)
+    else:
+        return []
+
+    with get_db_conn() as conn:
+        rows = conn.execute(sql, params).fetchall()
+    return [_shape_fetch(dict(row)) for row in rows]

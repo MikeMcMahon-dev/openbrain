@@ -157,8 +157,9 @@ def test_result_contract_shape():
     )
     if not results:
         pytest.skip("no historical rows matched 'system'")
+    # `signals` added by ADR-014 (raw per-retriever instrument behind the fused score).
     expected = {"id", "text", "score", "confidence",
-                "domain", "environment", "system", "tags", "status"}
+                "domain", "environment", "system", "tags", "status", "signals"}
     for r in results:
         assert set(r.keys()) == expected
         assert isinstance(r["id"], str)
