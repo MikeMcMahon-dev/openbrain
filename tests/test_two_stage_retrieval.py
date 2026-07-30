@@ -137,3 +137,27 @@ def test_mcp_fetch_routes_to_fetch_payload_with_ids():
 def test_mcp_advertises_search_and_fetch_tools():
     names = {t["name"] for t in mcp_http._list_tools()}
     assert {"search", "fetch"} <= names
+
+
+# --- chunked skim/fetch identity (ADR-017) ----------------------------------
+def test_skim_carries_document_id_and_siblings():
+    r = {"id": "chunk1", "document_id": "docA", "heading": "Recovery", "text": "w " * 100,
+         "score": 0.03, "signals": {}, "sibling_chunks": [{"id": "chunk2", "heading": "Sec2"}]}
+    skim = ob._skim_result(r)
+    assert skim["id"] == "chunk1"           # the section to fetch
+    assert skim["document_id"] == "docA"    # the whole-doc handle
+    assert skim["sibling_chunks"] == [{"id": "chunk2", "heading": "Sec2"}]
+    assert "text" not in skim               # still no full body in a skim
+
+
+def test_shape_fetch_carries_chunk_identity_when_present():
+    from api import knowledge_retrieval as kr
+    chunk = {"id": "c1", "content": "body", "document_id": "docA", "chunk_index": 2,
+             "heading": "Recovery", "domain": "K8s", "system": "pmx-01", "status": "current",
+             "tags": [], "environment": "Lab"}
+    out = kr._shape_fetch(chunk)
+    assert out["document_id"] == "docA" and out["chunk_index"] == 2
+    assert out["heading"] == "Recovery" and out["section"] == "Recovery"
+    plain = kr._shape_fetch({"id": "k1", "content": "b", "domain": "K8s", "system": None,
+                             "status": "current", "tags": [], "environment": "Lab"})
+    assert "document_id" not in plain       # unchunked row stays clean

@@ -190,7 +190,9 @@ def _list_tools() -> list[dict]:
             "name": "fetch",
             "description": (
                 "Fetch the FULL text of specific vault notes by id. Pass the id(s) returned "
-                "by `search`. Owner-scoped — you can only fetch your own notes."
+                "by `search`: a result's `id` fetches just that section, its `document_id` "
+                "fetches the whole note (all sections). Owner-scoped — you can only fetch "
+                "your own notes."
             ),
             "inputSchema": {
                 "type": "object",
