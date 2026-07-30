@@ -44,10 +44,11 @@ CREATE TABLE public.knowledge_chunked (
 -- ── Indexes ───────────────────────────────────────────────────────────────────
 
 CREATE INDEX knowledge_chunked_embedding_idx ON public.knowledge_chunked
-  USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
--- NOTE (ADR-017 §Constraints): chunking multiplies row count, which shifts the ivfflat
--- recall math (ADR-015). Re-derive probes / candidate-pool on this table before cutover,
--- or rebuild as HNSW. lists=100 is a starting point, not a tuned value.
+  USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64);
+-- HNSW (pgvector 0.8 on PG17), NOT ivfflat: it sidesteps the probes-starvation recall
+-- bug that bit public.knowledge (ADR-015) — no per-query `probes` to tune, high recall by
+-- default. Chunking multiplies row count so recall matters more here; HNSW handles it.
+-- Tune query-time `hnsw.ef_search` (default 40) only if the eval shows a recall gap.
 
 CREATE INDEX knowledge_chunked_status_domain_idx ON public.knowledge_chunked (status, domain, environment);
 CREATE INDEX knowledge_chunked_system_idx ON public.knowledge_chunked (system, status) WHERE system IS NOT NULL;

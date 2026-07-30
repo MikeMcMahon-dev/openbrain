@@ -106,8 +106,13 @@ Re-run the same detail queries against the chunked store:
 ## Constraints (unchanged, restated)
 - **Cross-tenant isolation** during backfill is the top-severity failure — scope every
   read/write by `created_by`, test it.
-- **IVFFlat retune:** more rows (chunks) per bucket shifts the recall math (ADR-015);
-  re-derive `probes` / candidate-pool on the chunked store, or move to HNSW.
+- **Index = HNSW, not IVFFlat.** The DB is pgvector 0.8 / PG17, so the chunked store
+  uses an HNSW embedding index — it sidesteps the `probes`-starvation recall bug (ADR-015)
+  with no per-query tuning. (More rows per IVFFlat bucket would otherwise have worsened
+  recall.) Tune `hnsw.ef_search` only if the eval shows a gap.
+- **Apply via the SQL editor, not `supabase db push`.** The CLI migration history is stale
+  (stuck at 2026-03-15); the OB2 migrations 001–004 were applied by hand, so `db push`
+  would try to re-create existing tables. Apply `005` the same way — paste + run.
 - **Cloudflare WAF** blocks command/path tokens on ingest — test chunking with realistic
   technical content.
 - **No credentials** in migration or backfill output; scan before commit.
