@@ -15,6 +15,7 @@ Public contract (Phase-2 integration depends on this — keep stable):
 """
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping
 from typing import Any
 
@@ -35,6 +36,37 @@ from api._openbrain_api import (
 # `status` defaults to 'current'; the rest are optional equality facets.
 _ALLOWED_FILTER_COLS = ("domain", "environment", "system")
 _DEFAULT_STATUS = "current"
+
+
+def _env_float(name: str, default: float) -> float:
+    """Read a float tuning knob from the environment; fall back to default on
+    missing/blank/malformed values so a bad env var never breaks retrieval."""
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
+
+# --- Retrieval tuning knobs (OB2). All default to a no-op so this change ships
+# behavior-neutral; each is set from real numbers after the signal harness baseline. ---
+
+# Component boost: authoritative current-state living docs tagged `component:*` get
+# their fused RRF score multiplied by this factor so stale event notes stop
+# out-ranking them. 1.0 = OFF (no behavior change) until the weight is tuned.
+_COMPONENT_BOOST = _env_float("OPENBRAIN_COMPONENT_BOOST", 1.0)
+
+# Vector-similarity suppression floor: drop candidates whose best vector match is
+# below this rather than returning the least-bad of several poor results. 0.0 = OFF
+# (suppress nothing) until an empirical floor is set from the baseline distribution.
+_VECTOR_SUPPRESSION_FLOOR = _env_float("OPENBRAIN_VECTOR_SUPPRESSION_FLOOR", 0.0)
+
+
+def _has_component_tag(tags: Any) -> bool:
+    """True when any tag is a `component:*` key (the living-doc supersession key)."""
+    return any(isinstance(t, str) and t.startswith("component:") for t in (tags or []))
 
 # Columns selected from public.knowledge for both candidate queries.
 _SELECT_COLS = """
@@ -154,7 +186,12 @@ def search_knowledge_keyword_candidates(
     return [dict(row) for row in rows]
 
 
-def _shape_result(row: Mapping[str, Any], score: float, confidence: str) -> dict[str, Any]:
+def _shape_result(
+    row: Mapping[str, Any],
+    score: float,
+    confidence: str,
+    signals: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     return {
         "id": str(row.get("id")),
         "text": row.get("content", ""),
@@ -165,6 +202,10 @@ def _shape_result(row: Mapping[str, Any], score: float, confidence: str) -> dict
         "system": row.get("system"),
         "tags": list(row.get("tags") or []),
         "status": row.get("status"),
+        # Retrieval instrument (ADR-014): raw per-retriever signals behind the fused
+        # ordinal `score`, so callers can measure relevance instead of reading a
+        # constant reciprocal. Additive — existing keys are unchanged.
+        "signals": signals or {},
     }
 
 
@@ -219,29 +260,100 @@ def retrieve_knowledge(
     # --- Reciprocal Rank Fusion, keyed on the UNIQUE knowledge.id ---
     # Keying on id (not (file, source)) is the bug-free contract from ADR-011:
     # distinct knowledge rows accumulate independent RRF buckets and never merge.
+    #
+    # Alongside the fused ordinal we retain each retriever's RAW signal per key
+    # (vector cosine distance, lexical ts_rank, and the two ranks). RRF fuses on
+    # rank alone and discards magnitude, so the fused score is a fixed reciprocal
+    # per position and carries no relevance information — these raw signals are the
+    # only relevance instrument the caller gets (ADR-014).
     rrf_scores: dict[Any, float] = {}
     row_by_key: dict[Any, dict[str, Any]] = {}
+    signals: dict[Any, dict[str, Any]] = {}
 
     for rank, row in enumerate(keyword_rows):
         key = row.get("id")
         rrf_scores[key] = rrf_scores.get(key, 0.0) + 1.0 / (_RRF_K + rank + 1)
         row_by_key[key] = row
+        sig = signals.setdefault(key, {})
+        sig["lexical_rank"] = rank
+        lex = row.get("score")
+        sig["lexical_score"] = float(lex) if lex is not None else None
 
     for rank, row in enumerate(vector_rows):
         key = row.get("id")
         rrf_scores[key] = rrf_scores.get(key, 0.0) + 1.0 / (_RRF_K + rank + 1)
         if key not in row_by_key:
             row_by_key[key] = row
+        sig = signals.setdefault(key, {})
+        sig["vector_rank"] = rank
+        # pgvector `<=>` is cosine DISTANCE (0=identical). similarity = 1 - distance.
+        dist = row.get("score")
+        if dist is not None:
+            dist = float(dist)
+            sig["vector_distance"] = dist
+            sig["vector_similarity"] = 1.0 - dist
+        else:
+            sig["vector_distance"] = None
+            sig["vector_similarity"] = None
 
-    # Length penalty: very short content is down-weighted (same logic/threshold
-    # as retrieve_thoughts via _word_count / _LENGTH_PENALTY_THRESHOLD).
+    # Normalise every signal bucket and record fused-pre-penalty + retriever coverage.
+    for key, sig in signals.items():
+        sig.setdefault("lexical_rank", None)
+        sig.setdefault("lexical_score", None)
+        sig.setdefault("vector_rank", None)
+        sig.setdefault("vector_distance", None)
+        sig.setdefault("vector_similarity", None)
+        sig["retrievers_hit"] = (
+            (1 if sig["lexical_rank"] is not None else 0)
+            + (1 if sig["vector_rank"] is not None else 0)
+        )
+        sig["rrf_score"] = rrf_scores[key]
+
+    # Length penalty: very short content is down-weighted (same logic/threshold as
+    # retrieve_thoughts). NB: this ONLY penalises fragments under the word threshold
+    # — long living docs are untouched (multiplier stays 1.0). The penalty factor is
+    # surfaced per result so the effect is observable, not assumed.
     for key, row in row_by_key.items():
         wc = _word_count(row.get("content", ""))
+        penalty = 1.0
         if wc < _LENGTH_PENALTY_THRESHOLD:
             penalty = wc / _LENGTH_PENALTY_THRESHOLD  # 0.0–1.0
             rrf_scores[key] *= penalty
+        signals[key]["word_count"] = wc
+        signals[key]["length_penalty_applied"] = penalty
+
+    # Component boost: authoritative current-state living docs (`component:*` tag)
+    # get their fused score lifted so stale event notes stop out-ranking them.
+    # CRITICAL: only status='current' rows are boosted. A superseded/historical row
+    # carries the same component:* tag, so an ungated boost would lift stale versions
+    # above the live one — the exact disease this is meant to cure. (Caught by the
+    # signal harness boost sweep, 2026-07-30.) _COMPONENT_BOOST defaults to 1.0 (OFF)
+    # until tuned against that harness.
+    for key, row in row_by_key.items():
+        is_current_component = (
+            row.get("status") == "current" and _has_component_tag(row.get("tags"))
+        )
+        boost = _COMPONENT_BOOST if is_current_component else 1.0
+        if boost != 1.0:
+            rrf_scores[key] *= boost
+        signals[key]["component_boost_applied"] = boost
 
     ranked_keys = sorted(rrf_scores, key=lambda k: rrf_scores[k], reverse=True)
+
+    # Vector-similarity suppression floor: drop candidates whose best vector match is
+    # below the floor rather than returning the least-bad. Keyword-only hits (no
+    # vector similarity) are kept — a lexical exact match is still meaningful.
+    # _VECTOR_SUPPRESSION_FLOOR defaults to 0.0 (OFF) until set from the baseline.
+    if _VECTOR_SUPPRESSION_FLOOR > 0.0:
+        kept: list[Any] = []
+        for key in ranked_keys:
+            vs = signals[key].get("vector_similarity")
+            if vs is not None and vs < _VECTOR_SUPPRESSION_FLOOR:
+                signals[key]["suppressed"] = True
+                continue
+            kept.append(key)
+        ranked_keys = kept
+
     ranked_keys = ranked_keys[:max_results]
 
     top_score = rrf_scores[ranked_keys[0]] if ranked_keys else 0.0
@@ -251,7 +363,7 @@ def retrieve_knowledge(
     for i, key in enumerate(ranked_keys):
         row = row_by_key[key]
         score = rrf_scores[key]
-        wc = _word_count(row.get("content", ""))
+        wc = signals[key]["word_count"]
         if i == 0:
             confidence = _confidence_label(top_score, second_score, wc)
         elif i == 1:
@@ -262,6 +374,8 @@ def retrieve_knowledge(
             )
         else:
             confidence = _confidence_label(score, None, wc)
-        final.append(_shape_result(row, score, confidence))
+        sig = signals[key]
+        sig["final_score"] = score
+        final.append(_shape_result(row, score, confidence, sig))
 
     return final[: max(1, n_results)]

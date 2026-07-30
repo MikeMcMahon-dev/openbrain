@@ -937,6 +937,9 @@ def _adapt_knowledge_result(kr: Mapping[str, Any]) -> dict[str, Any]:
         "system": system,
         "tags": list(kr.get("tags") or []),
         "status": kr.get("status"),
+        # Retrieval instrument (ADR-014): raw per-retriever signals behind the fused
+        # ordinal score. Additive; legacy consumers ignore it.
+        "signals": kr.get("signals") or {},
     }
 
 
