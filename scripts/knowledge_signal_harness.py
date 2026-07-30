@@ -298,8 +298,29 @@ def inv_boost_safety() -> tuple[str, bool, str]:
     return ("boost_safety", ok, detail)
 
 
+def inv_vector_recall() -> tuple[str, bool, str]:
+    """Guard the IVFFlat recall fix (ADR-015). A known high-similarity long doc
+    (the DNS current-state living doc, true vector rank ~1) must be found by the
+    VECTOR retriever, not lexical alone. If ivfflat.probes silently reverts to 1,
+    the doc drops out of the vector candidate set and this trips."""
+    rows = kr.retrieve_knowledge(
+        "DNS infrastructure Technitium CoreDNS Pi-hole authoritative zones DHCP IPAM",
+        6, _TENANT_B, filters={"status": None})
+    dns = next((r for r in rows
+                if any(t == "component:dns-current-state" for t in (r.get("tags") or []))
+                and r.get("status") == "current"), None)
+    if dns is None:
+        return ("vector_recall", False, "DNS current-state doc not retrieved at all")
+    s = dns["signals"]
+    ok = s.get("vector_rank") is not None and (s.get("vector_similarity") or 0) > 0.5
+    return ("vector_recall", ok,
+            f"DNS doc vector_rank={s.get('vector_rank')} vsim={s.get('vector_similarity')} "
+            f"hit={s.get('retrievers_hit')}" if ok
+            else f"vector MISS — recall regressed (probes reverted?): {s.get('vector_rank')}")
+
+
 LANDMINES = [inv_owner_isolation, inv_status_default, inv_shim_contract,
-             inv_signal_sanity, inv_suppression, inv_boost_safety]
+             inv_signal_sanity, inv_suppression, inv_boost_safety, inv_vector_recall]
 
 
 def run_landmines() -> list[tuple[str, bool, str]]:
