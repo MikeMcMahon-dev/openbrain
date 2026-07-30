@@ -1045,10 +1045,13 @@ def _slim_result(result: Mapping[str, Any]) -> dict[str, Any]:
 
 def _skim_result(result: Mapping[str, Any]) -> dict[str, Any]:
     """Stage-1 skim projection: metadata + snippet + signals, NO full text. Agents
-    read these to choose which notes to fetch by id."""
+    read these to choose which notes to fetch by id. On chunked reads (ADR-017) the
+    `id` is the chunk to fetch for that section, `document_id` fetches the whole doc,
+    and `sibling_chunks` shows the other sections available."""
     text = result.get("text", "")
-    return {
+    skim = {
         "id": result.get("id") or result.get("document_id"),
+        "document_id": result.get("document_id"),
         "heading": result.get("heading") or result.get("section"),
         "system": result.get("system"),
         "domain": result.get("domain"),
@@ -1060,6 +1063,9 @@ def _skim_result(result: Mapping[str, Any]) -> dict[str, Any]:
         "confidence": result.get("confidence"),
         "signals": result.get("signals", {}),
     }
+    if result.get("sibling_chunks"):
+        skim["sibling_chunks"] = result["sibling_chunks"]
+    return skim
 
 
 def fetch_payload(

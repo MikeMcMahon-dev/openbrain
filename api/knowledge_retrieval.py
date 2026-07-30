@@ -426,12 +426,14 @@ def retrieve_knowledge(
 
 def _shape_fetch(row: Mapping[str, Any]) -> dict[str, Any]:
     """Full-note payload for stage-2 fetch — same provenance synthesis as the
-    query adapter so a fetched note looks identical to one surfaced by query."""
+    query adapter so a fetched note looks identical to one surfaced by query. When
+    the row is a chunk (ADR-017) it carries document_id/chunk_index/heading so the
+    caller can tell which section it got and reassemble siblings."""
     domain = row.get("domain")
     system = row.get("system")
     provenance = "/".join(p for p in (domain, system) if p) or "knowledge"
     created = row.get("created_at")
-    return {
+    out = {
         "id": str(row.get("id")),
         "text": row.get("content", ""),
         "domain": domain,
@@ -440,20 +442,30 @@ def _shape_fetch(row: Mapping[str, Any]) -> dict[str, Any]:
         "status": row.get("status"),
         "tags": list(row.get("tags") or []),
         "source": provenance,
-        "section": provenance,
+        "section": row.get("heading") or provenance,
         "created_at": str(created) if created is not None else None,
     }
+    if row.get("document_id") is not None:
+        out["document_id"] = str(row.get("document_id"))
+        out["chunk_index"] = row.get("chunk_index")
+        out["heading"] = row.get("heading")
+    return out
 
 
 def fetch_knowledge_by_ids(
     ids: list[Any],
     owner: str | None,
+    table: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Stage-2 fetch (ADR-016): return FULL text for specific knowledge rows,
-    OWNER-SCOPED. `created_by` must equal the caller's authenticated owner, so a
-    caller can never fetch another tenant's row by id. Non-UUID and foreign/unknown
-    ids are silently dropped (returns [] rather than raising), so a bad id from a
-    skim result never errors the whole fetch. Read-only, SELECT only."""
+    """Stage-2 fetch (ADR-016/017): return FULL text for specific rows, OWNER-SCOPED.
+    `created_by` must equal the caller's authenticated owner, so a caller can never
+    fetch another tenant's row by id. Non-UUID and foreign/unknown ids are silently
+    dropped (returns [] rather than raising). Read-only, SELECT only.
+
+    On the chunked store an id may be a CHUNK id (returns that one section) OR a
+    document_id (returns all sections of that document, ordered) — so skim→fetch works
+    whether the agent asks for the section it picked or the whole living doc."""
+    table = table or _knowledge_table()
     clean: list[str] = []
     for i in ids or []:
         try:
@@ -462,20 +474,28 @@ def fetch_knowledge_by_ids(
             continue
     if not clean:
         return []
-
-    sql = """
-    SELECT id, content, domain, environment, system, tags, status, created_at
-    FROM public.knowledge
-    WHERE id = ANY(%s::uuid[])
-    """
-    params: list[Any] = [clean]
     # Owner scoping is mandatory for cross-tenant isolation; the caller passes the
     # AUTHENTICATED owner (never client-supplied). A falsy owner scopes to nothing.
-    if owner:
-        sql += " AND created_by = %s"
-        params.append(owner)
-    else:
+    if not owner:
         return []
+
+    if table == _CHUNK_TABLE:
+        sql = """
+        SELECT id, content, document_id, chunk_index, heading, domain, environment,
+               system, tags, status, created_at
+        FROM public.knowledge_chunked
+        WHERE (id = ANY(%s::uuid[]) OR document_id = ANY(%s::uuid[]))
+          AND created_by = %s
+        ORDER BY document_id, chunk_index
+        """
+        params: list[Any] = [clean, clean, owner]
+    else:
+        sql = """
+        SELECT id, content, domain, environment, system, tags, status, created_at
+        FROM public.knowledge
+        WHERE id = ANY(%s::uuid[]) AND created_by = %s
+        """
+        params = [clean, owner]
 
     with get_db_conn() as conn:
         rows = conn.execute(sql, params).fetchall()
