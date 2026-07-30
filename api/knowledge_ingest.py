@@ -30,6 +30,7 @@ returned dict still reports ``shape`` separately for callers that want it raw.
 from __future__ import annotations
 
 import hashlib
+import os
 from typing import Any
 
 from api._openbrain_api import (
@@ -47,6 +48,69 @@ from api.taxonomy_map import (
 )
 
 VALID_STATUSES = {"current", "superseded", "historical", "draft"}
+
+
+def _chunk_on_ingest() -> bool:
+    """Whether to mirror each ingest into public.knowledge_chunked (ADR-017 Phase H).
+    Default OFF ('held in reserve') — the chunked read store is otherwise a static
+    backfill snapshot. Enable with OPENBRAIN_CHUNK_ON_INGEST=1 once cutover is permanent."""
+    return (os.getenv("OPENBRAIN_CHUNK_ON_INGEST") or "").strip().lower() in (
+        "1", "true", "yes", "on")
+
+
+def _dual_write_chunks(
+    new_id: str,
+    content: str,
+    owner: str,
+    *,
+    domain: str,
+    environment: str,
+    system: str | None,
+    tags: list[str],
+    status: str,
+    source: str,
+    supersedes_id: str | None,
+    ingest_id: str,
+) -> None:
+    """Best-effort: chunk `content` and mirror it into public.knowledge_chunked so the
+    chunked read store stays fresh. knowledge is canonical, so callers wrap this in
+    try/except — a failure here NEVER fails the ingest. Mirrors write_knowledge's
+    set-based supersession so there is one current DOCUMENT per (system, component)."""
+    from api.chunking import chunk_document, infer_title
+
+    chunks = chunk_document(content, infer_title(content))
+    if not chunks:
+        return
+    component_tag = next((t for t in (tags or []) if str(t).startswith("component:")), None)
+    insert_sql = """
+        INSERT INTO public.knowledge_chunked
+            (content, embedding, document_id, chunk_index, heading, domain, environment,
+             system, tags, status, supersedes_id, ingest_id, source, created_by)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (document_id, chunk_index) DO NOTHING
+    """
+    with get_db_conn() as conn:
+        # Retire the PRIOR document's chunks for this identity first (the new doc's own
+        # chunks aren't inserted yet, so document_id <> new_id spares them).
+        if status == "current" and system and component_tag:
+            conn.execute(
+                "UPDATE public.knowledge_chunked SET status = 'superseded', valid_until = now() "
+                "WHERE system = %s AND status = 'current' AND tags @> ARRAY[%s] "
+                "AND document_id <> %s",
+                [system, component_tag, str(new_id)],
+            )
+        for ch in chunks:
+            emb = None
+            try:
+                emb = embedding_request(ch["embed_text"])
+            except Exception:
+                emb = None
+            conn.execute(insert_sql, [
+                ch["content"], _vector_param(emb) if emb else None, str(new_id),
+                ch["chunk_index"], ch["heading"], domain, environment, system, tags,
+                status, supersedes_id, f"{ingest_id}:c{ch['chunk_index']}", source, owner,
+            ])
+        conn.commit()
 
 # Max length of the sample_context excerpt stored on a tag_proposals row (review aid).
 _PROPOSAL_SAMPLE_LEN = 200
@@ -298,6 +362,18 @@ def write_knowledge(
                 "details": msg,
             }
         return {"status": "error", "code": 500, "error": "db_error", "message": msg}
+
+    # Mirror into the chunked store (ADR-017 Phase H) — gated OFF by default, best-effort.
+    # knowledge is canonical; a chunked-write failure must never fail a successful ingest.
+    if new_id and _chunk_on_ingest():
+        try:
+            _dual_write_chunks(
+                new_id, content, owner, domain=domain, environment=environment,
+                system=system, tags=tag_list, status=status, source=source,
+                supersedes_id=supersedes_id, ingest_id=ingest_id,
+            )
+        except Exception:
+            pass
 
     return {
         "status": "accepted",
