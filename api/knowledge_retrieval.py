@@ -346,14 +346,22 @@ def retrieve_knowledge(
         )
         sig["rrf_score"] = rrf_scores[key]
 
-    # Length penalty: very short content is down-weighted (same logic/threshold as
-    # retrieve_thoughts). NB: this ONLY penalises fragments under the word threshold
-    # — long living docs are untouched (multiplier stays 1.0). The penalty factor is
-    # surfaced per result so the effect is observable, not assumed.
+    # Length penalty (ADR-002): very short content is down-weighted as probable noise.
+    # NB: this ONLY penalises fragments under the word threshold — long docs are untouched
+    # (multiplier stays 1.0). The penalty factor is surfaced per result so the effect is
+    # observable, not assumed.
+    #
+    # It is SKIPPED on the chunked store: the length penalty was designed for whole docs,
+    # where short = probable noise. Chunking (ADR-017) intentionally produces short focused
+    # sections and already merges sub-minimum fragments (_MIN_CHUNK_WORDS), so docking a
+    # 27-word section penalises exactly what the chunker is built to make — the penalty
+    # fought the chunker (Chat's eval, 2026-07-30). word_count is still recorded (confidence
+    # uses it); only the score multiplication is skipped.
+    penalise_short = table != _CHUNK_TABLE
     for key, row in row_by_key.items():
         wc = _word_count(row.get("content", ""))
         penalty = 1.0
-        if wc < _LENGTH_PENALTY_THRESHOLD:
+        if penalise_short and wc < _LENGTH_PENALTY_THRESHOLD:
             penalty = wc / _LENGTH_PENALTY_THRESHOLD  # 0.0–1.0
             rrf_scores[key] *= penalty
         signals[key]["word_count"] = wc
@@ -404,13 +412,17 @@ def retrieve_knowledge(
         # Confidence keys off cosine vector_similarity (boost-independent), with the
         # fused score + neighbour retained for the keyword-only fallback (no similarity).
         vsim = sig.get("vector_similarity")
+        # Rank agreement = top of BOTH retriever lists. Scale-free, so it promotes a
+        # short-but-bullseye chunk to "high" that the whole-doc word-count floor would
+        # otherwise cap at "medium" (surfaced by Chat's eval, 2026-07-30).
+        rank_agreement = sig.get("lexical_rank") == 0 and sig.get("vector_rank") == 0
         if i == 0:
             neighbour = second_score
         elif i == 1:
             neighbour = rrf_scores[ranked_keys[2]] if len(ranked_keys) > 2 else None
         else:
             neighbour = None
-        confidence = _confidence_from_signals(vsim, score, neighbour, wc)
+        confidence = _confidence_from_signals(vsim, score, neighbour, wc, rank_agreement)
         sig["final_score"] = score
         final.append(_shape_result(row, score, confidence, sig))
 

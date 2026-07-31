@@ -828,16 +828,25 @@ def _confidence_from_signals(
     score: float,
     second_score: float | None,
     word_count: int,
+    rank_agreement: bool = False,
 ) -> str:
     """Confidence for the knowledge path (ADR-017). Prefers cosine vector similarity —
     boost-independent, so the ×2 component boost no longer compresses a strong top hit
     down to "medium". Falls back to the fused-RRF separation heuristic for keyword-only
-    hits (no vector similarity). The word-count floor still applies either way."""
+    hits (no vector similarity).
+
+    The `word_count >= _CONFIDENCE_HIGH_WORDS` gate for "high" was calibrated for whole
+    documents; chunking (ADR-017) now produces tight sections, so a genuine bullseye — a
+    74-word section that ranks #1 on BOTH retrievers — was capped at "medium" purely for
+    being short. `rank_agreement` (top of both the lexical and vector lists) is a
+    scale-free quality signal that substitutes for the length requirement in that case."""
     if word_count < _LENGTH_PENALTY_THRESHOLD:
         return "low"
     if vector_similarity is None:
         return _confidence_label(score, second_score, word_count)
-    if vector_similarity >= _CONFIDENCE_SIM_HIGH and word_count >= _CONFIDENCE_HIGH_WORDS:
+    if vector_similarity >= _CONFIDENCE_SIM_HIGH and (
+        word_count >= _CONFIDENCE_HIGH_WORDS or rank_agreement
+    ):
         return "high"
     if vector_similarity >= _CONFIDENCE_SIM_MED:
         return "medium"
@@ -947,7 +956,7 @@ def _adapt_knowledge_result(kr: Mapping[str, Any]) -> dict[str, Any]:
     domain = kr.get("domain")
     system = kr.get("system")
     provenance = "/".join(p for p in (domain, system) if p) or "knowledge"
-    return {
+    adapted = {
         "score": kr.get("score"),
         "id": kr.get("id"),
         # Chunked reads (ADR-017) carry the parent document_id + section heading;
@@ -978,6 +987,14 @@ def _adapt_knowledge_result(kr: Mapping[str, Any]) -> dict[str, Any]:
         # ordinal score. Additive; legacy consumers ignore it.
         "signals": kr.get("signals") or {},
     }
+    # Sibling sections (ADR-017 collapse) — carry through so the caller can see the other
+    # retrieved sections of this document and fetch the parent. The adapter used to drop
+    # it, so sibling_chunks (computed in collapse_chunks) never reached any query/search
+    # payload — 4.4 worked in the engine but was invisible through the API (found via
+    # Chat's eval, 2026-07-30). Present only when >1 chunk of the doc was retrieved.
+    if kr.get("sibling_chunks"):
+        adapted["sibling_chunks"] = kr["sibling_chunks"]
+    return adapted
 
 
 def retrieve_for_query(
