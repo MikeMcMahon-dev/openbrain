@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -187,3 +188,39 @@ def test_owner_scope():
     # all results (if any) must be reachable; we can't read created_by from the
     # contract shape, so just assert the call succeeds and is well-formed.
     assert isinstance(results, list)
+
+
+# --- Length penalty is skipped on chunked reads (Chat's eval, 2026-07-30) -------
+# Fully mocked (no DB): patch the two candidate searches + embedding so the fusion,
+# length-penalty, and collapse logic run deterministically on a synthetic short row.
+def _short_row(chunked: bool):
+    row = {"id": "11111111-1111-1111-1111-111111111111",
+           "content": " ".join(["word"] * 27),  # 27 words — under the 30-word threshold
+           "domain": "OpenBrain", "environment": "Production", "system": None,
+           "tags": [], "status": "current", "score": 0.2}
+    if chunked:
+        row.update(document_id="22222222-2222-2222-2222-222222222222",
+                   chunk_index=0, heading="Mounting")
+    return row
+
+
+def _run_retrieve(row, table):
+    from api import knowledge_retrieval as kr
+    with patch.object(kr, "embedding_request", return_value=[0.1] * 8), \
+         patch.object(kr, "search_knowledge_vector_candidates", return_value=[dict(row)]), \
+         patch.object(kr, "search_knowledge_keyword_candidates", return_value=[dict(row)]):
+        return kr.retrieve_knowledge("q", 5, owner=None, filters={"status": None}, table=table)
+
+
+def test_length_penalty_skipped_on_chunked_reads():
+    res = _run_retrieve(_short_row(chunked=True), "knowledge_chunked")
+    assert res and res[0]["signals"]["word_count"] == 27
+    # a 27-word section is intentional under chunking — must NOT be docked
+    assert res[0]["signals"]["length_penalty_applied"] == 1.0
+
+
+def test_length_penalty_still_applies_on_base_knowledge():
+    res = _run_retrieve(_short_row(chunked=False), "knowledge")
+    assert res[0]["signals"]["word_count"] == 27
+    # whole-doc reads keep the ADR-002 noise penalty
+    assert abs(res[0]["signals"]["length_penalty_applied"] - 27 / 30) < 1e-9
