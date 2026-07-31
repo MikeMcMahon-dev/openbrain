@@ -829,18 +829,23 @@ def _confidence_from_signals(
     second_score: float | None,
     word_count: int,
     rank_agreement: bool = False,
+    chunked: bool = False,
 ) -> str:
     """Confidence for the knowledge path (ADR-017). Prefers cosine vector similarity —
     boost-independent, so the ×2 component boost no longer compresses a strong top hit
     down to "medium". Falls back to the fused-RRF separation heuristic for keyword-only
     hits (no vector similarity).
 
-    The `word_count >= _CONFIDENCE_HIGH_WORDS` gate for "high" was calibrated for whole
-    documents; chunking (ADR-017) now produces tight sections, so a genuine bullseye — a
-    74-word section that ranks #1 on BOTH retrievers — was capped at "medium" purely for
-    being short. `rank_agreement` (top of both the lexical and vector lists) is a
-    scale-free quality signal that substitutes for the length requirement in that case."""
-    if word_count < _LENGTH_PENALTY_THRESHOLD:
+    Two word-count gates existed, both calibrated for whole documents and both wrong for
+    chunked reads. (1) The `word_count >= _CONFIDENCE_HIGH_WORDS` gate for "high" — a 74-word
+    bullseye that ranks #1 on BOTH retrievers was capped at "medium" for being short;
+    `rank_agreement` substitutes for the length requirement. (2) The hard `word_count < 30
+    → low` floor, which stranded a 23-word section at "low" *regardless of similarity* —
+    it ran before the vsim logic, so the promotion path was unreachable (Chat's eval §4,
+    2026-07-30). On chunked reads the floor is skipped: the chunker makes intentionally
+    short sections and merges sub-minimum fragments, so vsim/rank should decide, and the
+    similarity bands below still gate genuinely weak matches to "low"."""
+    if not chunked and word_count < _LENGTH_PENALTY_THRESHOLD:
         return "low"
     if vector_similarity is None:
         return _confidence_label(score, second_score, word_count)

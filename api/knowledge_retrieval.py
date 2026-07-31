@@ -422,7 +422,9 @@ def retrieve_knowledge(
             neighbour = rrf_scores[ranked_keys[2]] if len(ranked_keys) > 2 else None
         else:
             neighbour = None
-        confidence = _confidence_from_signals(vsim, score, neighbour, wc, rank_agreement)
+        confidence = _confidence_from_signals(
+            vsim, score, neighbour, wc, rank_agreement, chunked=(table == _CHUNK_TABLE)
+        )
         sig["final_score"] = score
         final.append(_shape_result(row, score, confidence, sig))
 
