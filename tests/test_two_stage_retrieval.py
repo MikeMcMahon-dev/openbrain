@@ -214,3 +214,24 @@ def test_confidence_from_signals_falls_back_to_rrf_without_similarity():
     # keyword-only hit (no vector similarity) uses the fused-RRF separation heuristic
     assert ob._confidence_from_signals(None, 0.033, 0.020, 150) == "high"
     assert ob._confidence_from_signals(None, 0.010, None, 150) == "low"
+
+
+def test_confidence_rank_agreement_promotes_short_bullseye():
+    # a 74-word section, high vsim, top of BOTH retrievers: the whole-doc word floor
+    # would cap it at "medium"; rank agreement promotes it to "high" (Chat's eval case)
+    assert ob._confidence_from_signals(0.6222, 0.033, 0.032, 74) == "medium"          # no agreement
+    assert ob._confidence_from_signals(0.6222, 0.033, 0.032, 74, rank_agreement=True) == "high"
+    # rank agreement does NOT rescue a moderate-similarity row (must still clear the band)
+    assert ob._confidence_from_signals(0.50, 0.033, 0.032, 74, rank_agreement=True) == "medium"
+
+
+# --- 4.4 delivery: sibling_chunks must survive the query-path adapter ----------
+def test_adapt_carries_sibling_chunks_through():
+    kr = {"id": "c1", "document_id": "docA", "chunk_index": 0, "heading": "Intro",
+          "text": "body", "score": 0.03, "domain": "K8s", "tags": [], "status": "current",
+          "sibling_chunks": [{"id": "c2", "chunk_index": 1, "heading": "Recovery"}]}
+    a = ob._adapt_knowledge_result(kr)
+    assert a["sibling_chunks"] == [{"id": "c2", "chunk_index": 1, "heading": "Recovery"}]
+    # a row with no siblings must NOT carry an empty/null sibling_chunks key
+    plain = ob._adapt_knowledge_result({"id": "k1", "text": "b", "score": 0.03, "tags": []})
+    assert "sibling_chunks" not in plain
