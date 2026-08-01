@@ -134,7 +134,7 @@ def run_report(days: int, synopsis: bool, daily: bool) -> None:
 
     # ── Daily breakdown ───────────────────────────────────────────────────────
     if daily and daily_rows:
-        print(f"\n  Day-by-Day Breakdown")
+        print("\n  Day-by-Day Breakdown")
         print(f"  {'-'*50}")
         current_owner = None
         for r in daily_rows:

@@ -3,6 +3,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import requests
+from bs4 import BeautifulSoup
 from markdownify import markdownify as md
 
 

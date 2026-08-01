@@ -3,7 +3,13 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from api._openbrain_api import ingest_payload, parse_request, query_payload, response_payload, validate_method
+from api._openbrain_api import (
+    ingest_payload,
+    parse_request,
+    query_payload,
+    response_payload,
+    validate_method,
+)
 from api.chatgpt import _inject_token_owner, _require_tool_auth
 
 

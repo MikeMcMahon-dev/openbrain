@@ -24,7 +24,6 @@ from __future__ import annotations
 import json
 import os
 import ssl
-import sys
 import time
 import urllib.error
 import urllib.parse
@@ -248,7 +247,7 @@ def phase3_url_ingest() -> tuple[list[str], list[str]]:
             "source": url,
             "owner": TEST_OWNER,
             "subject": TEST_SUBJECT,
-            "topic": f"url_eval",
+            "topic": "url_eval",
         })
         ingest_status = body.get("status", "") if isinstance(body, dict) else ""
         if status_code == 0:
@@ -386,7 +385,7 @@ def _append_eval_history(
     try:
         with open(EVAL_HISTORY, "a", encoding="utf-8") as f:
             f.write(entry)
-        print(f"\nAppended to eval_history.md: yes")
+        print("\nAppended to eval_history.md: yes")
     except Exception as exc:
         print(f"\nAppended to eval_history.md: FAILED ({exc})")
 
@@ -491,7 +490,7 @@ def main() -> int:
     print(f"Negative cases: {negative_passed}/{negative_total}")
     print(f"Cleanup: {cleanup_deleted} rows deleted")
     print(f"Overall pass rate: {total_passed / total_cases * 100:.1f}%")
-    print(f"Min threshold: 75%")
+    print("Min threshold: 75%")
     print(f"Status: {overall}")
     print(f"{'=' * 50}")
 

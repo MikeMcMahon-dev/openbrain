@@ -667,7 +667,7 @@ def print_report(eval_result: dict, verbose: bool = False) -> None:
     single_judge = eval_result["single_judge_mode"]
 
     print(f"\n{'='*70}")
-    print(f"  OpenBrain Answer Fidelity Eval")
+    print("  OpenBrain Answer Fidelity Eval")
     print(f"  Timestamp : {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}")
     print(f"  Cases     : {n}")
     print(f"  Avg fidelity: {avg_fidelity:.3f}")
@@ -705,7 +705,7 @@ def print_report(eval_result: dict, verbose: bool = False) -> None:
         print("  !!! Investigate judge prompt alignment before proceeding with automated scoring.")
 
     if verbose:
-        print(f"\n  Per-case results:")
+        print("\n  Per-case results:")
         for r in eval_result["results"]:
             flag = " [REVIEW]" if r["agreement"]["review_flag"] else ""
             hall = " [HALLUCINATION]" if r["agreement"]["final_hallucination"] else ""
@@ -728,7 +728,7 @@ def write_results_md(eval_result: dict) -> Path:
     disagreements = eval_result["disagreements"]
     single_judge = eval_result["single_judge_mode"]
 
-    lines = [f"# Answer Fidelity Results\n"]
+    lines = ["# Answer Fidelity Results\n"]
     lines.append(f"## Baseline — {timestamp}\n")
     lines.append(f"- Cases: {n}")
     lines.append(f"- Avg fidelity: {avg_fidelity:.3f}")
@@ -828,7 +828,7 @@ if __name__ == "__main__":
 
     print(f"Running {len(tests)} answer fidelity eval cases...")
     if SINGLE_JUDGE_MODE:
-        print(f"[SINGLE-JUDGE MODE] Judge B (gpt-4o) unavailable. Results flagged accordingly.")
+        print("[SINGLE-JUDGE MODE] Judge B (gpt-4o) unavailable. Results flagged accordingly.")
 
     eval_result = run_eval(tests, verbose=args.verbose)
     print_report(eval_result, verbose=args.verbose)

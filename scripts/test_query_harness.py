@@ -12,8 +12,6 @@ Usage:
     python scripts/test_query_harness.py --short-bias # short-doc bias report only
 """
 import argparse
-import json
-import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -22,6 +20,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from dotenv import load_dotenv
+
 load_dotenv(Path(__file__).parent.parent / ".env.local")
 
 from api._openbrain_api import retrieve_thoughts  # noqa: E402
@@ -525,7 +524,7 @@ def print_report(results: dict, label: str = "") -> None:
     print(f"{'='*60}")
 
     if results["failure_details"]:
-        print(f"\n  Top failure cases:")
+        print("\n  Top failure cases:")
         for f in results["failure_details"][:10]:
             print(f"\n  FAIL: {f['label']}")
             print(f"    Query  : {f['query']}")
@@ -567,8 +566,8 @@ def append_eval_history(runs: list[dict]) -> None:
         entry_lines = [
             f"\n## {timestamp} | query_harness | n={n}",
             f"- Pass rate / avg fidelity: {pass_rate:.1%}",
-            f"- Model versions: generator=N/A (retrieval only), judge_a=N/A, judge_b=N/A",
-            f"- Disagreements: N/A",
+            "- Model versions: generator=N/A (retrieval only), judge_a=N/A, judge_b=N/A",
+            "- Disagreements: N/A",
             f"- Flags: bias_flags={run.get('bias_flags', 0)}, failures={run.get('failures', 0)}",
         ]
         entry = "\n".join(entry_lines) + "\n"

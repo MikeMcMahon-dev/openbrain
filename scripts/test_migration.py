@@ -88,7 +88,7 @@ def run_tests() -> bool:
         conn.commit()
         # Should NOT reach here
         results.append((FAIL, "Test 3: duplicate current blocked by trigger", "no exception raised"))
-    except psycopg.errors.RaiseException as e:
+    except psycopg.errors.RaiseException:
         conn.rollback()
         results.append((PASS, "Test 3: duplicate current blocked by trigger", "exception raised as expected"))
     except Exception as e:
@@ -147,7 +147,7 @@ def run_tests() -> bool:
     except Exception as e:
         conn.rollback()
         print(f"  WARNING: cleanup failed — {e}")
-        print(f"  Manual cleanup: DELETE FROM public.knowledge WHERE source IS NULL AND content LIKE 'test%';")
+        print("  Manual cleanup: DELETE FROM public.knowledge WHERE source IS NULL AND content LIKE 'test%';")
 
     conn.close()
     return _print_results(results)

@@ -1,6 +1,12 @@
 from __future__ import annotations
 
-from api._openbrain_api import parse_request, require_auth, response_payload, search_payload, validate_method
+from api._openbrain_api import (
+    parse_request,
+    require_auth,
+    response_payload,
+    search_payload,
+    validate_method,
+)
 
 
 def handler(request):

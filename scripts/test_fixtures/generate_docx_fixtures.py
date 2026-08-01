@@ -50,7 +50,7 @@ def generate_simple_text(out_dir: Path) -> Path:
     from docx import Document
 
     doc = Document()
-    doc.add_paragraph(f"OpenBrain DOCX Test Fixture: simple_text")
+    doc.add_paragraph("OpenBrain DOCX Test Fixture: simple_text")
     doc.add_paragraph(f"Unique retrieval phrase: {SIMPLE_TEXT_UNIQUE_PHRASE}")
     doc.add_paragraph(
         "The quick brown fox jumps over the lazy dog. "

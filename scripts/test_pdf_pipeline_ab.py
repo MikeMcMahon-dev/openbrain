@@ -25,8 +25,8 @@ REPO_ROOT = SCRIPTS_DIR.parent
 
 sys.path.insert(0, str(REPO_ROOT))
 
-from scripts.chunking.text import chunk_text_by_tokens  # noqa: E402
 from scripts.chunking.markdown import chunk_markdown  # noqa: E402
+from scripts.chunking.text import chunk_text_by_tokens  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Optional dependency: pymupdf4llm
@@ -313,7 +313,7 @@ def print_pdf_table(label: str, path_a: dict, path_b: dict) -> None:
     if path_b.get("ocr_stub"):
         print(f"\n  [Path B note] {path_b['ocr_stub_message']}")
     if path_b.get("pymupdf4llm_unavailable"):
-        print(f"\n  [Path B note] pymupdf4llm not installed — install with: pip install pymupdf4llm")
+        print("\n  [Path B note] pymupdf4llm not installed — install with: pip install pymupdf4llm")
     if path_b.get("error"):
         print(f"\n  [Path B error] {path_b['error']}")
 
@@ -369,8 +369,8 @@ def main() -> None:
     print(f"Date: {date.today()}")
 
     pymupdf_status = "available" if PYMUPDF4LLM_AVAILABLE else "NOT INSTALLED (pip install pymupdf4llm)"
-    print(f"\nDependencies:")
-    print(f"  pypdf:        available")
+    print("\nDependencies:")
+    print("  pypdf:        available")
     print(f"  pymupdf4llm:  {pymupdf_status}")
 
     all_results: list[tuple[str, dict, dict]] = []
@@ -455,7 +455,7 @@ def main() -> None:
     print(f"Path A estimated overlap-redundant tokens: ~{path_a_overlap_tokens} tokens")
     print(f"  (100-token overlap x {path_a_total_chunks} chunks)")
     if path_b_definite_chunks > 0 or path_b_pending_ocr > 0:
-        print(f"Path B overlap redundancy: 0 tokens (heading-split chunking, no overlap)")
+        print("Path B overlap redundancy: 0 tokens (heading-split chunking, no overlap)")
     print()
     if path_b_pending_ocr:
         print(

@@ -22,9 +22,7 @@ from __future__ import annotations
 import json
 import os
 import ssl
-import sys
 import time
-import traceback
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -277,7 +275,7 @@ def _append_eval_history(
     try:
         with open(EVAL_HISTORY, "a", encoding="utf-8") as f:
             f.write(entry)
-        print(f"\nAppended to eval_history.md: yes")
+        print("\nAppended to eval_history.md: yes")
     except Exception as exc:
         print(f"\nAppended to eval_history.md: FAILED ({exc})")
 
@@ -349,7 +347,7 @@ def main() -> int:
     print(f"  Negative:  {negative_passed}/{negative_total}")
     print(f"Cleanup:     {cleanup_deleted} rows deleted")
     print(f"Pass rate:   {(ingest_passed + retrieval_passed + negative_passed) / total_cases * 100:.1f}%")
-    print(f"Min threshold: 80%")
+    print("Min threshold: 80%")
     print(f"Status: {overall}")
     print(f"{'=' * 50}")
 
