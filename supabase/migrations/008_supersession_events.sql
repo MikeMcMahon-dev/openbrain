@@ -1,8 +1,10 @@
 -- OB2 Migration 008: supersession_events — append-only transition records (ADR-018 P3)
 -- Additive; does NOT touch public.thoughts. Apply via Supabase Dashboard SQL editor.
 --
--- ⚠⚠ STAGED — NOT YET APPLIED. Needs Mike's sign-off. Sections A–B here (table + backfill);
---    the projection trigger + deferrable guard land in a later trialed section (P3 cont.). ⚠⚠
+-- APPLIED to prod 2026-08-01 (stepped through the Supabase SQL editor §A→§D; PR #92 merged).
+--    Sections: A table + guards, B backfill (5 rows), C projection trigger, D reconciliation
+--    log. All trialed in BEGIN..ROLLBACK first; post-apply reconcile CLEAN (5 events / 5
+--    superseded / drift 0). Kept in-repo as the schema-of-record; re-running is idempotent.
 --
 -- WHY: retirement is currently an in-place `UPDATE knowledge SET status='superseded'`
 -- (api/knowledge_ingest.py auto_supersede + ob2_state.py confirm). That destroys the record of
@@ -23,7 +25,11 @@
 -- also the only form that trials cleanly under sql_trial.py: `ALTER TYPE ... ADD VALUE` cannot be
 -- rolled back inside a transaction (ADR-018 §10e HARD GATE). So: TEXT + CHECK, matching convention.
 --
--- ROLLBACK (§A+§B): DROP TABLE public.supersession_events CASCADE;  -- new table, no dependents yet.
+-- ROLLBACK (full): all objects are new — nothing else references them yet.
+--   DROP TABLE IF EXISTS public.supersession_reconcile_log CASCADE;
+--   DROP TABLE IF EXISTS public.supersession_events CASCADE;   -- drops its triggers too
+--   DROP FUNCTION IF EXISTS public.project_supersession();
+--   DROP FUNCTION IF EXISTS public.supersession_events_immutable();
 
 -- ══ A. supersession_events table ══════════════════════════════════════════════════════════
 CREATE TABLE IF NOT EXISTS public.supersession_events (
