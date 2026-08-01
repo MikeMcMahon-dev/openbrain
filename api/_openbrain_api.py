@@ -1985,7 +1985,8 @@ def ingest_payload(
             else:
                 if not extracted_text.strip():
                     status = "failed"
-                    message = "Ingest failed: PDF contained no extractable text (may be image-only)."
+                    message = ("Ingest failed: PDF contained no extractable text "
+                               "(may be image-only).")
                     details.append("empty extraction")
                 else:
                     word_count = len(extracted_text.split())
