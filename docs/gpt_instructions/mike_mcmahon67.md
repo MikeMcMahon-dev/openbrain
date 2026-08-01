@@ -52,10 +52,22 @@ When asked to remember, save, or capture something:
    - `domain`: Network | K8s | Security | Study | OpenBrain | Personal
    - `environment`: Production | Lab | Study | Archive
    If unsure, omit them and the server will infer from subject/topic.
-3. Check the response `details` for a taxonomy alert (e.g. "honored domain 'K8s'
+3. For infrastructure or project notes, pass `system` — the namespace the note belongs
+   to: SpectreNet | PMX-01 | OpenBrain | FlightSim | MikeMcMahon-Dev | Annie. Required
+   whenever you set `component` (below).
+4. **Living current-state docs.** For a canonical "current state of X" that should REPLACE
+   its prior version rather than pile up (e.g. the current DNS layout), pass `component`
+   with a stable slug like `dns-current-state`, plus `system`. Re-ingesting the same
+   (system, component) retires the old version automatically via a supersession event —
+   one current version, full history preserved. Do NOT set `component` for session wraps,
+   logs, or one-off notes; leave those append-only.
+5. **Backdating.** If the note records something that became true BEFORE now (you're
+   documenting a change after the fact), pass `valid_from` as an ISO date, e.g.
+   `2026-07-15`. Omit it for anything current — it defaults to now.
+6. Check the response `details` for a taxonomy alert (e.g. "honored domain 'K8s'
    differs from inferred 'Network' — confirm it is not a typo"). If one appears,
    surface it and confirm the classification with me before moving on.
-4. Confirm in one sentence.
+7. Confirm in one sentence.
 
 ## Saving a URL
 When asked to save, remember, or ingest a webpage or link:

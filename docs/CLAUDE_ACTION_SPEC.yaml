@@ -276,6 +276,22 @@ paths:
                     Python, K8s, CKA, Network, Security, Architecture, AI, Ops, Lab, Production, OpenBrain, Homelab,
                     SpectreNet, Personal, Family, Annie, Science, Biology, Geometry, Math, Study, Health, Career,
                     Interview. Use existing tags where possible; novel tags are queued for human approval, not auto-applied.
+                system:
+                  type: string
+                  description: Namespace this note belongs to — the ADR-018 supersession pivot. REQUIRED whenever component is set. Choose the closest existing value; do not invent new systems.
+                  enum:
+                    - SpectreNet
+                    - PMX-01
+                    - OpenBrain
+                    - FlightSim
+                    - MikeMcMahon-Dev
+                    - Annie
+                component:
+                  type: string
+                  description: Living-doc identity (ADR-008). Set ONLY for a canonical current-state document that should REPLACE its prior version on re-ingest (e.g. dns-current-state) — never for append-only session notes. Requires system. Re-ingesting the same (system, component) retires the old version via a supersession event.
+                valid_from:
+                  type: string
+                  description: ISO-8601 fact-onset (valid-time), e.g. 2026-07-15. Set only when the fact became true BEFORE now (backdating a change you are recording after the fact); otherwise omit — it defaults to ingest time. ADR-018 bitemporality.
       responses:
         "200":
           description: Ingest result.
