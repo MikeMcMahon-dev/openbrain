@@ -377,9 +377,21 @@ validation pass must check, not just its numbers.
   not the `component:*` tag (`api/knowledge_ingest.py`) — the planned P2 step, executed 2026-08-01.
   Proven behaviour-equivalent on live data first (0 rows where the tag value and the column
   disagree among current+system rows). P3 retires the whole mechanism when the projection takes over.
-- **P3 Transition records.** `supersession_events`; backfill the 4 `supersedes_id` chains as
-  `reason_code='migration'`; switch the write path; projection writes `knowledge.status` only;
-  guard + reconciliation.
+- **P3 Transition records — BUILT + TRIALED (migration staged, 2026-08-01).** Migration 008
+  (`supabase/migrations/008_supersession_events.sql`): `supersession_events` append-only/immutable
+  table (TEXT+CHECK vocab, not `CREATE TYPE` — the only form that trials under §10e); backfill of
+  the **5** live `supersedes_id` chains as `reason_code='migration'` (recon confirmed 5, not 4 — 0
+  orphans); projection trigger = sole writer of the `superseded` transition; the guard is the
+  `superseding_id → knowledge.id` FK made **DEFERRABLE INITIALLY DEFERRED** (breaks the
+  event-first / one_current_per_component ordering knot). Write path switched to event-first in
+  BOTH `api/knowledge_ingest.py` (auto_supersede) and `api/ob2_state.py` (confirm) — no direct
+  `status='superseded'` UPDATE remains. Reconciliation core (`api/supersession_reconcile.py` +
+  `scripts/reconcile_supersession.py`) checks both drift directions, exempts the 67 birth-state
+  `historical` rows. All trialed in `BEGIN..ROLLBACK` (table/backfill 10/10, swap-flow 9/9,
+  confirm 5/5, reconcile 5/5). **Remaining:** apply migration via Dashboard (expand/contract:
+  migration FIRST, then deploy code); nightly cron wiring + surfacing; CI test on an ephemeral
+  schema. Precondition cleared: `environment='Archive'` (9 rows) is orthogonal (all `current`,
+  never overlaps historical/superseded).
 - **P4 Contradiction detection.** Candidate surfacing. The human gate moves here, off the write
   path. Ranked fourth on **dependency**, not value: resolving a detected contradiction means
   *recording a supersession*, so without P3 you would resolve it with the in-place UPDATE this

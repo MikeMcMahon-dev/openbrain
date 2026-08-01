@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import uuid
 from typing import Any
 
 from api._openbrain_api import (
@@ -306,13 +307,18 @@ def write_knowledge(
                 None,
             )
 
-            # ── Living-doc auto-supersession (ADR-008) ────────────────────────
+            # ── Living-doc auto-supersession as an append-only event (ADR-018 P3) ─
             # If this is a `current` write for a keyed living doc (component_key + system) and
-            # the caller did not pin a supersedes_id, retire the prior current row(s) for that
-            # exact (system, component_key) in the SAME transaction and link this row to the
-            # most-recent one. Same atomicity as the INSERT below, so a failure rolls back both.
-            # Keys on the component_key COLUMN, not the freeform tag (ADR-018a item 4 / P2);
-            # proven behaviour-equivalent on live data. No component_key => append-only => skipped.
+            # the caller did not pin a supersedes_id, retire the prior current row for that exact
+            # (system, component_key). Retirement is now recorded as a supersession_events row —
+            # its projection trigger performs the status='superseded' write (the SOLE writer of
+            # that transition). The successor's id is generated up-front so the event can be
+            # written BEFORE the successor row exists (the superseding_id FK is DEFERRABLE
+            # INITIALLY DEFERRED); the projection retires the prior row before the successor is
+            # inserted, so one_current_per_component never sees two current rows. Same atomicity
+            # as the INSERT below — a failure rolls back both. Keys on the component_key COLUMN
+            # (ADR-018a item 4). No component_key / no prior => append-only => no event.
+            new_id = str(uuid.uuid4())
             if (auto_supersede and status == "current" and system
                     and not supersedes_id and component_key is not None):
                 prior = conn.execute(
@@ -327,30 +333,32 @@ def write_knowledge(
                     supersedes_id = str(prior[0]["id"])
                     conn.execute(
                         """
-                        UPDATE public.knowledge
-                        SET status = 'superseded', valid_until = now()
-                        WHERE system = %s AND status = 'current' AND component_key = %s
+                        INSERT INTO public.supersession_events
+                            (superseded_id, superseding_id, occurred_at,
+                             reason_code, actor, method)
+                        VALUES (%s, %s, now(), 'component_collision', %s, 'agent')
                         """,
-                        [system, component_key],
+                        [supersedes_id, new_id, owner],
                     )
 
             embedding_val = _vector_param(embedding) if embedding else None
             row = conn.execute(
                 """
                 INSERT INTO public.knowledge
-                    (content, embedding, domain, environment, system, tags,
+                    (id, content, embedding, domain, environment, system, tags,
                      status, supersedes_id, ingest_id, source, created_by, component_key)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
-                [content, embedding_val, domain, environment, system, tag_list,
+                [new_id, content, embedding_val, domain, environment, system, tag_list,
                  status, supersedes_id, ingest_id, source, owner, component_key],
             ).fetchone()
             new_id = str(row["id"]) if row else None
     except Exception as exc:
         msg = str(exc)
         _low = msg.lower()
-        if "duplicate current record" in _low or "cannot create duplicate" in _low:
+        if ("duplicate current record" in _low or "cannot create duplicate" in _low
+                or "one_current_per_component" in _low):
             return {
                 "status": "conflict",
                 "code": 409,

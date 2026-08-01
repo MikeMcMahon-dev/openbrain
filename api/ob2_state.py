@@ -252,9 +252,18 @@ def handle_confirm_supersession(request: Any) -> dict[str, Any]:
                 })
 
             now = datetime.now(timezone.utc)
+            # Retire the target via an append-only event (ADR-018 P3); its projection trigger
+            # performs the status='superseded' write — the sole writer of that transition. This
+            # must precede promoting the draft to 'current' so one_current_per_component never
+            # sees two current rows for the same component. The successor (proposal) already
+            # exists, so the deferred superseding_id FK is satisfied immediately.
             conn.execute(
-                "UPDATE public.knowledge SET status = 'superseded', valid_until = %s WHERE id = %s",
-                [now, superseded_id],
+                """
+                INSERT INTO public.supersession_events
+                    (superseded_id, superseding_id, occurred_at, reason_code, actor, method)
+                VALUES (%s, %s, %s, 'manual', %s, 'human')
+                """,
+                [superseded_id, proposal_id, now, _resolved_owner or None],
             )
             conn.execute(
                 "UPDATE public.knowledge SET status = 'current', valid_from = %s WHERE id = %s",
