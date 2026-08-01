@@ -259,6 +259,19 @@ they were buried.
 Correctness cannot be guaranteed. Recoverability can, and it is the control a non-specialist
 reviewer can actually verify.
 
+**10d. Operational validation before any schema change — evidence, not memory.**
+
+"Validate current state" is not done after checking row data and wording. Before authoring OR
+applying an `ALTER`/`DROP`, run `scripts/preflight_migration.py <table>` and answer the PM's
+operational rubric from its output: column **nullability/defaults/CHECK** state, **real**
+index/constraint names (never guessed), the **apply order** (expand/contract — a reader/writer
+stops before a column is dropped; a NOT-NULL column gets `DROP NOT NULL` first), **every**
+repo reader AND writer of the table (not just the file in the diff), and **derived-table
+parity**. This control exists because the earlier data/phrasing pass missed a NOT-NULL that
+forced an expand/contract split, a fabricated index name, and an un-migrated second writer — the
+last one a data-loss-class miss caught only by 10b. A schema change with no preflight output on
+the record is not a validated change.
+
 ---
 
 ## Current state — what is live, what is frozen

@@ -43,6 +43,8 @@ DROP INDEX IF EXISTS public.knowledge_chunked_status_domain_idx;
 DROP INDEX IF EXISTS public.knowledge_chunked_system_idx;
 DROP INDEX IF EXISTS public.knowledge_chunked_tags_idx;
 
+-- Dropping `status` auto-drops the CHECK `knowledge_chunked_status_check` that references it
+-- (verified via preflight_migration.py — it depends only on status, so no CASCADE needed).
 ALTER TABLE public.knowledge_chunked DROP COLUMN IF EXISTS status;
 ALTER TABLE public.knowledge_chunked DROP COLUMN IF EXISTS system;
 ALTER TABLE public.knowledge_chunked DROP COLUMN IF EXISTS component_key;
