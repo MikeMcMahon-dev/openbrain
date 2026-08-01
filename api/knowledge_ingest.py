@@ -296,46 +296,44 @@ def write_knowledge(
             if shape_tag not in tag_list:
                 tag_list.append(shape_tag)
 
-            # ── Living-doc auto-supersession (ADR-008) ────────────────────────
-            # If this is a `current` write for a keyed living doc (has a
-            # component:* identity tag + a system) and the caller did not pin a
-            # supersedes_id, retire the prior current row(s) for that exact
-            # (system, component) in the SAME transaction and link this row to
-            # the most-recent one. Same atomicity as the INSERT below, so a
-            # failure rolls back both. No component tag => append-only => skipped.
-            if auto_supersede and status == "current" and system and not supersedes_id:
-                component_tag = next(
-                    (t for t in tag_list if t.startswith("component:")), None
-                )
-                if component_tag is not None:
-                    prior = conn.execute(
-                        """
-                        SELECT id FROM public.knowledge
-                        WHERE system = %s AND status = 'current' AND tags @> ARRAY[%s]
-                        ORDER BY valid_from DESC
-                        """,
-                        [system, component_tag],
-                    ).fetchall()
-                    if prior:
-                        supersedes_id = str(prior[0]["id"])
-                        conn.execute(
-                            """
-                            UPDATE public.knowledge
-                            SET status = 'superseded', valid_until = now()
-                            WHERE system = %s AND status = 'current' AND tags @> ARRAY[%s]
-                            """,
-                            [system, component_tag],
-                        )
-
-            # component_key writer (ADR-018a item 4): promote the component:* identity from
-            # the tags array to the real column, so the living-doc identity has a caller on
-            # every write — not just the 006 backfill. The API already rejects a component
-            # write with no system (_openbrain_api.py), so the component_requires_system CHECK
-            # is satisfied. The tag stays for now; auto_supersede still keys on it.
+            # component_key is the living-doc identity of record (ADR-018a item 4): promote
+            # the component:* identity from the tags array to the real column, so the identity
+            # has a caller on every write (not just the 006 backfill). The API rejects a
+            # component write with no system, satisfying the component_requires_system CHECK.
+            # Derived once here, used by both auto_supersede and the INSERT below.
             component_key = next(
                 (t[len("component:"):] for t in tag_list if t.startswith("component:")),
                 None,
             )
+
+            # ── Living-doc auto-supersession (ADR-008) ────────────────────────
+            # If this is a `current` write for a keyed living doc (component_key + system) and
+            # the caller did not pin a supersedes_id, retire the prior current row(s) for that
+            # exact (system, component_key) in the SAME transaction and link this row to the
+            # most-recent one. Same atomicity as the INSERT below, so a failure rolls back both.
+            # Keys on the component_key COLUMN, not the freeform tag (ADR-018a item 4 / P2);
+            # proven behaviour-equivalent on live data. No component_key => append-only => skipped.
+            if (auto_supersede and status == "current" and system
+                    and not supersedes_id and component_key is not None):
+                prior = conn.execute(
+                    """
+                    SELECT id FROM public.knowledge
+                    WHERE system = %s AND status = 'current' AND component_key = %s
+                    ORDER BY valid_from DESC
+                    """,
+                    [system, component_key],
+                ).fetchall()
+                if prior:
+                    supersedes_id = str(prior[0]["id"])
+                    conn.execute(
+                        """
+                        UPDATE public.knowledge
+                        SET status = 'superseded', valid_until = now()
+                        WHERE system = %s AND status = 'current' AND component_key = %s
+                        """,
+                        [system, component_key],
+                    )
+
             embedding_val = _vector_param(embedding) if embedding else None
             row = conn.execute(
                 """

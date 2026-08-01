@@ -373,10 +373,10 @@ validation pass must check, not just its numbers.
      irrelevant, they should not exist. ⏳ the one remaining P2 tail.
   - **Precondition — DECIDED:** `system` is a general **namespace** (Mike, 2026-08-01), not
     infra-only; the 2 rows re-keyed to `FlightSim` / `MikeMcMahon-Dev`.
-- **P2→P3 window.** `auto_supersede` still keys supersession on the `component:*` tag. It stays
-  correct and robust while the tag remains on `knowledge` (only chunks lose metadata in 007), so
-  the switch to the column is a **low-risk P2 tail item**, deferred until the `component_key`
-  writer has been live + verified; P3 retires the whole mechanism when the projection takes over.
+- **P2→P3 window.** ✅ `auto_supersede` now keys supersession on the `component_key` **column**,
+  not the `component:*` tag (`api/knowledge_ingest.py`) — the planned P2 step, executed 2026-08-01.
+  Proven behaviour-equivalent on live data first (0 rows where the tag value and the column
+  disagree among current+system rows). P3 retires the whole mechanism when the projection takes over.
 - **P3 Transition records.** `supersession_events`; backfill the 4 `supersedes_id` chains as
   `reason_code='migration'`; switch the write path; projection writes `knowledge.status` only;
   guard + reconciliation.
