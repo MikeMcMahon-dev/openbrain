@@ -211,6 +211,7 @@ def write_knowledge(
     source: str = "cutover:ingest",
     source_type: str | None = None,
     supersedes_id: str | None = None,
+    valid_from: str | None = None,
     auto_supersede: bool = True,
 ) -> dict[str, Any]:
     """Embed ``content`` and INSERT one row into ``public.knowledge``.
@@ -271,6 +272,11 @@ def write_knowledge(
     shape_tag = f"shape:{resolved_shape}"
 
     supersedes_id = (supersedes_id.strip() if isinstance(supersedes_id, str) else None) or None
+    # valid_from = fact-onset (valid-time), distinct from created_at (ingest/system-time). Explicit
+    # per ADR-018 P5 — set it when the fact predates ingest; NULL => the DB default now(). When a
+    # backdated onset is given it also becomes the retired predecessor's fact-offset below, so the
+    # two lifespans stay contiguous (old truth ended exactly when the new truth began).
+    valid_from = (valid_from.strip() if isinstance(valid_from, str) else None) or None
 
     ingest_id = compute_knowledge_ingest_id(content, owner, domain, environment, system)
 
@@ -331,14 +337,17 @@ def write_knowledge(
                 ).fetchall()
                 if prior:
                     supersedes_id = str(prior[0]["id"])
+                    # fact_valid_until = this write's valid_from: the prior truth ended exactly
+                    # when the new truth began. NULL (no backdated onset) => projection falls back
+                    # to occurred_at (P3 behaviour).
                     conn.execute(
                         """
                         INSERT INTO public.supersession_events
-                            (superseded_id, superseding_id, occurred_at,
+                            (superseded_id, superseding_id, occurred_at, fact_valid_until,
                              reason_code, actor, method)
-                        VALUES (%s, %s, now(), 'component_collision', %s, 'agent')
+                        VALUES (%s, %s, now(), %s, 'component_collision', %s, 'agent')
                         """,
-                        [supersedes_id, new_id, owner],
+                        [supersedes_id, new_id, valid_from, owner],
                     )
 
             embedding_val = _vector_param(embedding) if embedding else None
@@ -346,12 +355,14 @@ def write_knowledge(
                 """
                 INSERT INTO public.knowledge
                     (id, content, embedding, domain, environment, system, tags,
-                     status, supersedes_id, ingest_id, source, created_by, component_key)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     status, supersedes_id, ingest_id, source, created_by, component_key,
+                     valid_from)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        COALESCE(%s, now()))
                 RETURNING id
                 """,
                 [new_id, content, embedding_val, domain, environment, system, tag_list,
-                 status, supersedes_id, ingest_id, source, owner, component_key],
+                 status, supersedes_id, ingest_id, source, owner, component_key, valid_from],
             ).fetchone()
             new_id = str(row["id"]) if row else None
     except Exception as exc:
