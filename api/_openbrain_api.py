@@ -1351,6 +1351,7 @@ def _write_text_ingest_knowledge(
     warnings: list[str] | None = None,
     producer_tags: list[str] | None = None,
     auto_supersede: bool = True,
+    system_override: str | None = None,
 ) -> str | None:
     """Phase-2 write path into public.knowledge. Derives the OB2 taxonomy from the
     legacy (subject, topic) signals via api.taxonomy_map, then delegates field
@@ -1425,12 +1426,41 @@ def _write_text_ingest_knowledge(
         if t and t not in merged_tags:
             merged_tags.append(t)
 
+    # System namespace (ADR-018 P2 / ADR-019): honor an explicit `system_override` for
+    # honor-owners — the inference is unreliable, which is what left the (system, component)
+    # identity unsatisfiable on purpose — else fall back to the inferred value. Validated
+    # against the namespace vocabulary. REQUIRED whenever a component:* identity is present:
+    # that pair is the supersession pivot, and a null system is the defect P2 closes.
+    from api.canonical_systems import is_canonical_system
+
+    req_system = (system_override or "").strip() or None
+    system = tax.get("system")
+    if owner in _honor_owners() and req_system:
+        warn = warnings if warnings is not None else []
+        if not is_canonical_system(req_system):
+            warn.append(
+                f"ingest: system '{req_system}' is not a canonical namespace "
+                f"(api/canonical_systems.py) — writing it anyway (subject='{subject}')."
+            )
+        elif system and req_system != system:
+            warn.append(
+                f"ingest: honored system '{req_system}' differs from inferred '{system}' "
+                f"(subject='{subject}') — confirm it is not a typo."
+            )
+        system = req_system
+    if any(str(t).startswith("component:") for t in merged_tags) and not system:
+        return (
+            "knowledge write rejected: a component:* identity requires an explicit `system` "
+            "(the supersession pivot). Pass system=<namespace> at ingest — see "
+            "api/canonical_systems.py for the vocabulary."
+        )
+
     result = write_knowledge(
         content,
         owner,
         domain=domain,
         environment=environment,
-        system=tax.get("system"),
+        system=system,
         tags=merged_tags,
         shape=tax.get("shape"),
         source="live:text",
@@ -1456,6 +1486,7 @@ def _write_text_ingest(
     warnings: list[str] | None = None,
     producer_tags: list[str] | None = None,
     auto_supersede: bool = True,
+    system_override: str | None = None,
 ) -> str | None:
     """Embed and upsert a single text chunk into public.thoughts.
 
@@ -1475,6 +1506,7 @@ def _write_text_ingest(
             content, owner, subject, topic,
             domain_override, environment_override, warnings,
             producer_tags=producer_tags, auto_supersede=auto_supersede,
+            system_override=system_override,
         )
     try:
         embedding = embedding_request(content)
@@ -1917,6 +1949,7 @@ def ingest_payload(
                 warnings=tax_warnings,
                 producer_tags=_p_tags,
                 auto_supersede=payload.get("auto_supersede", True) is not False,
+                system_override=payload.get("system"),
             )
             if write_error:
                 status = "failed"

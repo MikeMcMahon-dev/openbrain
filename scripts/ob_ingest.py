@@ -28,8 +28,9 @@ LIVING DOCS vs EVENT NOTES (ADR-008):
     python scripts/ob_ingest.py --file dns-state.md --subject spectrenet-dns \
         --domain Network --environment Production --component dns-current-state
 
-  --component X  adds the tag `component:X` (ADR-008 identity key). The note's `system` is
-  still derived from --subject/--topic, and the (system, component:X) pair is the identity.
+  --component X  adds the tag `component:X` (ADR-008 identity key). The (system, component:X)
+  pair is the supersession identity, so `--system` is REQUIRED with --component — a null
+  system is what made the identity unsatisfiable on purpose (ADR-018 P2 / ADR-019).
   --no-supersede disables the auto-retire (append even if a current row exists — rarely wanted).
 """
 import argparse
@@ -67,6 +68,8 @@ def main() -> None:
     p.add_argument("--topic", default="session-wrap")
     p.add_argument("--domain", help="Network|K8s|Security|Study|OpenBrain|Personal")
     p.add_argument("--environment", help="Production|Lab|Study|Archive")
+    p.add_argument("--system", help="namespace (SpectreNet|PMX-01|OpenBrain|Annie|...); "
+                                    "REQUIRED with --component (the supersession pivot)")
     p.add_argument("--tags", help="comma-separated tags")
     p.add_argument("--component",
                    help="ADR-008 living-doc identity: adds tag component:<val> so a re-ingest "
@@ -97,6 +100,8 @@ def main() -> None:
         payload["domain"] = args.domain
     if args.environment:
         payload["environment"] = args.environment
+    if args.system:
+        payload["system"] = args.system
     tags = [t.strip() for t in (args.tags or "").split(",") if t.strip()]
     if args.component:
         comp = args.component.strip()
