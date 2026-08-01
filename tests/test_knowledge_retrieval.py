@@ -224,3 +224,56 @@ def test_length_penalty_still_applies_on_base_knowledge():
     assert res[0]["signals"]["word_count"] == 27
     # whole-doc reads keep the ADR-002 noise penalty
     assert abs(res[0]["signals"]["length_penalty_applied"] - 27 / 30) < 1e-9
+
+
+# --- Recency net (ADR-018 P1): old current docs sink in allowlisted domains -----
+from datetime import datetime, timedelta, timezone  # noqa: E402
+
+
+def _dated(cid, days_old, *, domain="Network", tags=None, component=False):
+    t = list(tags or [])
+    if component:
+        t.append("component:x")
+    return {"id": cid, "content": "network configuration note, enough words to matter",
+            "domain": domain, "environment": "Production", "system": None, "tags": t,
+            "status": "current",
+            "created_at": datetime.now(timezone.utc) - timedelta(days=days_old)}
+
+
+def _rank(rows):
+    from api import knowledge_retrieval as kr
+    cands = [dict(r) for r in rows]
+    with patch.object(kr, "embedding_request", return_value=[0.1] * 8), \
+         patch.object(kr, "search_knowledge_vector_candidates", return_value=cands), \
+         patch.object(kr, "search_knowledge_keyword_candidates", return_value=cands):
+        res = kr.retrieve_knowledge("q", 5, owner=None, filters={"status": None}, table="knowledge")
+    return [r["id"] for r in res]
+
+
+def test_recency_off_by_default_preserves_order(monkeypatch):
+    monkeypatch.setattr("api.knowledge_retrieval._RECENCY_HALFLIFE_DAYS", 0.0)
+    # old ranks first on both retrievers; with recency OFF it stays first
+    assert _rank([_dated("old", 300), _dated("new", 3)])[0] == "old"
+
+
+def test_recency_sinks_old_below_new_when_enabled(monkeypatch):
+    monkeypatch.setattr("api.knowledge_retrieval._RECENCY_HALFLIFE_DAYS", 90.0)
+    order = _rank([_dated("old", 300), _dated("new", 3)])
+    assert order.index("new") < order.index("old")   # 300-day note sinks below the 3-day one
+
+
+def test_recency_exempts_durable(monkeypatch):
+    monkeypatch.setattr("api.knowledge_retrieval._RECENCY_HALFLIFE_DAYS", 90.0)
+    # a durable-tagged old doc must NOT sink — stays above the fresher note
+    assert _rank([_dated("old", 300, tags=["durable"]), _dated("new", 3)])[0] == "old"
+
+
+def test_recency_exempts_component_keyed(monkeypatch):
+    monkeypatch.setattr("api.knowledge_retrieval._RECENCY_HALFLIFE_DAYS", 90.0)
+    assert _rank([_dated("old", 300, component=True), _dated("new", 3)])[0] == "old"
+
+
+def test_recency_exempts_non_allowlisted_domain(monkeypatch):
+    monkeypatch.setattr("api.knowledge_retrieval._RECENCY_HALFLIFE_DAYS", 90.0)
+    # Study is outside the allowlist (protects Annie's tutor) — old Study doc doesn't sink
+    assert _rank([_dated("old", 300, domain="Study"), _dated("new", 3, domain="Study")])[0] == "old"
