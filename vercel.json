@@ -4,6 +4,10 @@
     {
       "path": "/api/cron/session_report",
       "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/cron/supersession_reconcile",
+      "schedule": "0 4 * * *"
     }
   ],
   "builds": [

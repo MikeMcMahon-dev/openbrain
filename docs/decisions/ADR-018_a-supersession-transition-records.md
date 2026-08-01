@@ -387,11 +387,15 @@ validation pass must check, not just its numbers.
   BOTH `api/knowledge_ingest.py` (auto_supersede) and `api/ob2_state.py` (confirm) — no direct
   `status='superseded'` UPDATE remains. Reconciliation core (`api/supersession_reconcile.py` +
   `scripts/reconcile_supersession.py`) checks both drift directions, exempts the 67 birth-state
-  `historical` rows. All trialed in `BEGIN..ROLLBACK` (table/backfill 10/10, swap-flow 9/9,
-  confirm 5/5, reconcile 5/5). **Remaining:** apply migration via Dashboard (expand/contract:
-  migration FIRST, then deploy code); nightly cron wiring + surfacing; CI test on an ephemeral
-  schema. Precondition cleared: `environment='Archive'` (9 rows) is orthogonal (all `current`,
-  never overlaps historical/superseded).
+  `historical` rows. Nightly reconciliation wired as a Vercel cron
+  (`api/cron_supersession_reconcile.py`, `0 4 * * *`) that appends to migration 008 §D's
+  `supersession_reconcile_log` — `drift_count>0` rows are the alert surface (no paging, no
+  Vercel→internal-Pushgateway boundary; a Grafana Postgres datasource or email digest reads it
+  later). All trialed in `BEGIN..ROLLBACK` (table/backfill 10/10, swap-flow 9/9, confirm 5/5,
+  reconcile 5/5, log-write 2/2). **Remaining:** apply migration via Dashboard (expand/contract:
+  migration FIRST, then deploy code); CI test on an ephemeral schema (F2/F7/F10 harness).
+  Precondition cleared: `environment='Archive'` (9 rows) is orthogonal (all `current`, never
+  overlaps historical/superseded).
 - **P4 Contradiction detection.** Candidate surfacing. The human gate moves here, off the write
   path. Ranked fourth on **dependency**, not value: resolving a detected contradiction means
   *recording a supersession*, so without P3 you would resolve it with the in-place UPDATE this

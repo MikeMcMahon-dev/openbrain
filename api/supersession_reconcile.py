@@ -14,6 +14,7 @@ any 'draft'/'current' carry no event by design. Only 'superseded' requires an ev
 """
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from api._openbrain_api import get_db_conn
@@ -72,3 +73,18 @@ def reconcile_supersession(conn: Any = None) -> dict[str, Any]:
         "events": events,
         "superseded": superseded,
     }
+
+
+def write_reconcile_log(conn: Any, report: dict[str, Any]) -> None:
+    """Append one row to supersession_reconcile_log recording a reconciliation run. The
+    drift_count>0 rows are the alert surface — a Grafana Postgres datasource or email digest
+    reads this later. Caller owns the connection/commit."""
+    conn.execute(
+        """
+        INSERT INTO public.supersession_reconcile_log
+            (drift_count, events, superseded, details)
+        VALUES (%s, %s, %s, %s)
+        """,
+        [report["drift_count"], report["events"], report["superseded"],
+         json.dumps(report["drift"])],
+    )

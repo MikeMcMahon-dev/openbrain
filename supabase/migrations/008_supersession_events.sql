@@ -128,3 +128,28 @@ DROP TRIGGER IF EXISTS supersession_events_project ON public.supersession_events
 CREATE TRIGGER supersession_events_project
   AFTER INSERT ON public.supersession_events
   FOR EACH ROW EXECUTE FUNCTION public.project_supersession();
+
+-- ══ D. Reconciliation log — the drift surface (ADR-018 P3 §5, nightly job) ═════════════════
+-- One row per nightly run. drift_count>0 rows ARE the alert (queryable; a Grafana Postgres
+-- datasource or an email digest can read this later). No paging, no network boundary — the
+-- job runs on Vercel and writes here, in Supabase. Drift is a bug: recovery is replay from
+-- supersession_events, not restore. This table is a log, not truth.
+CREATE TABLE IF NOT EXISTS public.supersession_reconcile_log (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  run_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  drift_count  INTEGER NOT NULL,
+  events       INTEGER NOT NULL,
+  superseded   INTEGER NOT NULL,
+  details      JSONB   NOT NULL DEFAULT '[]'::jsonb
+);
+
+CREATE INDEX IF NOT EXISTS supersession_reconcile_log_run_at_idx
+  ON public.supersession_reconcile_log (run_at DESC);
+-- The alert surface: recent runs that found drift.
+CREATE INDEX IF NOT EXISTS supersession_reconcile_log_drift_idx
+  ON public.supersession_reconcile_log (run_at DESC) WHERE drift_count > 0;
+
+ALTER TABLE public.supersession_reconcile_log ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS supersession_reconcile_log_service_all ON public.supersession_reconcile_log;
+CREATE POLICY supersession_reconcile_log_service_all ON public.supersession_reconcile_log
+  FOR ALL TO service_role USING (true) WITH CHECK (true);
