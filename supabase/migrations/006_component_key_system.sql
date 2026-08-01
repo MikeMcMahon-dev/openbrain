@@ -47,9 +47,10 @@ CREATE TABLE IF NOT EXISTS public.system_vocabulary (
 );
 
 INSERT INTO public.system_vocabulary (system) VALUES
-  ('SpectreNet'), ('PMX-01'), ('OpenBrain'), ('Annie')
-  -- ADD the blessed values for the two null-system component rows before step 3, e.g.
-  -- ('FlightSim'), ('MikeMcMahon-Dev')   -- confirm/rename first (Mike's call)
+  ('SpectreNet'), ('PMX-01'), ('OpenBrain'), ('Annie'),
+  -- Blessed 2026-08-01 (Mike's taxonomy call) for the two null-system component rows,
+  -- re-keyed in step 3 below: flightsim-hardware → FlightSim, mikemcmahon-dev-design → MikeMcMahon-Dev.
+  ('FlightSim'), ('MikeMcMahon-Dev')
 ON CONFLICT (system) DO NOTHING;
 
 -- Enforce: a non-null `system` must be a registered namespace. NULL passes (nothing keyed).
@@ -93,6 +94,15 @@ ALTER TABLE public.knowledge
 CREATE UNIQUE INDEX IF NOT EXISTS one_current_per_component
   ON public.knowledge (system, component_key) NULLS NOT DISTINCT
   WHERE status = 'current' AND component_key IS NOT NULL;
+
+-- ══ step 3. Re-key the two null-system component rows (DATA — run AFTER A–D) ══════════════
+-- Blessed values 2026-08-01. The component_requires_system CHECK (added NOT VALID) and the
+-- system_vocabulary trigger validate each UPDATE as it is made. Guarded on `system IS NULL`
+-- so a re-run is a no-op. Expect ROW COUNT 1 each — STOP if either reports 0 or >1.
+--   UPDATE public.knowledge SET system = 'FlightSim'
+--     WHERE component_key = 'flightsim-hardware'      AND system IS NULL;
+--   UPDATE public.knowledge SET system = 'MikeMcMahon-Dev'
+--     WHERE component_key = 'mikemcmahon-dev-design'  AND system IS NULL;
 
 -- ══ E. Run AFTER step 3 (the two rows re-keyed): promote the CHECK to full enforcement ════
 --   ALTER TABLE public.knowledge VALIDATE CONSTRAINT component_requires_system;

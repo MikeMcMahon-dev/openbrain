@@ -22,11 +22,10 @@ CANONICAL_SYSTEMS: frozenset[str] = frozenset({
     "PMX-01",          # the Proxmox virtualization host
     # ── projects ──
     "OpenBrain",       # the RAG knowledge system
+    "FlightSim",       # the flight-sim rig (hardware/mounting) — component:flightsim-hardware
+    "MikeMcMahon-Dev", # the mikemcmahon.dev portfolio site — component:mikemcmahon-dev-design
     # ── learning tracks ──
     "Annie",           # Annie's Ubuntu/Linux study curriculum
-    # NOTE: the two currently null-`system` component rows (flightsim-hardware,
-    # mikemcmahon-dev-design) need a namespace before the P2 re-key. Proposed values are
-    # in the P2 handoff for Mike's taxonomy call; add them here once blessed, then re-key.
 })
 # fmt: on
 
