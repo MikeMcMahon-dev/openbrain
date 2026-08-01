@@ -77,7 +77,12 @@ test-supersession-regression:
 	@# get buried with it. Run on every change (see ADR-018 validation).
 	@cd tests && python -m pytest test_supersession_harness.py -q -rx -k "C3 or C4"
 
-check: lint smoke
+capability-audit:
+	@# Deployment-completeness gate (ADR-018): fail on any capability that landed with
+	@# no caller and isn't registered in scripts/capability_audit.allow.json. exit 1 = block.
+	@python scripts/capability_audit.py
+
+check: lint smoke capability-audit
 
 check-log:
 	@mkdir -p "$(LOG_DIR)"
