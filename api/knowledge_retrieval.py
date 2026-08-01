@@ -18,6 +18,7 @@ from __future__ import annotations
 import os
 import uuid
 from collections.abc import Mapping
+from datetime import datetime, timezone
 from typing import Any
 
 from api._openbrain_api import (
@@ -78,6 +79,33 @@ _IVFFLAT_PROBES = int(_env_float("OPENBRAIN_IVFFLAT_PROBES", 10))
 # borderline high-similarity doc isn't dropped before fusion even sees it.
 _VECTOR_POOL_FLOOR = int(_env_float("OPENBRAIN_VECTOR_POOL_FLOOR", 50))
 
+# Recency net (ADR-018 P1). Down-weights OLD current docs so a stale event note sinks
+# below fresher truth on the same topic — the recency signal RRF discards. Gated to the
+# three domains where the stale-ranking bug was actually measured (allowlist, not
+# denylist), and EXEMPTS durable-tagged living docs + any component-keyed row (those must
+# surface, not sink — §4). Half-life in days; 0 (default) = OFF, so this ships
+# behaviour-neutral. The floor keeps an old doc from vanishing — it sinks, it isn't deleted.
+_RECENCY_HALFLIFE_DAYS = _env_float("OPENBRAIN_RECENCY_HALFLIFE_DAYS", 0.0)
+_RECENCY_FLOOR = _env_float("OPENBRAIN_RECENCY_FLOOR", 0.25)
+_RECENCY_DOMAINS = {"Network", "K8s", "Security"}
+
+
+def _recency_factor(created_at: Any, now: datetime) -> float:
+    """Age decay 0.5**(age_days / halflife), floored at _RECENCY_FLOOR. Returns 1.0 when
+    recency is OFF or the row carries no usable created_at (never penalise on missing data)."""
+    if _RECENCY_HALFLIFE_DAYS <= 0 or created_at is None:
+        return 1.0
+    ca = created_at
+    if not isinstance(ca, datetime):
+        try:
+            ca = datetime.fromisoformat(str(ca))
+        except (ValueError, TypeError):
+            return 1.0
+    if ca.tzinfo is None:
+        ca = ca.replace(tzinfo=timezone.utc)
+    age_days = max(0.0, (now - ca).total_seconds() / 86400.0)
+    return max(_RECENCY_FLOOR, 0.5 ** (age_days / _RECENCY_HALFLIFE_DAYS))
+
 
 def _has_component_tag(tags: Any) -> bool:
     """True when any tag is a `component:*` key (the living-doc supersession key)."""
@@ -95,7 +123,7 @@ def _knowledge_table() -> str:
 
 
 def _select_cols(table: str) -> str:
-    cols = "id, content, domain, environment, system, tags, status"
+    cols = "id, content, domain, environment, system, tags, status, created_at"
     if table == _CHUNK_TABLE:
         cols += ", document_id, chunk_index, heading"
     return cols
@@ -382,6 +410,26 @@ def retrieve_knowledge(
         if boost != 1.0:
             rrf_scores[key] *= boost
         signals[key]["component_boost_applied"] = boost
+
+    # Recency net (ADR-018 P1): down-weight OLD current docs in the measured-failure
+    # domains so a stale note sinks below fresher truth. EXEMPT: durable-tagged living
+    # docs and any component-keyed row (must surface, §4), and every non-allowlist domain
+    # (Study/Personal/OpenBrain untouched — protects Annie's tutor). created_at is the
+    # doc's age (chunk created_at mirrors parent, verified). OFF unless the half-life env
+    # is set, so this is behaviour-neutral until deliberately enabled.
+    if _RECENCY_HALFLIFE_DAYS > 0:
+        now = datetime.now(timezone.utc)
+        for key, row in row_by_key.items():
+            tags = row.get("tags") or []
+            exempt = (
+                row.get("domain") not in _RECENCY_DOMAINS
+                or "durable" in tags
+                or _has_component_tag(tags)
+            )
+            factor = 1.0 if exempt else _recency_factor(row.get("created_at"), now)
+            if factor != 1.0:
+                rrf_scores[key] *= factor
+            signals[key]["recency_decay_applied"] = factor
 
     ranked_keys = sorted(rrf_scores, key=lambda k: rrf_scores[k], reverse=True)
 
