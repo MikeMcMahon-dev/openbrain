@@ -4,8 +4,6 @@ from datetime import datetime, timezone
 from typing import Any
 
 from api._openbrain_api import (
-    _vector_param,
-    embedding_request,
     get_db_conn,
     parse_request,
     require_auth_owner,
@@ -69,50 +67,44 @@ def handle_ingest_state(request: Any) -> dict[str, Any]:
     if status not in VALID_STATUSES:
         status = "current"
     supersedes_id = body.get("supersedes_id") or None
+    valid_from = (body.get("valid_from") or "").strip() or None
     source = (body.get("source") or "api/ingest_state").strip()
     owner = resolved_owner or (body.get("owner") or "").strip() or "mmcmahon"
+    auto_supersede = body.get("auto_supersede", True) is not False
 
-    embedding = None
-    try:
-        embedding = embedding_request(content)
-    except Exception:
-        pass
+    # Route through write_knowledge (ADR-018) so this endpoint gets the SAME guarantees as
+    # /api/ingest: component_key derived from a component:* tag (P2), event-first auto-supersession
+    # (P3 — sole writer of the superseded transition), an explicit valid_from (P5), and the
+    # one_current_per_component invariant. It previously did a bare INSERT that silently dropped
+    # all three (component_key=NULL, no event, valid_from forced to now()). write_knowledge owns
+    # the embedding + the atomic event/insert.
+    from api.knowledge_ingest import write_knowledge
+
+    result = write_knowledge(
+        content, owner, domain=domain, environment=environment, system=system,
+        tags=tags, status=status, source=source, supersedes_id=supersedes_id,
+        valid_from=valid_from, auto_supersede=auto_supersede,
+    )
+    if result.get("status") != "accepted":
+        return response_payload(result.get("code", 500), {
+            "error": result.get("error", "error"),
+            "message": result.get("message", "ingest failed"),
+            "details": result.get("details"),
+        })
 
     try:
         with get_db_conn() as conn:
-            embedding_val = _vector_param(embedding) if embedding else None
-            row = conn.execute(
-                """
-                INSERT INTO public.knowledge
-                    (content, embedding, domain, environment, system, tags,
-                     status, supersedes_id, source, created_by)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                RETURNING id
-                """,
-                [content, embedding_val, domain, environment, system, tags,
-                 status, supersedes_id, source, owner],
-            ).fetchone()
-            new_id = str(row["id"]) if row else None
             _mark_wiki_pages_stale(conn, domain, system)
-    except Exception as exc:
-        msg = str(exc)
-        if "duplicate Current record" in msg or "Cannot create duplicate" in msg:
-            return response_payload(409, {
-                "error": "conflict",
-                "message": (
-                    "A current record already exists for this system/tags combination. "
-                    "Use POST /api/propose_supersession to replace it."
-                ),
-                "details": msg,
-            })
-        return response_payload(500, {"error": "db_error", "message": msg})
+    except Exception:
+        pass  # wiki staleness is best-effort
 
     return response_payload(200, {
         "status": "accepted",
-        "id": new_id,
+        "id": result.get("id"),
         "owner": owner,
         "domain": domain,
         "environment": environment,
+        "superseded_id": result.get("superseded_id"),
     })
 
 
@@ -145,6 +137,7 @@ def handle_propose_supersession(request: Any) -> dict[str, Any]:
         tags = []
     source = (body.get("source") or "api/propose_supersession").strip()
     owner = resolved_owner or (body.get("owner") or "").strip() or "mmcmahon"
+    valid_from = (body.get("valid_from") or "").strip() or None
 
     try:
         with get_db_conn() as conn:
@@ -152,39 +145,39 @@ def handle_propose_supersession(request: Any) -> dict[str, Any]:
                 "SELECT id, status FROM public.knowledge WHERE id = %s",
                 [supersedes_id],
             ).fetchone()
-            if not target:
-                return response_payload(404, {
-                    "error": "not_found",
-                    "message": f"Record {supersedes_id} not found",
-                })
-            if target["status"] != "current":
-                return response_payload(409, {
-                    "error": "conflict",
-                    "message": (
-                        f"Target record has status='{target['status']}' — "
-                        "can only supersede 'current' records"
-                    ),
-                })
+        if not target:
+            return response_payload(404, {
+                "error": "not_found",
+                "message": f"Record {supersedes_id} not found",
+            })
+        if target["status"] != "current":
+            return response_payload(409, {
+                "error": "conflict",
+                "message": (
+                    f"Target record has status='{target['status']}' — "
+                    "can only supersede 'current' records"
+                ),
+            })
 
-            embedding = None
-            try:
-                embedding = embedding_request(content)
-            except Exception:
-                pass
+        # Create the draft via write_knowledge so it carries component_key (P2) + valid_from (P5)
+        # like any other write — a bare INSERT here dropped both, so a confirmed living doc landed
+        # component_key=NULL. status='draft' + auto_supersede=False keeps it inert until confirm
+        # promotes it and retires the target via an event (ADR-018 P3); supersedes_id records the
+        # intended predecessor.
+        from api.knowledge_ingest import write_knowledge
 
-            embedding_val = _vector_param(embedding) if embedding else None
-            row = conn.execute(
-                """
-                INSERT INTO public.knowledge
-                    (content, embedding, domain, environment, system, tags,
-                     status, supersedes_id, source, created_by)
-                VALUES (%s, %s, %s, %s, %s, %s, 'draft', %s, %s, %s)
-                RETURNING id
-                """,
-                [content, embedding_val, domain, environment, system, tags,
-                 supersedes_id, source, owner],
-            ).fetchone()
-            proposal_id = str(row["id"]) if row else None
+        result = write_knowledge(
+            content, owner, domain=domain, environment=environment, system=system,
+            tags=tags, status="draft", source=source, supersedes_id=supersedes_id,
+            valid_from=valid_from, auto_supersede=False,
+        )
+        if result.get("status") != "accepted":
+            return response_payload(result.get("code", 500), {
+                "error": result.get("error", "error"),
+                "message": result.get("message", "draft creation failed"),
+                "details": result.get("details"),
+            })
+        proposal_id = result.get("id")
     except Exception as exc:
         return response_payload(500, {"error": "db_error", "message": str(exc)})
 

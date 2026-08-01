@@ -77,6 +77,10 @@ def main() -> None:
     p.add_argument("--no-supersede", dest="supersede", action="store_false",
                    help="disable living-doc auto-supersede (append even if a current row exists)")
     p.set_defaults(supersede=True)
+    p.add_argument("--valid-from", dest="valid_from",
+                   help="ADR-018 P5 fact-onset (valid-time), ISO-8601 e.g. 2026-07-15 — set it "
+                        "when the fact predates ingest; default is now(). Also becomes the "
+                        "retired predecessor's fact-offset (contiguous lifespans).")
     p.add_argument("--endpoint", default="/api/ingest")
     p.add_argument("--base", default=DEFAULT_BASE)
     p.add_argument("--token", help="override; else $OPENBRAIN_TOOL_ACCESS_TOKEN or .env.local")
@@ -112,6 +116,8 @@ def main() -> None:
         payload["tags"] = tags
     if not args.supersede:
         payload["auto_supersede"] = False
+    if args.valid_from:
+        payload["valid_from"] = args.valid_from
 
     req = urllib.request.Request(
         args.base.rstrip("/") + args.endpoint,
