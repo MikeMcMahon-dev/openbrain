@@ -67,6 +67,16 @@ test:
 	@# if it starts at the root. tests/conftest.py puts the repo on sys.path.
 	@cd tests && python -m pytest -q
 
+test-supersession:
+	@# Supersession harness (ADR-018). Deterministic — no DB, no live embeddings.
+	@# Suites A/B/E arrive with their phases; Suite C (retrieval) is here today.
+	@cd tests && python -m pytest test_supersession_harness.py -v -rx
+
+test-supersession-regression:
+	@# The C3/C4 regression pair only — stale content stays buried, evergreen doesn't
+	@# get buried with it. Run on every change (see ADR-018 validation).
+	@cd tests && python -m pytest test_supersession_harness.py -q -rx -k "C3 or C4"
+
 check: lint smoke
 
 check-log:
