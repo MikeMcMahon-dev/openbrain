@@ -1949,7 +1949,18 @@ def ingest_payload(
             # in `tax_warnings` and are surfaced to the producer via `details`.
             tax_warnings: list[str] = []
             _p_tags = payload.get("tags")
-            _p_tags = _p_tags if isinstance(_p_tags, list) else None
+            _p_tags = list(_p_tags) if isinstance(_p_tags, list) else []
+            # A `component` field keys a living doc (ADR-008): fold it into tags as
+            # component:<val> so write_knowledge derives component_key (mirrors ob_ingest
+            # --component). The component:* identity requires an explicit system, enforced
+            # downstream in _write_text_ingest_knowledge.
+            _component = payload.get("component")
+            if isinstance(_component, str) and _component.strip():
+                _c = _component.strip()
+                _comp_tag = _c if _c.startswith("component:") else f"component:{_c}"
+                if _comp_tag not in _p_tags:
+                    _p_tags.append(_comp_tag)
+            _p_tags = _p_tags or None
             write_error = _write_text_ingest(
                 source, owner, _tenant_id, subject, topic, _text_ingest_id,
                 domain_override=payload.get("domain"),

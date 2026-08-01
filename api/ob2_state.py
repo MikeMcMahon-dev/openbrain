@@ -63,6 +63,14 @@ def handle_ingest_state(request: Any) -> dict[str, Any]:
     tags = body.get("tags") or []
     if not isinstance(tags, list):
         tags = []
+    # A `component` field keys a living doc (ADR-008) — fold to a component:<val> tag, same as
+    # the /openbrain_ingest path and the ob_ingest --component flag (uniform ingest surface).
+    component = body.get("component")
+    if isinstance(component, str) and component.strip():
+        _c = component.strip()
+        _comp_tag = _c if _c.startswith("component:") else f"component:{_c}"
+        if _comp_tag not in tags:
+            tags.append(_comp_tag)
     status = (body.get("status") or "current").strip()
     if status not in VALID_STATUSES:
         status = "current"
