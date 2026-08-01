@@ -33,6 +33,11 @@ CANONICAL_TAGS: list[str] = [
     "Career", "Interview", "NV-Prep", "Testing", "Ubuntu Study", "Schooling",
     "Monitoring",
     "LabInfra",
+    # Lifecycle flag (not a topic). INTERIM: exempts a row from the P1 recency net
+    # (ADR-018). To be REMOVED and promoted to a validated `durable` column in P2, the
+    # moment durability gates anything destructive. Lowercase to mark it distinct from
+    # the TitleCase topic tags.
+    "durable",
     # ── approved via scripts/tag_review.py append below this line ──
 ]
 # fmt: on
