@@ -413,8 +413,25 @@ validation pass must check, not just its numbers.
   BEGIN..ROLLBACK (detect→confirm→dismiss→no-reflag→reconcile CLEAN). Scoped same-system only;
   679 null-system floaters are recency-net territory (P1). **Remaining:** apply 009 via Dashboard;
   human-review the 9; enable the cron if volume climbs.
-- **P5 Bitemporality — deferred, unscheduled.** Pull forward when a concrete backdating case
-  demands it (item 8).
+- **P5 Bitemporality — BUILT + TRIALED, PULLED FORWARD (migration staged, 2026-08-01).** Mike's
+  call, overriding "defer": in a lab, state churns continuously, so "a change is coming" is a
+  standing condition, not a maybe — building ahead of a known caller is the *opposite* of the
+  `component_key` capability-without-a-caller trap, and leaving `valid_from` dormant-but-populated
+  (it is `NOT NULL DEFAULT now()`, silently claiming fact-onset while delivering ingest-time) is
+  itself the landmine. Fix: decouple the two clocks. Migration `010_bitemporal.sql`:
+  `supersession_events.fact_valid_until` (nullable valid-time offset; NULL ⇒ projection uses
+  `occurred_at`, i.e. P3 behaviour preserved); projection sets `knowledge.valid_until =
+  COALESCE(fact_valid_until, occurred_at)`; `CHECK knowledge_valid_span (valid_until IS NULL OR
+  valid_from <= valid_until)` (0 existing violations, VALIDATED) — also rejects a backdated offset
+  earlier than onset. Callers wired, explicit (not ignored optionals): `valid_from` at the ingest
+  surface + `write_knowledge` (also becomes the retired predecessor's fact-offset → contiguous
+  lifespans); `fact_valid_until` on all three retire paths (`knowledge_ingest` auto_supersede,
+  `ob2_state` confirm, `contradiction_detect` confirm). As-of read: `api/temporal_query.py:as_of`
+  + CLI `scripts/as_of.py` — point-in-time state by valid-time (a superseded row still surfaces
+  as-of a date inside its real span). Trialed 4/4 (backdated retire, NULL fallback, inverted-span
+  reject, validated) + as_of 4/4 in BEGIN..ROLLBACK; `tests/test_bitemporal.py` (skips until 010
+  applied). **Remaining:** apply 010 via Dashboard, then merge. `valid_from` now HAS a caller —
+  no longer a dormant capability.
 - **P6 Fail-loud wiki `is_stale`** — low priority; the wiki is a separate surface
   (`handle_get_wiki` / `handle_compile_wiki`), not the main query path.
 - **P-Personal — deferred, unscheduled.** How the fastest-moving domain should age, with real

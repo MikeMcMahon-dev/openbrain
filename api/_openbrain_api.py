@@ -1355,6 +1355,7 @@ def _write_text_ingest_knowledge(
     producer_tags: list[str] | None = None,
     auto_supersede: bool = True,
     system_override: str | None = None,
+    valid_from: str | None = None,
 ) -> str | None:
     """Phase-2 write path into public.knowledge. Derives the OB2 taxonomy from the
     legacy (subject, topic) signals via api.taxonomy_map, then delegates field
@@ -1469,6 +1470,7 @@ def _write_text_ingest_knowledge(
         source="live:text",
         source_type="text",
         auto_supersede=auto_supersede,
+        valid_from=valid_from,
     )
     status = result.get("status")
     if status == "accepted":
@@ -1490,6 +1492,7 @@ def _write_text_ingest(
     producer_tags: list[str] | None = None,
     auto_supersede: bool = True,
     system_override: str | None = None,
+    valid_from: str | None = None,
 ) -> str | None:
     """Embed and upsert a single text chunk into public.thoughts.
 
@@ -1509,7 +1512,7 @@ def _write_text_ingest(
             content, owner, subject, topic,
             domain_override, environment_override, warnings,
             producer_tags=producer_tags, auto_supersede=auto_supersede,
-            system_override=system_override,
+            system_override=system_override, valid_from=valid_from,
         )
     try:
         embedding = embedding_request(content)
@@ -1955,6 +1958,7 @@ def ingest_payload(
                 producer_tags=_p_tags,
                 auto_supersede=payload.get("auto_supersede", True) is not False,
                 system_override=payload.get("system"),
+                valid_from=payload.get("valid_from"),
             )
             if write_error:
                 status = "failed"

@@ -91,7 +91,7 @@ def list_pending(conn: Any = None) -> list[dict[str, Any]]:
 
 
 def _confirm(conn: Any, pair_id: str, loser_id: str, actor: str,
-             note: str | None) -> dict[str, Any]:
+             note: str | None, fact_valid_until: str | None) -> dict[str, Any]:
     cand = conn.execute(
         "SELECT id_lo, id_hi, status FROM public.contradiction_candidates WHERE id = %s",
         [pair_id],
@@ -116,13 +116,15 @@ def _confirm(conn: Any, pair_id: str, loser_id: str, actor: str,
         return {"ok": False, "error": "both rows must still be current to confirm"}
 
     # Retire the loser via a contradiction_confirmed event; the P3 projection flips its status.
+    # Optional backdated fact-offset (P5): when the loser stopped being true earlier than now.
     conn.execute(
         """
         INSERT INTO public.supersession_events
-            (superseded_id, superseding_id, occurred_at, reason_code, reason_note, actor, method)
-        VALUES (%s, %s, now(), 'contradiction_confirmed', %s, %s, 'human')
+            (superseded_id, superseding_id, occurred_at, fact_valid_until,
+             reason_code, reason_note, actor, method)
+        VALUES (%s, %s, now(), %s, 'contradiction_confirmed', %s, %s, 'human')
         """,
-        [loser_id, winner_id, note, actor],
+        [loser_id, winner_id, fact_valid_until, note, actor],
     )
     conn.execute(
         """
@@ -136,13 +138,14 @@ def _confirm(conn: Any, pair_id: str, loser_id: str, actor: str,
 
 
 def confirm(pair_id: str, loser_id: str, actor: str, note: str | None = None,
-            conn: Any = None) -> dict[str, Any]:
+            fact_valid_until: str | None = None, conn: Any = None) -> dict[str, Any]:
     """Confirm a pair as a real contradiction: retire `loser_id` (a `contradiction_confirmed`
-    event; the projection sets it superseded), keep the other. Marks the candidate confirmed."""
+    event; the projection sets it superseded), keep the other. Marks the candidate confirmed.
+    `fact_valid_until` optionally backdates when the loser stopped being true (P5)."""
     if conn is not None:
-        return _confirm(conn, pair_id, loser_id, actor, note)
+        return _confirm(conn, pair_id, loser_id, actor, note, fact_valid_until)
     with get_db_conn() as c:
-        return _confirm(c, pair_id, loser_id, actor, note)
+        return _confirm(c, pair_id, loser_id, actor, note, fact_valid_until)
 
 
 def _dismiss(conn: Any, pair_id: str, actor: str, note: str | None) -> dict[str, Any]:

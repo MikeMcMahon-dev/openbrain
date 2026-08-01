@@ -208,6 +208,11 @@ def handle_confirm_supersession(request: Any) -> dict[str, Any]:
     if not proposal_id:
         return response_payload(400, {"error": "bad_request", "message": "proposal_id is required"})
 
+    # Optional backdated fact-offset (ADR-018 P5): when the superseded fact stopped being true
+    # earlier than we are recording it (a lab change we are documenting after the fact). NULL =>
+    # the projection uses occurred_at (system-time), the P3 behaviour.
+    fact_valid_until = (body.get("valid_until") or "").strip() or None
+
     try:
         with get_db_conn() as conn:
             draft = conn.execute(
@@ -260,14 +265,18 @@ def handle_confirm_supersession(request: Any) -> dict[str, Any]:
             conn.execute(
                 """
                 INSERT INTO public.supersession_events
-                    (superseded_id, superseding_id, occurred_at, reason_code, actor, method)
-                VALUES (%s, %s, %s, 'manual', %s, 'human')
+                    (superseded_id, superseding_id, occurred_at, fact_valid_until,
+                     reason_code, actor, method)
+                VALUES (%s, %s, %s, %s, 'manual', %s, 'human')
                 """,
-                [superseded_id, proposal_id, now, _resolved_owner or None],
+                [superseded_id, proposal_id, now, fact_valid_until, _resolved_owner or None],
             )
+            # Promote the successor from the same moment the prior fact ended, so the two
+            # lifespans are contiguous (backdated offset when given, else now).
             conn.execute(
-                "UPDATE public.knowledge SET status = 'current', valid_from = %s WHERE id = %s",
-                [now, proposal_id],
+                "UPDATE public.knowledge SET status = 'current', "
+                "valid_from = COALESCE(%s, %s) WHERE id = %s",
+                [fact_valid_until, now, proposal_id],
             )
 
             domain = str(draft["domain"]) if draft.get("domain") else ""
