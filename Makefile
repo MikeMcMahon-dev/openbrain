@@ -67,6 +67,11 @@ test:
 	@# if it starts at the root. tests/conftest.py puts the repo on sys.path.
 	@cd tests && python -m pytest -q
 
+capability-audit:
+	@# Deployment-completeness gate (ADR-018): fail on any capability that landed with
+	@# no caller and isn't registered in scripts/capability_audit.allow.json. exit 1 = block.
+	@python scripts/capability_audit.py
+
 check: lint smoke
 
 check-log:

@@ -1,0 +1,23 @@
+{
+  "_doc": "Registered capabilities that shipped without a caller. Being here means the gap is KNOWN and its completion is TRACKED — it does not fail the gate. Remove an entry when the capability is wired (utilisation rises above threshold) or when its tracking ADR closes. A NEW orphan not listed here fails the audit: wire it or register it with a reason.",
+  "knowledge.system": {
+    "reason": "settable in write_knowledge() but not exposed by the ingest API/CLI; inferred unreliably. Being promoted to an explicit, validated ingest param.",
+    "tracked_by": "ADR-018 P2"
+  },
+  "knowledge.valid_from (organic)": {
+    "reason": "bitemporal fact-onset column shipped in OB2, wired to no settable source; defaults to now() on 100% of writes. Need is unmeasurable until exposed.",
+    "tracked_by": "ADR-018 P5 (deferred)"
+  },
+  "knowledge.valid_until": {
+    "reason": "written only by auto_supersede (always now()); never settable at ingest, never backdated. Real but narrow.",
+    "tracked_by": "ADR-018 P3/P5"
+  },
+  "knowledge.supersedes_id": {
+    "reason": "supersession chain pointer; barely populated because auto_supersede is gated on a null-prone system. Superseded by the transition-record model.",
+    "tracked_by": "ADR-018 P3"
+  },
+  "knowledge.component_key(tag)": {
+    "reason": "living-doc identity lives as an unvalidated freeform tag; being promoted to a validated column with a required system.",
+    "tracked_by": "ADR-018 P2"
+  }
+}
