@@ -3,6 +3,7 @@ from __future__ import annotations
 from api.chatgpt import handler as chatgpt_handler
 from api.claude import handler as claude_handler
 from api.cron_session_report import handler as cron_session_report_handler
+from api.cron_supersession_reconcile import handler as cron_supersession_reconcile_handler
 from api.fetch import handler as fetch_handler
 from api.generate_flashcards import handler as flashcards_handler
 from api.generate_quiz import handler as quiz_handler
@@ -89,6 +90,9 @@ def handler(request):
         return session_report_handler(request)
     if path in {"/api/cron/session_report"}:
         return cron_session_report_handler(request)
+
+    if path in {"/api/cron/supersession_reconcile"}:
+        return cron_supersession_reconcile_handler(request)
     if path in {"/api/ingest_state"}:
         return handle_ingest_state(request)
     if path in {"/api/propose_supersession"}:
