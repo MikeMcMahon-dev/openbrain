@@ -46,8 +46,15 @@ excluded. Concretely:
    impossible* rather than merely detected. `created_by` stays denormalised on chunks
    (immutable → no divergence risk; keeps owner-scoping a single-table filter).
 3. **`component_key` promoted from the `tags` array to a real column** + a vocabulary table,
-   so the key supersession pivots on is validated (today an unregistered key is accepted
-   silently) and the partial unique index is possible. One fix for two defects.
+   so the key is validated (today an unregistered key is accepted silently). **`system`
+   becomes an explicit, required ingest parameter whenever a component key is present** — it
+   is settable in `write_knowledge()` but *not exposed by the ingest API/CLI*, so today it is
+   inferred, unreliably (same subject → `OpenBrain` for one write, `null` for another), which
+   makes a complete `(system, component)` identity impossible to produce on purpose. A
+   `CHECK (component_key IS NULL OR system IS NOT NULL)` rejects the incomplete identity at
+   write time, and the partial unique index uses **`NULLS NOT DISTINCT`** (PG17, confirmed) as
+   a secondary guard — because standard NULL-distinctness would let `(NULL, 'k')` collide with
+   `(NULL, 'k')`, permitting the exact duplicate this ADR's own re-ingest produced (Chat, Q1b).
 4. **Enforcement:** a guard mechanism refuses a competing current insert with no accompanying
    transition; a projection mechanism is the *only* writer of `status`; a nightly
    reconciliation job proves stored status matches transitions-derived status (drift = bug).
@@ -65,8 +72,11 @@ excluded. Concretely:
 - **P1 Recency net** — fixes the live bug, zero writes, instantly reversible. **First.**
   `created_at` decay applied **only to `Network`, `K8s`, `Security`** (the domains where the
   failure was measured — allowlist, not denylist; Q3). `durable`-tagged rows exempt.
-- **P2 `component_key` column** + vocabulary + partial unique index (on `knowledge`, the
-  parent — chunks never carry component keys).
+- **P2 `component_key` column** + vocabulary + **explicit-required `system`** (plumbed through
+  the ingest API/CLI, validated) + `CHECK (component_key IS NULL OR system IS NOT NULL)` +
+  partial unique index `NULLS NOT DISTINCT` on `knowledge` (parent — chunks never carry keys).
+  Backfill inherits inferred systems, so re-key the existing 4 null-system component rows by
+  hand as part of the migration.
 - **P3 Transition records** — `supersession_events`, backfill the 4 `supersedes_id` chains
   as `reason_code='migration'`, switch the write path, the projection writes `knowledge.status`
   only (chunks join, no cascade), guard (deferrable constraint trigger, Q2) + reconciliation.
@@ -129,8 +139,10 @@ All seven of Code's open questions are resolved. The originals are preserved in 
 
 ## Scope honesty
 
-This builds rails for the **component-keyed subset** (3 rows today, growing) plus a
-**recency net** for the ~613 floaters. It does **not** make the 83% ungrounded corpus
+This builds rails for the **component-keyed subset** — 8 current rows today, but only **4
+carry a `system`**, so only 4 are index-protectable until P2 plumbs system (the other 4
+include 2 legit living docs, `flightsim-hardware` and `mikemcmahon-dev-design`, unprotected
+now) — plus a **recency net** for the ~613 floaters. It does **not** make the 83% ungrounded corpus
 "temporally grounded" — that remains a curation reality. What it does: makes stale content
 *sink* (recency), makes designated living-docs *provably single-current* (transitions +
 index), and makes contradiction a *query a machine runs* rather than a thing a solo operator
