@@ -33,13 +33,15 @@ ALTER TABLE public.knowledge_chunked ALTER COLUMN status      DROP NOT NULL;
 ALTER TABLE public.knowledge_chunked ALTER COLUMN tags        DROP NOT NULL;
 
 -- ══ B. Run AFTER the deploy is verified: drop the six mirrored metadata columns ═══════════
--- Guard: refuse to drop while any code path could still read/write them. This is a manual
--- gate — confirm the deploy is live and `make capability-audit` + smoke are green first.
--- Indexes on these columns drop automatically with the columns (CASCADE not needed for
--- column-local indexes, but stated explicitly for the composite ones).
-DROP INDEX IF EXISTS public.knowledge_chunked_status_idx;
-DROP INDEX IF EXISTS public.knowledge_chunked_system_status_idx;
-DROP INDEX IF EXISTS public.knowledge_chunked_domain_status_idx;
+-- Confirm the deploy is live and `make capability-audit` + smoke are green first.
+-- The three indexes that reference the dropped columns (names VERIFIED against pg_indexes
+-- 2026-08-01, not guessed): status_domain_idx (status,domain,environment), system_idx
+-- (system,status), tags_idx (tags). Postgres would auto-drop them with the columns anyway;
+-- dropping them explicitly first keeps the intent legible. The embedding (HNSW), document,
+-- created_by, and doc_chunk_uniq indexes are retained — they reference kept columns.
+DROP INDEX IF EXISTS public.knowledge_chunked_status_domain_idx;
+DROP INDEX IF EXISTS public.knowledge_chunked_system_idx;
+DROP INDEX IF EXISTS public.knowledge_chunked_tags_idx;
 
 ALTER TABLE public.knowledge_chunked DROP COLUMN IF EXISTS status;
 ALTER TABLE public.knowledge_chunked DROP COLUMN IF EXISTS system;
