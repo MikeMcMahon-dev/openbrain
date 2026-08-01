@@ -63,42 +63,35 @@ def _dual_write_chunks(
     content: str,
     owner: str,
     *,
-    domain: str,
-    environment: str,
-    system: str | None,
-    tags: list[str],
-    status: str,
     source: str,
     supersedes_id: str | None,
     ingest_id: str,
 ) -> None:
-    """Best-effort: chunk `content` and mirror it into public.knowledge_chunked so the
-    chunked read store stays fresh. knowledge is canonical, so callers wrap this in
-    try/except — a failure here NEVER fails the ingest. Mirrors write_knowledge's
-    set-based supersession so there is one current DOCUMENT per (system, component)."""
+    """Best-effort: chunk `content` and mirror it into public.knowledge_chunked.
+
+    The chunk store owns ONLY content + embedding + chunk identity + provenance + the
+    denormalised created_by (ADR-018a item 3). Every mutable metadata facet
+    (domain/environment/system/tags/status/component_key) is JOINed from the canonical
+    parent `knowledge` row at read time, so it is single-sourced and cannot drift — the
+    hand-synced mirror was the root cause the join removes. Parent-level auto_supersede
+    already retires the prior document and chunks inherit its status through the join, so
+    the old tag-based chunk-status UPDATE is gone (ADR-018a P2 step 3).
+
+    knowledge is canonical, so callers wrap this in try/except — a failure here NEVER fails
+    the ingest."""
     from api.chunking import chunk_document, infer_title
 
     chunks = chunk_document(content, infer_title(content))
     if not chunks:
         return
-    component_tag = next((t for t in (tags or []) if str(t).startswith("component:")), None)
     insert_sql = """
         INSERT INTO public.knowledge_chunked
-            (content, embedding, document_id, chunk_index, heading, domain, environment,
-             system, tags, status, supersedes_id, ingest_id, source, created_by)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            (content, embedding, document_id, chunk_index, heading,
+             supersedes_id, ingest_id, source, created_by)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (document_id, chunk_index) DO NOTHING
     """
     with get_db_conn() as conn:
-        # Retire the PRIOR document's chunks for this identity first (the new doc's own
-        # chunks aren't inserted yet, so document_id <> new_id spares them).
-        if status == "current" and system and component_tag:
-            conn.execute(
-                "UPDATE public.knowledge_chunked SET status = 'superseded', valid_until = now() "
-                "WHERE system = %s AND status = 'current' AND tags @> ARRAY[%s] "
-                "AND document_id <> %s",
-                [system, component_tag, str(new_id)],
-            )
         for ch in chunks:
             emb = None
             try:
@@ -107,8 +100,8 @@ def _dual_write_chunks(
                 emb = None
             conn.execute(insert_sql, [
                 ch["content"], _vector_param(emb) if emb else None, str(new_id),
-                ch["chunk_index"], ch["heading"], domain, environment, system, tags,
-                status, supersedes_id, f"{ingest_id}:c{ch['chunk_index']}", source, owner,
+                ch["chunk_index"], ch["heading"], supersedes_id,
+                f"{ingest_id}:c{ch['chunk_index']}", source, owner,
             ])
         conn.commit()
 
@@ -334,17 +327,26 @@ def write_knowledge(
                             [system, component_tag],
                         )
 
+            # component_key writer (ADR-018a item 4): promote the component:* identity from
+            # the tags array to the real column, so the living-doc identity has a caller on
+            # every write — not just the 006 backfill. The API already rejects a component
+            # write with no system (_openbrain_api.py), so the component_requires_system CHECK
+            # is satisfied. The tag stays for now; auto_supersede still keys on it.
+            component_key = next(
+                (t[len("component:"):] for t in tag_list if t.startswith("component:")),
+                None,
+            )
             embedding_val = _vector_param(embedding) if embedding else None
             row = conn.execute(
                 """
                 INSERT INTO public.knowledge
                     (content, embedding, domain, environment, system, tags,
-                     status, supersedes_id, ingest_id, source, created_by)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     status, supersedes_id, ingest_id, source, created_by, component_key)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 [content, embedding_val, domain, environment, system, tag_list,
-                 status, supersedes_id, ingest_id, source, owner],
+                 status, supersedes_id, ingest_id, source, owner, component_key],
             ).fetchone()
             new_id = str(row["id"]) if row else None
     except Exception as exc:
@@ -368,8 +370,7 @@ def write_knowledge(
     if new_id and _chunk_on_ingest():
         try:
             _dual_write_chunks(
-                new_id, content, owner, domain=domain, environment=environment,
-                system=system, tags=tag_list, status=status, source=source,
+                new_id, content, owner, source=source,
                 supersedes_id=supersedes_id, ingest_id=ingest_id,
             )
         except Exception:
