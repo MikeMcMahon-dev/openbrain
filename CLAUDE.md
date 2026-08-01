@@ -55,13 +55,22 @@ See docs/decisions/ for full ADRs. Summary:
 - REPORT_CONFIGS owner must match created_by_user_login in public.thoughts exactly
 - Never commit directly to main — use /commit skill and PR workflow
 
-## Schema & migration changes — MANDATORY (ADR-018a §10d)
+## Schema & migration changes — MANDATORY (ADR-018a §10d/§10e)
+
+**HARD GATE (§10e): no prod SQL is handed to Mike without `sql_trial.py` output attached.**
+Every statement runs in a rolled-back transaction first — it reproduces the exact dependency /
+constraint / permission error against real prod data and changes nothing. This is not optional
+and not memory-dependent: **Mike rejects any SQL block that arrives without its trial output.**
+```bash
+python scripts/sql_trial.py "UPDATE ...; ALTER TABLE ...;"   # BEGIN..ROLLBACK; PASS/FAIL evidence
+```
+
 Before authoring OR applying any `ALTER`/`DROP` migration, run the preflight and validate from
 its evidence — never from memory. "Validate current state" is NOT done after checking row data
 and wording; it must cover schema constraints, apply order, and every reader/writer.
 ```bash
 python scripts/preflight_migration.py <table>   # live columns+nullability, REAL index/constraint
-                                                 # names, and every repo reader/writer of the table
+                                                 # names, RLS policies, every repo reader/writer
 ```
 - **Apply order (expand/contract):** a reader/writer must stop touching a column before it is
   dropped; a NOT-NULL column needs `DROP NOT NULL` before a writer can omit it. Split the
