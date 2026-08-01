@@ -72,7 +72,7 @@ capability-audit:
 	@# no caller and isn't registered in scripts/capability_audit.allow.json. exit 1 = block.
 	@python scripts/capability_audit.py
 
-check: lint smoke
+check: lint smoke capability-audit
 
 check-log:
 	@mkdir -p "$(LOG_DIR)"
