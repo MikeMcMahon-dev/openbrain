@@ -4,6 +4,31 @@ This document tracks planned improvements for the OpenBrain system.
 
 ---
 
+## Temporal / supersession redesign — ADR-018a (current)
+
+**Full plan + P3 detail:** `docs/HANDOFF-P3-transition-records-2026-08-01.md`. P1 (recency net)
+and P2 (metadata ownership) are **done + applied** — `knowledge_chunked` is content-only, all
+metadata joins from the parent, `component_key` has a writer, `auto_supersede` keys on the column,
+006 CHECK validated.
+
+- [ ] **P3 — transition records (next).** `supersession_events` append-only table; `knowledge.status`
+  as a trigger-maintained projection replacing the in-place `auto_supersede` UPDATE; `DEFERRABLE
+  INITIALLY DEFERRED` guard at COMMIT; nightly reconciliation (recovery = replay, not restore);
+  backfill the **5** `supersedes_id` chains as `reason_code='migration'`. Needs an ephemeral test
+  schema for Suites A/B. (`environment='Archive'` reconciliation: RESOLVED — it's a sensitivity
+  bucket, not retirement; P3 does nothing with it.)
+- [ ] **P1.5 durable first-pass (parallel, AMBER).** Recency net is live with **0 durable members**;
+  ~12 foundational non-keyed Network/K8s/Security docs are exposed to decay. Mike marks the set;
+  Claude produces the candidate list (reason per row). Open Q: should `component_key` imply `durable`?
+- [ ] **Lint pass 2.** ~98 `E501` wraps + 4 minor (2 unused vars, 1 import placement, 1 semicolon).
+  Pass 1 (#88) fixed a real bug (missing `BeautifulSoup` import) + 50 autofixes.
+- [ ] **Process controls now MANDATORY:** `scripts/sql_trial.py` (rolled-back trial before any prod
+  SQL — Mike rejects un-trialed SQL) + `scripts/preflight_migration.py`. See ADR-018a items 10d/10e.
+- [ ] **Minor artifact:** 2 `component:adr-018` rows have the tag but null `component_key` (I cleared
+  the column for the CHECK; left the tag). Harmless; strip the tag if ever tidying.
+
+---
+
 ## Two-stage retrieval — Phase 3 rollout (2026-07-30, ADR-016)
 
 Phases 0–2 shipped (de-dup, `/search` skim + `/fetch` endpoints, MCP `search`/`fetch`
