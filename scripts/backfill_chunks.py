@@ -86,20 +86,23 @@ def plan(owner: str | None, status: str | None, limit: int | None) -> None:
     print("\nlargest fan-outs (these are the multi-topic docs chunking targets):")
     for n, title in sorted(fanout, reverse=True)[:10]:
         print(f"  {n:>2} chunks  {title!r}")
-    print("\nInherited per chunk at execute time: domain, environment, system, tags,")
-    print("status, source, created_by, ingest_id, supersedes_id (status/chains preserved).")
+    print("\nContent-only per chunk (ADR-018a item 3): content, embedding, document_id,")
+    print("chunk_index, heading, supersedes_id, ingest_id, source, created_by. Metadata")
+    print("(domain/environment/system/tags/status/component_key) JOINs from the parent.")
     print("Idempotency key: deterministic per (content, owner, ..., chunk_index).\n")
 
 
-_PARENT_COLS = ("id, content, domain, environment, system, tags, status, valid_from, "
-                "valid_until, supersedes_id, ingest_id, source, created_by, created_at")
+# Content-only mirror (ADR-018a item 3): chunks own content + embedding + identity +
+# provenance + the denormalised created_by; every metadata facet JOINs from the parent at
+# read time. Only these parent fields are needed to build a chunk row. Valid post migration
+# 007 §A (domain/environment/status/tags dropped their NOT NULL) — same as the live mirror.
+_PARENT_COLS = "id, content, supersedes_id, ingest_id, source, created_by"
 
 _INSERT = """
 INSERT INTO public.knowledge_chunked
-    (content, embedding, document_id, chunk_index, heading, domain, environment, system,
-     tags, status, valid_from, valid_until, supersedes_id, ingest_id, source, created_by,
-     created_at)
-VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+    (content, embedding, document_id, chunk_index, heading,
+     supersedes_id, ingest_id, source, created_by)
+VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
 ON CONFLICT (document_id, chunk_index) DO NOTHING
 """
 
@@ -110,8 +113,9 @@ def execute_backfill(
     limit: int | None,
     rechunk: bool = False,
 ) -> None:
-    """Chunk + re-embed every knowledge row into knowledge_chunked, inheriting all
-    parent fields (status/supersedes chains + created_by scoping preserved).
+    """Chunk + re-embed every knowledge row into knowledge_chunked as CONTENT-ONLY rows
+    (ADR-018a item 3): content + embedding + identity + provenance + created_by scoping;
+    metadata is JOINed from the parent at read time, never copied here.
 
     Two modes:
     - default (resume/backfill): idempotent via ON CONFLICT (document_id, chunk_index)
@@ -161,9 +165,8 @@ def execute_backfill(
                 ingest_id = f"{d['ingest_id'] or d['id']}:c{ch['chunk_index']}"
                 conn.execute(_INSERT, [
                     ch["content"], _vector_param(emb) if emb else None, str(d["id"]),
-                    ch["chunk_index"], ch["heading"], d["domain"], d["environment"],
-                    d["system"], d["tags"], d["status"], d["valid_from"], d["valid_until"],
-                    d["supersedes_id"], ingest_id, d["source"], d["created_by"], d["created_at"],
+                    ch["chunk_index"], ch["heading"],
+                    d["supersedes_id"], ingest_id, d["source"], d["created_by"],
                 ])
                 chunk_total += 1
             conn.commit()  # per-document: short transactions, resumable

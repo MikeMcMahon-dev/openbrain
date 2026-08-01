@@ -55,6 +55,24 @@ See docs/decisions/ for full ADRs. Summary:
 - REPORT_CONFIGS owner must match created_by_user_login in public.thoughts exactly
 - Never commit directly to main — use /commit skill and PR workflow
 
+## Schema & migration changes — MANDATORY (ADR-018a §10d)
+Before authoring OR applying any `ALTER`/`DROP` migration, run the preflight and validate from
+its evidence — never from memory. "Validate current state" is NOT done after checking row data
+and wording; it must cover schema constraints, apply order, and every reader/writer.
+```bash
+python scripts/preflight_migration.py <table>   # live columns+nullability, REAL index/constraint
+                                                 # names, and every repo reader/writer of the table
+```
+- **Apply order (expand/contract):** a reader/writer must stop touching a column before it is
+  dropped; a NOT-NULL column needs `DROP NOT NULL` before a writer can omit it. Split the
+  migration around the deploy accordingly.
+- **Every writer**, not just the file in your diff — grep the whole repo (the preflight does this).
+- **Real identifiers** — index/constraint names come from `pg_indexes`/`pg_constraint`, never guessed.
+- **Derived tables** (`knowledge_chunked`): validate the change on BOTH it and `knowledge`.
+- No prod mutation without sign-off + a read-only dry run + a hand-reviewed retire/demote list.
+- A schema change with no preflight output on the record is not a validated change — the `pm`
+  reviewer's operational rubric BLOCKs it.
+
 ## Dev workflow
 ```bash
 # Local dev

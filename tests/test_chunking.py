@@ -125,9 +125,9 @@ def test_knowledge_table_flag_resolution(monkeypatch):
     assert kr._knowledge_table() == "knowledge_chunked"
     monkeypatch.setenv("OPENBRAIN_KNOWLEDGE_TABLE", "chunked")
     assert kr._knowledge_table() == "knowledge_chunked"   # alias
-    # chunked SELECT carries the chunk-identity columns; base does not
-    assert "document_id" in kr._select_cols("knowledge_chunked")
-    assert "document_id" not in kr._select_cols("knowledge")
+    # chunked SELECT carries the chunk-identity columns (from the join shape); base does not
+    assert "document_id" in kr._query_shape("knowledge_chunked")[0]
+    assert "document_id" not in kr._query_shape("knowledge")[0]
 
 
 def test_oversized_section_is_subsplit():

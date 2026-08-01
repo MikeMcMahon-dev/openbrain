@@ -259,6 +259,19 @@ they were buried.
 Correctness cannot be guaranteed. Recoverability can, and it is the control a non-specialist
 reviewer can actually verify.
 
+**10d. Operational validation before any schema change — evidence, not memory.**
+
+"Validate current state" is not done after checking row data and wording. Before authoring OR
+applying an `ALTER`/`DROP`, run `scripts/preflight_migration.py <table>` and answer the PM's
+operational rubric from its output: column **nullability/defaults/CHECK** state, **real**
+index/constraint names (never guessed), the **apply order** (expand/contract — a reader/writer
+stops before a column is dropped; a NOT-NULL column gets `DROP NOT NULL` first), **every**
+repo reader AND writer of the table (not just the file in the diff), and **derived-table
+parity**. This control exists because the earlier data/phrasing pass missed a NOT-NULL that
+forced an expand/contract split, a fabricated index name, and an un-migrated second writer — the
+last one a data-loss-class miss caught only by 10b. A schema change with no preflight output on
+the record is not a validated change.
+
 ---
 
 ## Current state — what is live, what is frozen
@@ -282,6 +295,21 @@ and the `knowledge_chunked` drift — neither breaks retrieval, because reads st
 That column is now to be dropped, along with the five other mirrored metadata columns. Migration
 007 supersedes part of 006 — record it as such rather than editing 006.
 
+**Apply-order defect found at build time (2026-08-01), and why the validation pass missed it.**
+Rev.5.1 listed "migration 007: drop the columns" as P2 step 1, ahead of the read-path join. That
+order is unsafe: dropping first 500s the live read path and fails the mirror INSERT, and four of
+the six columns (`domain/environment/status/tags`) are NOT NULL, so the content-only mirror
+cannot even omit them until they are made nullable. The fix is expand/contract — §A `DROP NOT
+NULL` before the deploy, §B `DROP COLUMN` after (see Phasing P2, now corrected). **Why the
+earlier "reconcile the ADR to tested current state" pass did not catch it:** that pass validated
+row-level *data* (the re-key, the drift counts) and *phrasing*, not the schema *constraints*
+(column nullability) that govern apply-order safety, and it applied a factual-consistency lens,
+not an operational-sequencing one. The nullability was one `information_schema` query away and
+was not run until implementation forced it — the same "validate the part you thought to look at,
+not the part that bites you" failure this ADR exists to break. Backstop that caught it: item 10b
+(restate-before-build). Standing correction: a plan's *apply order* is part of what the
+validation pass must check, not just its numbers.
+
 ---
 
 ## Phasing
@@ -303,25 +331,35 @@ That column is now to be dropped, along with the five other mirrored metadata co
   durable? A living doc is by definition the current-state record for its component, so sinking
   one is always wrong — if that holds, keyed rows are exempt structurally and future living docs
   inherit the protection.
-- **P2 Metadata ownership + component identity — FROZEN, resume here.**
-  0. **Write the two-table parity test (item 10a) and confirm it goes RED** against the current
-     drifted state. A parity test that passes today is not testing anything.
-  1. Migration 007: drop the six mirrored metadata columns and their indexes from
-     `knowledge_chunked`.
-  2. `knowledge_retrieval.py`: join to `knowledge` on `document_id`; read `component_key` from
-     the column, not the tag.
-  3. `knowledge_ingest.py`: `_mirror_chunks()` writes content + embedding + `created_by` only.
-     Remove the tag-based supersede UPDATE at `:92–99`.
-  4. Write path for `component_key` — the column has no writer today.
-  5. `system` plumbed through ingest API and CLI, validated against the vocabulary.
-  6. **Then** `VALIDATE CONSTRAINT` (§E), **then** hand-re-key the 2 real null-system rows, so
-     the constraint validates each correction as it is made.
-  - **Precondition (Mike's call, before the re-key):** does `system` mean infrastructure-systems
-    (`SpectreNet`) or general namespaces? Those 2 rows are not infra, and their re-key sets the
-    convention for every write after. Decided deliberately, not by two hand-edits.
-- **P2→P3 window.** `auto_supersede` currently reads the `component:*` tag; P2 moves that key to a
-  column. **P2 updates `auto_supersede` to read the new column** so live supersession stays whole;
-  P3 retires it when the projection takes over.
+- **P2 Metadata ownership + component identity — resume here.** Ordered for **expand/contract**
+  safety: reads and the mirror must stop depending on the six columns BEFORE they are dropped,
+  and four of them (`domain/environment/status/tags`) are NOT NULL, so the content-only mirror
+  cannot omit them until they are made nullable. This **corrects rev.5.1's step order**, which
+  listed the column drop as step 1 — dropping first would 500 the live read path and fail the
+  mirror INSERT. Caught at build time (item 10b working as intended); see the current-state note
+  for why the earlier data/phrasing validation pass did not catch it.
+  0. **Parity test (item 10a), confirmed RED.** ✅ merged (#84) — 8 `system`-drift rows.
+  1. **Code — build + deploy FIRST.** Retrieval joins to `knowledge` on `document_id` for every
+     metadata facet + reads `component_key` from the column (tag fallback); mirror writes
+     content-only + drops the tag-based chunk-status UPDATE; `component_key` gets its writer on
+     the parent INSERT. ✅ built + live-verified (PR #85). Deploy happens at step 4.
+  2. `system` at the ingest API + CLI, validated vs the vocabulary. ✅ already in main (#82).
+  3. **Migration 007 §A — `DROP NOT NULL`** on `domain/environment/status/tags`. BEFORE the
+     deploy. Behaviour-neutral: the old mirror keeps writing values.
+  4. **Deploy** the step-1 code. Metadata now read from the parent; mirror content-only; the six
+     columns are unread and unwritten.
+  5. **Verify** — smoke, `make capability-audit`, spot-check queries — before dropping anything.
+  6. **Migration 007 §B — `DROP` the six columns** + indexes. Parity guard then xPASSes → delete it.
+  7. **`VALIDATE CONSTRAINT`** (006 §E). The 2 real null-system rows are already re-keyed, clean scan.
+  8. **Post-migration `chore(lint)`.** Clear the 163 ruff findings (mostly E501; 50 auto-fixable)
+     in a dedicated PR — surgical wraps, not `ruff format`. All Claude-authored; who wrote them is
+     irrelevant, they should not exist.
+  - **Precondition — DECIDED:** `system` is a general **namespace** (Mike, 2026-08-01), not
+    infra-only; the 2 rows re-keyed to `FlightSim` / `MikeMcMahon-Dev`.
+- **P2→P3 window.** `auto_supersede` still keys supersession on the `component:*` tag. It stays
+  correct and robust while the tag remains on `knowledge` (only chunks lose metadata in 007), so
+  the switch to the column is a **low-risk P2 tail item**, deferred until the `component_key`
+  writer has been live + verified; P3 retires the whole mechanism when the projection takes over.
 - **P3 Transition records.** `supersession_events`; backfill the 4 `supersedes_id` chains as
   `reason_code='migration'`; switch the write path; projection writes `knowledge.status` only;
   guard + reconciliation.

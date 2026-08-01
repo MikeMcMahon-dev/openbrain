@@ -111,6 +111,15 @@ def _has_component_tag(tags: Any) -> bool:
     """True when any tag is a `component:*` key (the living-doc supersession key)."""
     return any(isinstance(t, str) and t.startswith("component:") for t in (tags or []))
 
+
+def _is_component_row(row: Mapping[str, Any]) -> bool:
+    """True when the row is a living doc. Reads the `component_key` COLUMN of record
+    (ADR-018a item 4), falling back to the `component:*` tag for rows written before the
+    column had a writer — so detection stays whole through the P2 transition."""
+    if row.get("component_key") is not None:
+        return True
+    return _has_component_tag(row.get("tags"))
+
 # Physical read table (ADR-017). Default 'knowledge'; set OPENBRAIN_KNOWLEDGE_TABLE
 # =knowledge_chunked to serve chunked sections (adds document_id/heading and triggers
 # retrieval-side collapse). Resolved at call time so the flag flips without a redeploy.
@@ -122,22 +131,42 @@ def _knowledge_table() -> str:
     return _CHUNK_TABLE if t in (_CHUNK_TABLE, "chunked") else "knowledge"
 
 
-def _select_cols(table: str) -> str:
-    cols = "id, content, domain, environment, system, tags, status, created_at"
+def _query_shape(table: str) -> tuple[str, str, str, str, str, str]:
+    """Per-table SQL shape: (select_list, from_clause, meta_prefix, owner_col,
+    content_col, embedding_col).
+
+    On the chunked store (ADR-018a item 3) `knowledge_chunked` owns ONLY content +
+    embedding + chunk identity + the denormalised `created_by`; every mutable metadata
+    column (domain/environment/system/tags/status/component_key/created_at) is JOINed
+    from the parent `knowledge` row on `document_id`, so it is single-sourced and cannot
+    drift. Metadata filters therefore target the parent alias `k.`; owner scoping stays a
+    single-table predicate on the chunk (`kc.created_by`), the security-critical filter.
+    """
     if table == _CHUNK_TABLE:
-        cols += ", document_id, chunk_index, heading"
-    return cols
+        select = (
+            "kc.id, kc.content, k.domain, k.environment, k.system, k.tags, k.status, "
+            "k.created_at, k.component_key, kc.document_id, kc.chunk_index, kc.heading"
+        )
+        frm = "public.knowledge_chunked kc JOIN public.knowledge k ON k.id = kc.document_id"
+        return select, frm, "k.", "kc.created_by", "kc.content", "kc.embedding"
+    select = "id, content, domain, environment, system, tags, status, created_at, component_key"
+    return select, "public.knowledge", "", "created_by", "content", "embedding"
 
 
 def _build_filter_clause(
     owner: str | None,
     filters: dict | None,
+    *,
+    meta_prefix: str = "",
+    owner_col: str = "created_by",
 ) -> tuple[str, list[Any]]:
     """Build the shared WHERE fragment + params for status/owner/facet filters.
 
     - status defaults to 'current'; a caller-supplied filters['status'] overrides.
-    - owner scopes via knowledge.created_by when provided.
+    - owner scopes via `owner_col` when provided.
     - domain/environment/system are AND-ed equality facets when present.
+    `meta_prefix` qualifies the metadata columns (status/domain/environment/system) with a
+    table alias for the chunked JOIN (e.g. 'k.'); it is '' for the single-table base path.
     Returns (clause, params) where clause begins with ' AND ...'.
     """
     filters = filters or {}
@@ -146,17 +175,17 @@ def _build_filter_clause(
 
     status = filters.get("status", _DEFAULT_STATUS)
     if status is not None:
-        clauses.append("status = %s")
+        clauses.append(f"{meta_prefix}status = %s")
         params.append(status)
 
     if owner:
-        clauses.append("created_by = %s")
+        clauses.append(f"{owner_col} = %s")
         params.append(owner)
 
     for col in _ALLOWED_FILTER_COLS:
         value = filters.get(col)
         if value:
-            clauses.append(f"{col} = %s")
+            clauses.append(f"{meta_prefix}{col} = %s")
             params.append(value)
 
     clause = ("".join(f" AND {c}" for c in clauses)) if clauses else ""
@@ -173,7 +202,10 @@ def search_knowledge_vector_candidates(
     """Nearest-neighbour candidates by cosine distance over <table>.embedding."""
     table = table or _knowledge_table()
     vector_param = _vector_param(query_embedding)
-    filter_clause, filter_params = _build_filter_clause(owner, filters)
+    select, frm, meta_prefix, owner_col, _content_col, emb_col = _query_shape(table)
+    filter_clause, filter_params = _build_filter_clause(
+        owner, filters, meta_prefix=meta_prefix, owner_col=owner_col
+    )
 
     params: list[Any] = [vector_param]
     params.extend(filter_params)
@@ -182,12 +214,12 @@ def search_knowledge_vector_candidates(
 
     query_sql = f"""
     SELECT
-    {_select_cols(table)},
-      (embedding <=> %s::vector) AS score
-    FROM public.{table}
-    WHERE embedding IS NOT NULL
+    {select},
+      ({emb_col} <=> %s::vector) AS score
+    FROM {frm}
+    WHERE {emb_col} IS NOT NULL
       {filter_clause}
-    ORDER BY embedding <=> %s::vector
+    ORDER BY {emb_col} <=> %s::vector
     LIMIT %s;
     """
 
@@ -215,7 +247,10 @@ def search_knowledge_keyword_candidates(
     websearch_to_tsquery only when the query yields no usable terms.
     """
     table = table or _knowledge_table()
-    filter_clause, filter_params = _build_filter_clause(owner, filters)
+    select, frm, meta_prefix, owner_col, content_col, _emb_col = _query_shape(table)
+    filter_clause, filter_params = _build_filter_clause(
+        owner, filters, meta_prefix=meta_prefix, owner_col=owner_col
+    )
 
     or_frag, or_params = _or_tsquery_fragment(query)
     if or_frag is not None:
@@ -225,10 +260,10 @@ def search_knowledge_keyword_candidates(
 
     query_sql = f"""
     SELECT
-    {_select_cols(table)},
-      ts_rank(to_tsvector('english', coalesce(content, '')), {tsq}) AS score
-    FROM public.{table}
-    WHERE to_tsvector('english', coalesce(content, '')) @@ {tsq}
+    {select},
+      ts_rank(to_tsvector('english', coalesce({content_col}, '')), {tsq}) AS score
+    FROM {frm}
+    WHERE to_tsvector('english', coalesce({content_col}, '')) @@ {tsq}
       {filter_clause}
     ORDER BY score DESC NULLS LAST
     LIMIT %s;
@@ -404,7 +439,7 @@ def retrieve_knowledge(
     # until tuned against that harness.
     for key, row in row_by_key.items():
         is_current_component = (
-            row.get("status") == "current" and _has_component_tag(row.get("tags"))
+            row.get("status") == "current" and _is_component_row(row)
         )
         boost = _COMPONENT_BOOST if is_current_component else 1.0
         if boost != 1.0:
@@ -424,7 +459,7 @@ def retrieve_knowledge(
             exempt = (
                 row.get("domain") not in _RECENCY_DOMAINS
                 or "durable" in tags
-                or _has_component_tag(tags)
+                or _is_component_row(row)
             )
             factor = 1.0 if exempt else _recency_factor(row.get("created_at"), now)
             if factor != 1.0:
@@ -541,13 +576,16 @@ def fetch_knowledge_by_ids(
         return []
 
     if table == _CHUNK_TABLE:
+        # Metadata JOINed from the parent (ADR-018a item 3); chunk owns only content +
+        # identity + the denormalised created_by used for owner-scoping.
         sql = """
-        SELECT id, content, document_id, chunk_index, heading, domain, environment,
-               system, tags, status, created_at
-        FROM public.knowledge_chunked
-        WHERE (id = ANY(%s::uuid[]) OR document_id = ANY(%s::uuid[]))
-          AND created_by = %s
-        ORDER BY document_id, chunk_index
+        SELECT kc.id, kc.content, kc.document_id, kc.chunk_index, kc.heading,
+               k.domain, k.environment, k.system, k.tags, k.status, k.created_at
+        FROM public.knowledge_chunked kc
+        JOIN public.knowledge k ON k.id = kc.document_id
+        WHERE (kc.id = ANY(%s::uuid[]) OR kc.document_id = ANY(%s::uuid[]))
+          AND kc.created_by = %s
+        ORDER BY kc.document_id, kc.chunk_index
         """
         params: list[Any] = [clean, clean, owner]
     else:
