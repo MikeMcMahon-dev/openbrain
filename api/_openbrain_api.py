@@ -338,7 +338,8 @@ def _ingest_preflight(
         report["status"] = "failed"
         report["errors"].append("owner is empty")
     elif owner == "default_user":
-        report["warnings"].append("owner is default_user. Confirm OPENBRAIN_DEFAULT_OWNER or request owner header.")
+        report["warnings"].append(
+            "owner is default_user. Confirm OPENBRAIN_DEFAULT_OWNER or request owner header.")
 
     if not tenant_id:
         report["status"] = "failed"
@@ -350,7 +351,8 @@ def _ingest_preflight(
 
     if not (os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENAI_API_KEY")):
         report["warnings"].append(
-            "No OPENROUTER_API_KEY or OPENAI_API_KEY set; ingest fallback behavior depends on configured local model."
+            "No OPENROUTER_API_KEY or OPENAI_API_KEY set; ingest fallback behavior "
+            "depends on configured local model."
         )
 
     connection, conn_error = _db_connect()
@@ -406,7 +408,8 @@ def _ingest_preflight(
                     elif isinstance(row, tuple) and row:
                         report["existing_rows"] = int(row[0])
             else:
-                report["warnings"].append("Unable to compute existing row count: schema missing source fields")
+                report["warnings"].append(
+                    "Unable to compute existing row count: schema missing source fields")
     except Exception as exc:
         report["warnings"].append(f"Pre-flight row-count check skipped: {exc}")
     finally:
@@ -1833,12 +1836,14 @@ def ingest_payload(
             else:
                 queued += 1
 
-        status = "failed" if any(item.get("status") == "failed" for item in normalized_items) else "accepted"
+        status = ("failed" if any(item.get("status") == "failed" for item in normalized_items)
+                  else "accepted")
         if status == "failed":
             message = "Ingest request blocked by pre-flight checks."
             details.extend(item_errors)
             details.extend(
-                sorted({error for preflight in bulk_preflight for error in preflight.get("errors", [])})
+                sorted({error for preflight in bulk_preflight
+                        for error in preflight.get("errors", [])})
             )
         else:
             message = (
@@ -1952,7 +1957,8 @@ def ingest_payload(
             else:
                 if not extracted_text.strip():
                     status = "failed"
-                    message = "Ingest failed: PDF contained no extractable text (may be image-only)."
+                    message = ("Ingest failed: PDF contained no extractable text "
+                               "(may be image-only).")
                     details.append("empty extraction")
                 else:
                     word_count = len(extracted_text.split())
@@ -1966,20 +1972,25 @@ def ingest_payload(
                         ]
                         failed_chunks = []
                         for idx, chunk in enumerate(chunks):
-                            chunk_id = compute_ingest_id(source_type, chunk, owner, subject, f"{topic}_chunk{idx}")
-                            write_error = _write_text_ingest(chunk, owner, _tenant_id, subject, f"{topic}_chunk{idx}", chunk_id)
+                            chunk_id = compute_ingest_id(
+                                source_type, chunk, owner, subject, f"{topic}_chunk{idx}")
+                            write_error = _write_text_ingest(
+                                chunk, owner, _tenant_id, subject, f"{topic}_chunk{idx}", chunk_id)
                             if write_error:
                                 failed_chunks.append(idx)
                         if failed_chunks:
                             status = "failed"
-                            message = f"Ingest failed: {len(failed_chunks)}/{len(chunks)} chunks failed to write."
+                            message = (f"Ingest failed: {len(failed_chunks)}/{len(chunks)} "
+                                       "chunks failed to write.")
                         else:
                             status = "accepted"
                             message = f"Ingest accepted. PDF split into {len(chunks)} chunks."
                             details.append(f"chunks: {len(chunks)}, words: {word_count}")
                     else:
-                        _pdf_ingest_id = compute_ingest_id(source_type, extracted_text, owner, subject, topic)
-                        write_error = _write_text_ingest(extracted_text, owner, _tenant_id, subject, topic, _pdf_ingest_id)
+                        _pdf_ingest_id = compute_ingest_id(
+                            source_type, extracted_text, owner, subject, topic)
+                        write_error = _write_text_ingest(
+                            extracted_text, owner, _tenant_id, subject, topic, _pdf_ingest_id)
                         if write_error:
                             status = "failed"
                             message = f"Ingest failed: {write_error}"
@@ -1997,7 +2008,8 @@ def ingest_payload(
             else:
                 if not extracted_text.strip():
                     status = "failed"
-                    message = "Ingest failed: DOCX contained no extractable text (document may be empty)."
+                    message = ("Ingest failed: DOCX contained no extractable text "
+                               "(document may be empty).")
                     details.append("empty extraction")
                 else:
                     word_count = len(extracted_text.split())
@@ -2011,20 +2023,25 @@ def ingest_payload(
                         ]
                         failed_chunks = []
                         for idx, chunk in enumerate(chunks):
-                            chunk_id = compute_ingest_id(source_type, chunk, owner, subject, f"{topic}_chunk{idx}")
-                            write_error = _write_text_ingest(chunk, owner, _tenant_id, subject, f"{topic}_chunk{idx}", chunk_id)
+                            chunk_id = compute_ingest_id(
+                                source_type, chunk, owner, subject, f"{topic}_chunk{idx}")
+                            write_error = _write_text_ingest(
+                                chunk, owner, _tenant_id, subject, f"{topic}_chunk{idx}", chunk_id)
                             if write_error:
                                 failed_chunks.append(idx)
                         if failed_chunks:
                             status = "failed"
-                            message = f"Ingest failed: {len(failed_chunks)}/{len(chunks)} chunks failed to write."
+                            message = (f"Ingest failed: {len(failed_chunks)}/{len(chunks)} "
+                                       "chunks failed to write.")
                         else:
                             status = "accepted"
                             message = f"Ingest accepted. DOCX split into {len(chunks)} chunks."
                             details.append(f"chunks: {len(chunks)}, words: {word_count}")
                     else:
-                        _docx_ingest_id = compute_ingest_id(source_type, extracted_text, owner, subject, topic)
-                        write_error = _write_text_ingest(extracted_text, owner, _tenant_id, subject, topic, _docx_ingest_id)
+                        _docx_ingest_id = compute_ingest_id(
+                            source_type, extracted_text, owner, subject, topic)
+                        write_error = _write_text_ingest(
+                            extracted_text, owner, _tenant_id, subject, topic, _docx_ingest_id)
                         if write_error:
                             status = "failed"
                             message = f"Ingest failed: {write_error}"
@@ -2056,20 +2073,26 @@ def ingest_payload(
                         ]
                         failed_chunks = []
                         for idx, chunk in enumerate(chunks):
-                            chunk_id = compute_ingest_id(source_type, chunk, owner, subject, f"{topic}_chunk{idx}")
-                            write_error = _write_text_ingest(chunk, owner, _tenant_id, subject, f"{topic}_chunk{idx}", chunk_id)
+                            chunk_id = compute_ingest_id(
+                                source_type, chunk, owner, subject, f"{topic}_chunk{idx}")
+                            write_error = _write_text_ingest(
+                                chunk, owner, _tenant_id, subject, f"{topic}_chunk{idx}", chunk_id)
                             if write_error:
                                 failed_chunks.append(idx)
                         if failed_chunks:
                             status = "failed"
-                            message = f"Ingest failed: {len(failed_chunks)}/{len(chunks)} chunks failed to write."
+                            message = (f"Ingest failed: {len(failed_chunks)}/{len(chunks)} "
+                                       "chunks failed to write.")
                         else:
                             status = "accepted"
-                            message = f"Ingest accepted. URL content split into {len(chunks)} chunks."
+                            message = (f"Ingest accepted. URL content split into "
+                                       f"{len(chunks)} chunks.")
                             details.append(f"chunks: {len(chunks)}, words: {word_count}")
                     else:
-                        _url_ingest_id = compute_ingest_id(source_type, extracted_text, owner, subject, topic)
-                        write_error = _write_text_ingest(extracted_text, owner, _tenant_id, subject, topic, _url_ingest_id)
+                        _url_ingest_id = compute_ingest_id(
+                            source_type, extracted_text, owner, subject, topic)
+                        write_error = _write_text_ingest(
+                            extracted_text, owner, _tenant_id, subject, topic, _url_ingest_id)
                         if write_error:
                             status = "failed"
                             message = f"Ingest failed: {write_error}"
@@ -2086,7 +2109,8 @@ def ingest_payload(
                 details.extend(preflight_summary.get("errors", []))
             else:
                 status = "queued"
-                message = "Ingest request accepted. Processing is currently queued in the MCP scaffold."
+                message = ("Ingest request accepted. Processing is currently queued "
+                           "in the MCP scaffold.")
                 if preflight_summary.get("warnings"):
                     details.extend(preflight_summary.get("warnings", []))
 
