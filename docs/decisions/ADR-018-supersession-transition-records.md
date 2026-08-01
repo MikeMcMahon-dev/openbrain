@@ -1,7 +1,8 @@
 # ADR-018: Supersession as append-only transition records
 
-**Status:** Proposed (design; no DB mutation without sign-off + a read-only dry run)
-**Date:** 2026-07-31
+**Status:** Proposed (design; no DB mutation without sign-off + a read-only dry run).
+All seven open questions **resolved** with Chat 2026-07-31 (see §Resolutions).
+**Date:** 2026-07-31 (rev. 2026-07-31 — Q1 join-not-cascade, Q3 allowlist decay)
 **Relates to:** ADR-008 (living-doc identity / component keys), ADR-011 (document model),
 ADR-017 (chunking — the read path this must stay consistent with). Supersedes the
 `auto_supersede` UPDATE-in-place mechanism in `api/knowledge_ingest.py`.
@@ -35,11 +36,15 @@ excluded. Concretely:
    `superseded_id`, `superseding_id` (nullable for expiry), `occurred_at`, `reason_code`
    (enum), `reason_note`, `actor`, `method`. This becomes the **truth** of what was retired,
    when, why, and by whom.
-2. **`knowledge.status` is a materialised projection** of that truth — kept stored (not
-   read-time-derived) so a **partial unique index** `one_current_per_component` can enforce
-   *at most one current row per component* at the database level. This is a deliberate
-   divergence from the "derive at read time" idea three responders proposed: we take the
-   append-only-truth 90% and keep an indexable projection for the uniqueness guarantee.
+2. **`knowledge.status` (parent only) is a materialised projection** of that truth — kept
+   stored (not read-time-derived) so a **partial unique index** `one_current_per_component`
+   can enforce *at most one current row per component* at the database level. A deliberate
+   divergence from full read-time derivation: append-only-truth where it matters, indexable
+   projection for the uniqueness guarantee. **`knowledge_chunked` carries NO status** — the
+   read path joins chunks to their parent on `document_id` (Q1, resolved with Chat). One
+   stored status, no chunk-level cascade to keep in sync, status divergence *structurally
+   impossible* rather than merely detected. `created_by` stays denormalised on chunks
+   (immutable → no divergence risk; keeps owner-scoping a single-table filter).
 3. **`component_key` promoted from the `tags` array to a real column** + a vocabulary table,
    so the key supersession pivots on is validated (today an unregistered key is accepted
    silently) and the partial unique index is possible. One fix for two defects.
@@ -58,14 +63,18 @@ excluded. Concretely:
 - **P0 Measure** — count existing invariant violations (`(system, component)` with >1
   current) and the same-system high-similarity current-pair population. Baseline retrieval.
 - **P1 Recency net** — fixes the live bug, zero writes, instantly reversible. **First.**
-- **P2 `component_key` column** + vocabulary + partial unique index.
+  `created_at` decay applied **only to `Network`, `K8s`, `Security`** (the domains where the
+  failure was measured — allowlist, not denylist; Q3). `durable`-tagged rows exempt.
+- **P2 `component_key` column** + vocabulary + partial unique index (on `knowledge`, the
+  parent — chunks never carry component keys).
 - **P3 Transition records** — `supersession_events`, backfill the 4 `supersedes_id` chains
-  as `reason_code='migration'`, switch the write path, guard + projection + reconciliation.
+  as `reason_code='migration'`, switch the write path, the projection writes `knowledge.status`
+  only (chunks join, no cascade), guard (deferrable constraint trigger, Q2) + reconciliation.
 - **P4 Contradiction detection** — candidate surfacing; the human gate moves here off the
   write path.
 - **P5 Bitemporality** — explicit `valid_from`. Independent; can move earlier.
-- **P6 Fail-loud wiki `is_stale`** — low priority (see Open Questions #7; the wiki is not in
-  the main query path).
+- **P6 Fail-loud wiki `is_stale`** — low priority; the wiki is a separate surface, not the
+  main query path (verified).
 
 ### Ordering — Code concedes to Chat
 
@@ -77,40 +86,46 @@ detection's urgency; detection's unique value is age-independent conflicts. **Ti
 P0:** if same-system high-similarity current pairs are many, detection is urgent; if a
 handful, it follows the foundation.
 
-## Open questions — resolve before the affected phase (Code's concerns)
+## Resolutions (Code + Chat, 2026-07-31)
 
-1. **`knowledge_chunked` is not in the plan, and it is the read path.** Supersession already
-   writes *both* tables (`knowledge_ingest.py:97`), retrieval reads *only* `knowledge_chunked`,
-   and the two are written in **separate transactions/connections** today — so their statuses
-   are not atomically linked. The projection, the unique index, and reconciliation must all
-   span both tables (parent status → *every* chunk's status), or the chunked read path will
-   serve a status the events table says is superseded. **This is the headline gap and gates P3.**
-2. **Guard trigger vs FK ordering.** `supersession_events.superseding_id → knowledge.id` (the
-   new row) means the new row must exist before the event can reference it — so the guard
-   cannot be a plain `BEFORE INSERT` that requires the event to pre-exist. It likely must be a
-   `DEFERRABLE INITIALLY DEFERRED` constraint trigger checked at COMMIT, and the write path
-   must wrap knowledge-insert + event-insert in **one** transaction. The write path uses
-   explicit `conn.commit()` so multi-statement txns are supported, but the current dual-table
-   mirror commits separately — reconcile with #1.
-3. **Recency net must not degrade the study/tutor path.** OB's own "temporal awareness is a
-   priority, not a filter" finding: current-only reads are catastrophically wrong for Annie's
-   study tutor, whose material is old-but-evergreen. A naive age decay buries it. The net must
-   be domain-scoped or gentle, and validated against `Study`/`Personal`, not just infra docs.
-   Also: **"durable" has no representation today** (no column/tag). Decide tag vs column and
-   who marks evergreens — and whether P1 ships with the durable mechanism or a decay mild
-   enough not to need it yet.
-4. **Fixture embedding determinism.** The harness wants deterministic fixtures, but embeddings
-   come from a live API (non-deterministic across versions, costs per run). CI-wired C3/C4
-   should use **frozen, precomputed vectors**, not live embedding calls.
-5. **Harness isolation.** Ephemeral schema vs dedicated tenant. Migrations apply via the
-   Supabase SQL editor (CLI history stale) — automated per-run schema setup is awkward; a
-   dedicated-tenant approach puts fixtures in prod tables (risk). Decide before Suite B.
-6. **`occurred_at` vs `valid_until`/`valid_from` semantics.** The plan sets
-   `valid_until = occurred_at`. Under bitemporality (P5) `valid_until` is *valid-time* (when
-   the fact stopped being true), which a backdated correction places before the transition was
-   recorded. Pin whether `occurred_at` is system-time or valid-time across P3 and P5.
-7. **Wiki-in-path — answered.** The wiki is a separate surface (`handle_get_wiki`/
-   `handle_compile_wiki` endpoints), not the main query path. P6 is isolated and low-priority.
+All seven of Code's open questions are resolved. The originals are preserved in git history
+(rev. 1 of this ADR); the decisions:
+
+1. **`knowledge_chunked` — join, don't cascade.** Code raised that the chunked read path never
+   appeared in the plan and that dual-writing status to both tables is a divergence risk.
+   Chat's counter (accepted): **chunks carry no `status` at all** — retrieval joins chunks to
+   their parent on `document_id`. Verified against the read path: the three status-composite
+   indexes on `knowledge_chunked` exist but **none drive retrieval** (HNSW drives the vector
+   path, a seq scan the keyword path); `current` is **82%** of chunks so the filter is barely
+   selective (no filtered-HNSW pathology); and `created_by` (the security-critical filter) is
+   immutable and stays denormalised, so only the *mutable* field joins. This eliminates the
+   status-cascade, the second reconciliation failure mode, and the line-97 dual-UPDATE — status
+   divergence becomes *impossible*, not *prevented*. The content dual-write still must be atomic
+   (a parent with no chunks is its own bug); status simply isn't part of it.
+2. **Guard = `DEFERRABLE INITIALLY DEFERRED` constraint trigger**, checked at COMMIT (the FK
+   `superseding_id → knowledge.id` needs the new row to exist first, so a plain `BEFORE INSERT`
+   is impossible). Write path wraps knowledge-insert + event-insert in one transaction.
+3. **Recency net (Q3).** `durable` ships as a **tag** for P1 — acceptable *because P1 writes
+   nothing*: a mistagged row is down-ranked, not destroyed; fix the tag and it returns. **Stated
+   promotion trigger:** the moment durability gates anything *destructive* (a retirement job, a
+   status-writing demotion) it becomes a **validated column** — not "if it earns it." Decay is
+   **opt-in by domain** (`Network`/`K8s`/`Security` only — where the failure was measured), not
+   opt-out. This closes Code's exemption gap: `Personal` is **not** evergreen — it holds the
+   fastest-moving content in the store (the job-search pipeline record) — so a wholesale
+   `Personal` exemption would let the one thing guaranteed to age never age. `Personal` gets its
+   own look in a later phase with real data, not a rule inherited from an infra bug.
+4. **Fixture embeddings:** frozen/precomputed vectors for CI **plus** a separate non-CI job that
+   re-embeds fixtures against the live model periodically and flags divergence (Chat's addition —
+   otherwise CI stays green while production retrieval drifts).
+5. **Harness isolation:** ephemeral schema, not a dedicated prod tenant. Fixtures F2/F7/F10 are
+   deliberately-invalid rows; in prod tables one missed teardown turns a fixture contradiction
+   into a real answer. Awkward migrations are tooling; polluted production truth is correctness.
+6. **`occurred_at` = system/recorded time; `valid_until` = valid-time.** They are *not* the same
+   column: a backdated retirement sets `valid_until` to fact-offset (possibly earlier than
+   `occurred_at`). Pinned across P3 and P5 so bitemporality doesn't contradict the transition
+   record.
+7. **Wiki-in-path — answered.** Separate surface (`handle_get_wiki`/`handle_compile_wiki`), not
+   the main query path. P6 stays isolated and low-priority.
 
 ## Scope honesty
 
@@ -136,8 +151,9 @@ gain write access, or if we start grading agent predictions adversarially.
   retirement with reason; database-enforced single-current-per-component; contradiction
   becomes runnable; the live stale-ranking bug fixed at P1 before any schema change.
 - **Cost/risk:** triggers + a projection + a reconciliation job is materially more machinery
-  than an UPDATE; the `knowledge_chunked` consistency (#1) is non-trivial; a bad projection
-  could silently diverge (mitigated by the reconciliation job + B9 drift test).
+  than an UPDATE; a bad projection could silently diverge (mitigated by the reconciliation job
+  + B9 drift test). The `knowledge_chunked` risk (#1) is *dissolved*, not just mitigated —
+  chunks stop carrying status, so parent and chunks can't disagree about it.
 - **Validation:** every phase measured before/after; C3 (boost-off regression) + C4 (evergreen
   negative control) wired into CI; a **read-only dry run against the real corpus with a
   hand-reviewed retire/demote list before anything is applied to production** (test-harness
