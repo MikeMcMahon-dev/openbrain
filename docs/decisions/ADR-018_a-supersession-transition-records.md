@@ -396,10 +396,23 @@ validation pass must check, not just its numbers.
   migration FIRST, then deploy code); CI test on an ephemeral schema (F2/F7/F10 harness).
   Precondition cleared: `environment='Archive'` (9 rows) is orthogonal (all `current`, never
   overlaps historical/superseded).
-- **P4 Contradiction detection.** Candidate surfacing. The human gate moves here, off the write
-  path. Ranked fourth on **dependency**, not value: resolving a detected contradiction means
-  *recording a supersession*, so without P3 you would resolve it with the in-place UPDATE this
-  ADR removes.
+- **P4 Contradiction detection — BUILT + TRIALED (migration staged, 2026-08-01).** Candidate
+  surfacing; the human gate is off the write path. **P0 baseline** (same-system current pairs):
+  0 pairs ≥0.92, 2 ≥0.90, **9 ≥0.85** — and the top pairs are same-topic / temporal-sequence /
+  append-only session logs, **not** logical contradictions, confirming ADR §7's "two similar rows
+  may both be true." So: no auto-judgment; most candidates get dismissed → **dismissal memory is
+  the load-bearing requirement**. Migration `009_contradiction_candidates.sql`: pair table
+  (canonical `id_lo<id_hi`, `UNIQUE(id_lo,id_hi)`, status pending|confirmed|dismissed) — a
+  confirmed/dismissed pair is never re-flagged (`ON CONFLICT DO NOTHING`). `api/contradiction_
+  detect.py`: `detect_candidates` (same-system, sim≥threshold, default 0.85 via
+  `OPENBRAIN_CONTRADICTION_SIM_THRESHOLD`), `list_pending` (both-current only), `confirm`
+  (→`contradiction_confirmed` event on the P3 rails, projection retires the loser), `dismiss`
+  (no event). Review CLI `scripts/contradiction_review.py` (detect|list|confirm|dismiss). Nightly
+  cron `api/cron_contradiction_detect.py` built + routed but **DORMANT** (not in `vercel.json` —
+  ~9 pairs doesn't warrant a scan; one-line enable documented, Mike's call). Trialed 12/12 in
+  BEGIN..ROLLBACK (detect→confirm→dismiss→no-reflag→reconcile CLEAN). Scoped same-system only;
+  679 null-system floaters are recency-net territory (P1). **Remaining:** apply 009 via Dashboard;
+  human-review the 9; enable the cron if volume climbs.
 - **P5 Bitemporality — deferred, unscheduled.** Pull forward when a concrete backdating case
   demands it (item 8).
 - **P6 Fail-loud wiki `is_stale`** — low priority; the wiki is a separate surface
