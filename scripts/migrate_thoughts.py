@@ -243,7 +243,7 @@ def migrate(dry_run: bool = True) -> None:
     cur.execute("SELECT COUNT(*) FROM public.thoughts")
     thoughts_count = cur.fetchone()[0]
 
-    print(f"\nVerification:")
+    print("\nVerification:")
     print(f"  thoughts rows: {thoughts_count}")
     print(f"  knowledge rows: {knowledge_count}")
 
@@ -252,7 +252,7 @@ def migrate(dry_run: bool = True) -> None:
         conn.close()
         sys.exit(1)
     else:
-        print(f"  ✓ Counts match")
+        print("  ✓ Counts match")
 
     _write_report(total, prepared, domain_counts, env_counts, dry_run=False)
     conn.close()
@@ -267,15 +267,15 @@ def _write_report(
     dry_run: bool,
 ) -> None:
     lines = [
-        f"# OB2 Migration Report",
-        f"",
+        "# OB2 Migration Report",
+        "",
         f"**Date:** {datetime.now(timezone.utc).date()}",
         f"**Mode:** {'DRY RUN' if dry_run else 'EXECUTED'}",
         f"**Source:** `{MIGRATION_SOURCE}`",
         f"**Rows processed:** {total}",
-        f"",
-        f"## Domain distribution",
-        f"",
+        "",
+        "## Domain distribution",
+        "",
     ]
     for d, c in sorted(domain_counts.items(), key=lambda x: -x[1]):
         lines.append(f"- {d}: {c}")

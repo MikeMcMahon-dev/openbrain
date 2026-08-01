@@ -93,7 +93,7 @@ def test_fetch_strips_html_tags() -> None:
         if found:
             _record(name, False, f"raw HTML tags found in output: {found}")
         else:
-            _record(name, True, f"no raw HTML tags in output")
+            _record(name, True, "no raw HTML tags in output")
     except (ImportError, AttributeError):
         _record(name, False, "_fetch_url not yet implemented in api/_openbrain_api.py")
     except Exception as exc:

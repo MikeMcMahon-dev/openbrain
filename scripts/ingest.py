@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import os
+import sys
 import time
 import tomllib
-import sys
+import urllib.error
 from pathlib import Path
 from typing import Any
-import urllib.error
 
 from chunking import chunk_markdown, chunk_text_by_tokens
 from ingestors import (
@@ -152,8 +152,8 @@ def _connect_supabase(database_config: dict[str, Any]) -> tuple[Any | None, str 
         return None, "missing connection string"
 
     try:
-        from urllib.parse import urlparse
         import socket
+        from urllib.parse import urlparse
 
         parsed = urlparse(connection_string)
         if parsed.hostname:

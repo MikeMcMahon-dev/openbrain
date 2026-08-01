@@ -27,7 +27,6 @@ import argparse
 import json
 import re
 import secrets
-import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -189,7 +188,7 @@ def main() -> None:
     for token, owner in new_map.items():
         label = GPT_LABELS.get(owner, owner)
         print(f"\n  {label}")
-        print(f"  ChatGPT → Configure → Actions → Authentication → Bearer token:")
+        print("  ChatGPT → Configure → Actions → Authentication → Bearer token:")
         print(f"  {token}")
     print()
     print("Rotation complete. Confirm all three GPTs working within one week.")

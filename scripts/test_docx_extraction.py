@@ -12,7 +12,6 @@ Exit code: 0 = all pass, non-zero = failures.
 from __future__ import annotations
 
 import sys
-import traceback
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
