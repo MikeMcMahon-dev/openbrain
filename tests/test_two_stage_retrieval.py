@@ -225,6 +225,16 @@ def test_confidence_rank_agreement_promotes_short_bullseye():
     assert ob._confidence_from_signals(0.50, 0.033, 0.032, 74, rank_agreement=True) == "medium"
 
 
+def test_confidence_short_chunk_not_floored_to_low():
+    # a 23-word chunk with strong vsim: the whole-doc `<30 words -> low` floor stranded it
+    # at "low" regardless of similarity. On chunked reads the floor is skipped so vsim
+    # decides (Chat's eval §4). vsim 0.6459, no rank agreement -> medium (not high, not low).
+    assert ob._confidence_from_signals(0.6459, 0.03, 0.03, 23) == "low"                    # whole-doc: floored
+    assert ob._confidence_from_signals(0.6459, 0.03, 0.03, 23, chunked=True) == "medium"   # chunk: vsim decides
+    # the similarity bands still gate a genuinely weak short chunk to "low" even chunked
+    assert ob._confidence_from_signals(0.30, 0.03, 0.03, 23, chunked=True) == "low"
+
+
 # --- 4.4 delivery: sibling_chunks must survive the query-path adapter ----------
 def test_adapt_carries_sibling_chunks_through():
     kr = {"id": "c1", "document_id": "docA", "chunk_index": 0, "heading": "Intro",
