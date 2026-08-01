@@ -39,6 +39,14 @@ ALTER TABLE public.knowledge_chunked ALTER COLUMN tags        DROP NOT NULL;
 -- (system,status), tags_idx (tags). Postgres would auto-drop them with the columns anyway;
 -- dropping them explicitly first keeps the intent legible. The embedding (HNSW), document,
 -- created_by, and doc_chunk_uniq indexes are retained — they reference kept columns.
+--
+-- AS-APPLIED (2026-08-01): two RLS policies gated on `status` and blocked the column drop —
+-- found at apply time because the preflight did not enumerate policies (now fixed). The app
+-- connects as `postgres` (BYPASSRLS), so these anon policies governed only the unused Supabase
+-- REST anon surface; dropped them (Mike's call) rather than re-point them at the parent.
+DROP POLICY IF EXISTS knowledge_chunked_anon_read ON public.knowledge_chunked;
+DROP POLICY IF EXISTS knowledge_chunked_agent_insert ON public.knowledge_chunked;
+
 DROP INDEX IF EXISTS public.knowledge_chunked_status_domain_idx;
 DROP INDEX IF EXISTS public.knowledge_chunked_system_idx;
 DROP INDEX IF EXISTS public.knowledge_chunked_tags_idx;
@@ -62,3 +70,12 @@ ALTER TABLE public.knowledge_chunked DROP COLUMN IF EXISTS environment;
 --     component_key=k.component_key, tags=k.tags, domain=k.domain, environment=k.environment
 --     FROM public.knowledge k WHERE k.id = kc.document_id;
 --   -- then re-add NOT NULL on domain/environment/status/tags if desired (§A reverse).
+
+-- ══ C. AS-APPLIED before 006 §E VALIDATE (2026-08-01) ═════════════════════════════════════
+-- Promoting 006's `component_requires_system` CHECK to VALID failed: two `component:adr-018`
+-- rows (1 current, 1 superseded) had a backfilled component_key but no system. They are ADR
+-- handoff artifacts — "ingested once, not maintained live" (ADR-018a) — so they should not be
+-- live component identities. De-registered them (clear the key) rather than invent a system,
+-- then 006 §E validated clean. Trialed in a rolled-back txn first.
+--   UPDATE public.knowledge SET component_key = NULL WHERE component_key='adr-018' AND system IS NULL;
+--   ALTER TABLE public.knowledge VALIDATE CONSTRAINT component_requires_system;   -- (006 §E)

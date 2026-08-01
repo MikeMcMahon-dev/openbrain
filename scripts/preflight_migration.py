@@ -58,9 +58,15 @@ def schema(table: str):
             [table],
         )
         cons = cur.fetchall()
+        cur.execute(
+            "SELECT policyname, cmd, roles::text, qual, with_check "
+            "FROM pg_policies WHERE tablename = %s ORDER BY policyname",
+            [table],
+        )
+        pols = cur.fetchall()
         cur.execute("SELECT count(*) FROM public." + table)  # table name validated in main()
         n = cur.fetchone()[0]
-    return cols, idx, cons, n
+    return cols, idx, cons, pols, n
 
 
 def code_refs(table: str) -> list[tuple[str, str, str]]:
@@ -98,7 +104,7 @@ def main() -> int:
     if result is None:
         print(f"no such table: public.{table}")
         return 2
-    cols, idx, cons, n = result
+    cols, idx, cons, pols, n = result
 
     print(f"\n=== public.{table} — {n} rows ===")
     print("\ncolumns (name | nullable | default | type):")
@@ -110,6 +116,17 @@ def main() -> int:
     print("\nconstraints (name | type | validated):")
     for name, ct, val in cons:
         print(f"  {name:38} {ct}  validated={val}")
+
+    print("\nRLS policies (a policy referencing a dropped column BLOCKS the drop —")
+    print("re-point it at the parent or drop it first):")
+    if not pols:
+        print("  (none)")
+    for name, cmd, roles, qual, wc in pols:
+        print(f"  {name}  ({cmd}, roles={roles})")
+        if qual:
+            print(f"      USING:      {qual}")
+        if wc:
+            print(f"      WITH CHECK: {wc}")
 
     refs = code_refs(table)
     writers = [h for h in refs if h[0] == "WRITE"]

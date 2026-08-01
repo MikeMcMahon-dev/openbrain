@@ -1,11 +1,12 @@
 # ADR-018: Supersession as append-only transition records
 
-**Status:** P1 **shipped and live**. The metadata-ownership question is **decided** (§Decision 3:
-join, don't cascade). P2 **frozen mid-apply** pending *implementation* — resume at P2 step 0 (the
-two-table parity test), then migration 007. No further DB mutation without sign-off + a read-only
-dry run.
-**Date:** 2026-08-01 (rev.5.1 — single Decision section; metadata drift resolved; P2 freeze
-recorded; post-re-key state reconciled + linchpin phrasing tightened)
+**Status:** P1 **shipped and live**. P2 **COMPLETE and applied** (2026-08-01): `knowledge_chunked`
+is content-only, metadata joins from the parent, `component_key` has a writer, and 006's
+`component_requires_system` CHECK is **validated**. Verified end state: content-only chunk table,
+constraint validated, 807/1317 rows intact, invariants green, live smoke clean. Next up is P3
+(transition records). Only P2 tail left: the `chore(lint)` sweep.
+**Date:** 2026-08-01 (rev.6 — P2 applied end-to-end; expand/contract apply order + two apply-time
+finds recorded: RLS-policy dependency and the adr-018 CHECK-violator artifacts)
 **Relates to:** ADR-008 (living-doc identity), ADR-011 (document model), ADR-017 (chunking —
 the read path this must stay consistent with), ADR-019 (deployment-completeness gate).
 Supersedes the `auto_supersede` UPDATE-in-place mechanism in `api/knowledge_ingest.py`.
@@ -266,11 +267,20 @@ applying an `ALTER`/`DROP`, run `scripts/preflight_migration.py <table>` and ans
 operational rubric from its output: column **nullability/defaults/CHECK** state, **real**
 index/constraint names (never guessed), the **apply order** (expand/contract — a reader/writer
 stops before a column is dropped; a NOT-NULL column gets `DROP NOT NULL` first), **every**
-repo reader AND writer of the table (not just the file in the diff), and **derived-table
-parity**. This control exists because the earlier data/phrasing pass missed a NOT-NULL that
-forced an expand/contract split, a fabricated index name, and an un-migrated second writer — the
-last one a data-loss-class miss caught only by 10b. A schema change with no preflight output on
-the record is not a validated change.
+repo reader AND writer of the table (not just the file in the diff), **RLS policies** on the
+table, and **derived-table parity**. This control exists because the earlier data/phrasing pass
+missed a NOT-NULL that forced an expand/contract split, a fabricated index name, and an
+un-migrated second writer — the last one a data-loss-class miss caught only by 10b. A schema
+change with no preflight output on the record is not a validated change.
+
+**10e. Trial every prod statement in `BEGIN … ROLLBACK` before it is handed over — the
+universal net.** Enumerating object classes ahead of time is fallible (the apply still hit an
+RLS-policy dependency at §B and a CHECK violation at §E that preflight/audit had not surfaced).
+Running the *exact* statement in a rolled-back transaction reproduces every dependency and
+constraint error against real prod data while changing nothing — it does not depend on
+remembering what to check. Both apply-time surprises would have been caught pre-handoff by this
+one rule. Standing rule: **no prod SQL reaches Mike until its rolled-back trial has passed**, and
+the trial result is the evidence, not "I checked it."
 
 ---
 
@@ -344,16 +354,23 @@ validation pass must check, not just its numbers.
      content-only + drops the tag-based chunk-status UPDATE; `component_key` gets its writer on
      the parent INSERT. ✅ built + live-verified (PR #85). Deploy happens at step 4.
   2. `system` at the ingest API + CLI, validated vs the vocabulary. ✅ already in main (#82).
-  3. **Migration 007 §A — `DROP NOT NULL`** on `domain/environment/status/tags`. BEFORE the
-     deploy. Behaviour-neutral: the old mirror keeps writing values.
-  4. **Deploy** the step-1 code. Metadata now read from the parent; mirror content-only; the six
-     columns are unread and unwritten.
-  5. **Verify** — smoke, `make capability-audit`, spot-check queries — before dropping anything.
-  6. **Migration 007 §B — `DROP` the six columns** + indexes. Parity guard then xPASSes → delete it.
-  7. **`VALIDATE CONSTRAINT`** (006 §E). The 2 real null-system rows are already re-keyed, clean scan.
+  3. **Migration 007 §A — `DROP NOT NULL`** on `domain/environment/status/tags`, before the
+     deploy. ✅ applied.
+  4. **Deploy** the step-1 code (Vercel auto-deploy on #85 merge). ✅ live (READY at 9ab0621).
+  5. **Verify** — live smoke exit 0, `capability-audit` PASS, prod spot-check served parent
+     `system` for the drifted docs. ✅
+  6. **Migration 007 §B — `DROP` the six columns** + indexes. ✅ applied. **Apply-time find:** two
+     `anon` RLS policies gated on `status` and blocked the drop — the preflight had not enumerated
+     policies (now fixed). App is `postgres`/BYPASSRLS so they governed only the unused REST anon
+     surface; dropped them. Parity guard xPASSed → deleted.
+  7. **`VALIDATE CONSTRAINT`** (006 §E). ✅ applied. **Apply-time find:** the CHECK is
+     unconditional (all statuses), so it caught two `component:adr-018` handoff-artifact rows the
+     `current`-scoped audit had excluded; de-registered them (cleared `component_key`) per "ingest
+     once, not maintained live", then validated clean. (Trialed in a rolled-back txn first — the
+     rule that would have caught both finds pre-handoff; see item 10d.)
   8. **Post-migration `chore(lint)`.** Clear the 163 ruff findings (mostly E501; 50 auto-fixable)
      in a dedicated PR — surgical wraps, not `ruff format`. All Claude-authored; who wrote them is
-     irrelevant, they should not exist.
+     irrelevant, they should not exist. ⏳ the one remaining P2 tail.
   - **Precondition — DECIDED:** `system` is a general **namespace** (Mike, 2026-08-01), not
     infra-only; the 2 rows re-keyed to `FlightSim` / `MikeMcMahon-Dev`.
 - **P2→P3 window.** `auto_supersede` still keys supersession on the `component:*` tag. It stays
