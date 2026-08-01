@@ -1,8 +1,8 @@
 # ADR-018: Supersession as append-only transition records
 
 **Status:** Proposed (design; no DB mutation without sign-off + a read-only dry run).
-All seven open questions **resolved** with Chat 2026-07-31 (see §Resolutions).
-**Date:** 2026-07-31 (rev. 2026-07-31 — Q1 join-not-cascade, Q3 allowlist decay)
+Seven open questions resolved with Chat; nine review refinements folded in (see §Resolutions).
+**Date:** 2026-07-31 (rev.4 — join-not-cascade, allowlist decay, review refinements 1–10)
 **Relates to:** ADR-008 (living-doc identity / component keys), ADR-011 (document model),
 ADR-017 (chunking — the read path this must stay consistent with). Supersedes the
 `auto_supersede` UPDATE-in-place mechanism in `api/knowledge_ingest.py`.
@@ -18,10 +18,12 @@ retrieval still serves stale present-tense assertions. Verified against prod (20
   authoritative doc** the moment the component boost isn't present. Query
   `Technitium DNS cluster DANE TLSA certificate trust`: at `boost=1.0` the June-stale doc
   ranks **#0** and the July-authoritative one falls to **#3** (below a superseded row). The
-  ×2 boost is the only thing hiding it, and it fires on **3 of 731 current rows**.
+  ×2 boost is the only thing hiding it, and it fires on **3 of 731 current rows** (3 at time
+  of measurement; 6 real component-keyed rows as of writing — the count grew as this work
+  produced component-tagged docs).
 - **83% of current rows are temporally ungrounded** — no in-content date, no `component:*`
-  tag; `valid_until` set on 15 rows total; supersession-eligible on 3. 91% of the corpus is
-  `current` and nothing retires it, so present-tense assertions live forever.
+  tag; `valid_until` set on 16 rows (15 at measurement); supersession-eligible on 3. 91% of the
+  corpus is `current` and nothing retires it, so present-tense assertions live forever.
 - **Supersession UPDATEs in place** (`knowledge_ingest.py`: `SET status='superseded'`), and
   **nothing detects that a new record contradicts a current one** — a human has to notice,
   which the cutover post itself says solo operators fail at.
@@ -52,9 +54,10 @@ excluded. Concretely:
    inferred, unreliably (same subject → `OpenBrain` for one write, `null` for another), which
    makes a complete `(system, component)` identity impossible to produce on purpose. A
    `CHECK (component_key IS NULL OR system IS NOT NULL)` rejects the incomplete identity at
-   write time, and the partial unique index uses **`NULLS NOT DISTINCT`** (PG17, confirmed) as
-   a secondary guard — because standard NULL-distinctness would let `(NULL, 'k')` collide with
-   `(NULL, 'k')`, permitting the exact duplicate this ADR's own re-ingest produced (Chat, Q1b).
+   write time (the **primary** guard), and the partial unique index uses **`NULLS NOT DISTINCT`**
+   (PG17, confirmed) as a secondary belt — because standard NULL-distinctness treats two NULL
+   systems as *different*, so `(NULL,'k')` and `(NULL,'k')` **fail to collide** and both rows
+   are permitted, which is the gap that lets a null-system component silently duplicate.
 4. **Enforcement:** a guard mechanism refuses a competing current insert with no accompanying
    transition; a projection mechanism is the *only* writer of `status`; a nightly
    reconciliation job proves stored status matches transitions-derived status (drift = bug).
@@ -62,29 +65,53 @@ excluded. Concretely:
    ~613 floaters that carry no component key and never will.
 6. **Contradiction detection** surfaces *candidates* (same-system, high-similarity current
    pairs) for human confirmation — not automated contradiction judgment.
-7. **Bitemporality:** ingest may set `valid_from` to fact-onset while `created_at` stays
-   ingest time. Columns already exist; the fix is using them.
+7. **Bitemporality:** `valid_from` = fact-onset, `created_at` = ingest time — columns exist.
+   But the distinction is **anticipated, not observed** (data, 2026-07-31): `valid_until` *is*
+   exercised organically (6 `live:text` retirements vs 10 migration artifacts, 16 total), yet
+   `valid_from` has never once *organically* differed from `created_at` — the 743 rows where
+   they differ are OB1→OB2 migration timestamp skew, not backdating. So P5 is **scheduled for a
+   concrete backdating case, not built speculatively**, and when built `valid_from` is set
+   **explicitly at the ingest surface — never an optional `may`** (capacity without a caller is
+   how `component_key` reached 8 rows half-unusable).
 
 ### Phasing (adopting the plan's order)
 
-- **P0 Measure** — count existing invariant violations (`(system, component)` with >1
-  current) and the same-system high-similarity current-pair population. Baseline retrieval.
+- **P0 Measure + standing monitor** — baseline the same-system high-similarity current-pair
+  population, then run two counts **on a schedule through P1/P2** (excluding handoff artifacts,
+  §Corrections): (a) current rows with a `component_key` and null `system` — today **2**, must
+  trend to 0; (b) `(system, component_key)` with >1 current — today **0**, must stay 0. A query,
+  not a project; it catches a regression during the P1 window when nobody's watching this surface.
 - **P1 Recency net** — fixes the live bug, zero writes, instantly reversible. **First.**
   `created_at` decay applied **only to `Network`, `K8s`, `Security`** (the domains where the
   failure was measured — allowlist, not denylist; Q3). `durable`-tagged rows exempt.
+  **Done when** the harness C3 xpasses at `boost=1.0` and its strict-xfail marker is removed
+  (test-harness defines this exit criterion precisely).
 - **P2 `component_key` column** + vocabulary + **explicit-required `system`** (plumbed through
   the ingest API/CLI, validated) + `CHECK (component_key IS NULL OR system IS NOT NULL)` +
   partial unique index `NULLS NOT DISTINCT` on `knowledge` (parent — chunks never carry keys).
-  Backfill inherits inferred systems, so re-key the existing 4 null-system component rows by
-  hand as part of the migration.
+  **Sequence:** land the CHECK **first**, *then* hand-re-key the real null-system component rows
+  (**2** excluding handoff: `flightsim-hardware`, `mikemcmahon-dev-design`) — so the constraint
+  validates each correction as it's made rather than re-keying under the conditions that caused
+  the error. **Precondition (Mike's call):** what does the vocabulary *mean* — is `system`
+  infrastructure-systems (`SpectreNet`) or general namespaces? Those two rows aren't infra, and
+  their re-key sets the convention for every write after. Decide before the backfill, not by
+  four hand-edits.
+- **P2→P3 window (no silent gap):** `auto_supersede` currently reads the `component:*` **tag**;
+  P2 moves that key to a column. P2 **updates `auto_supersede` to read the new column** so live
+  supersession stays whole through the window; P3 retires it when the projection takes over.
+  (Option (a) of {update / pause / ship-together} — chosen, stated.)
 - **P3 Transition records** — `supersession_events`, backfill the 4 `supersedes_id` chains
   as `reason_code='migration'`, switch the write path, the projection writes `knowledge.status`
   only (chunks join, no cascade), guard (deferrable constraint trigger, Q2) + reconciliation.
 - **P4 Contradiction detection** — candidate surfacing; the human gate moves here off the
   write path.
-- **P5 Bitemporality** — explicit `valid_from`. Independent; can move earlier.
+- **P5 Bitemporality** — `valid_from` set **explicitly** at ingest (never `may`). **Deferred,
+  unscheduled** — the distinction is anticipated, not measured (Decision 7); pull it forward
+  only when a concrete backdating case demands it.
 - **P6 Fail-loud wiki `is_stale`** — low priority; the wiki is a separate surface, not the
   main query path (verified).
+- **P-Personal (deferred, unscheduled)** — decide how the fastest-moving domain (`Personal` /
+  the job-search pipeline) should age, with real data. Numbered so it doesn't evaporate.
 
 ### Ordering — Code concedes to Chat
 
@@ -123,7 +150,8 @@ All seven of Code's open questions are resolved. The originals are preserved in 
    opt-out. This closes Code's exemption gap: `Personal` is **not** evergreen — it holds the
    fastest-moving content in the store (the job-search pipeline record) — so a wholesale
    `Personal` exemption would let the one thing guaranteed to age never age. `Personal` gets its
-   own look in a later phase with real data, not a rule inherited from an infra bug.
+   own look in **P-Personal (deferred, unscheduled)** — with real data, not a rule inherited
+   from an infra bug.
 4. **Fixture embeddings:** frozen/precomputed vectors for CI **plus** a separate non-CI job that
    re-embeds fixtures against the live model periodically and flags divergence (Chat's addition —
    otherwise CI stays green while production retrieval drifts).
@@ -137,16 +165,32 @@ All seven of Code's open questions are resolved. The originals are preserved in 
 7. **Wiki-in-path — answered.** Separate surface (`handle_get_wiki`/`handle_compile_wiki`), not
    the main query path. P6 stays isolated and low-priority.
 
+## Corrections — handoff artifacts are not a real failure rate
+
+The duplicate `component:adr-018` rows came from writing this ADR *into* OpenBrain as a way to
+hand the document to Chat — a workflow artifact, not organic operation. The earlier idea of
+making that recursion a centrepiece of Context is **withdrawn**: it would misrepresent the
+system's real failure rate to a later reader. The technical finding it surfaced stands on its
+own without the dupes — `system` isn't settable through the ingest surface, the identity is
+half-inferred, and the CHECK is the right fix. **Consequence:** every invariant-violation count
+(P0, Scope) **excludes handoff artifacts**, or the baseline measures our process, not the store.
+Lesson adopted: ADRs are decided in git and ingested **once**, not maintained live in the store.
+
 ## Scope honesty
 
-This builds rails for the **component-keyed subset** — 8 current rows today, but only **4
-carry a `system`**, so only 4 are index-protectable until P2 plumbs system (the other 4
-include 2 legit living docs, `flightsim-hardware` and `mikemcmahon-dev-design`, unprotected
-now) — plus a **recency net** for the ~613 floaters. It does **not** make the 83% ungrounded corpus
-"temporally grounded" — that remains a curation reality. What it does: makes stale content
-*sink* (recency), makes designated living-docs *provably single-current* (transitions +
-index), and makes contradiction a *query a machine runs* rather than a thing a solo operator
-must notice.
+This builds rails for the **component-keyed subset** — 7 current component rows today, of which
+**1 is the `adr-018` handoff artifact** (excluded). Of the **6 real** rows, **4 carry a
+`system`** (index-protectable) and **2 do not** — the legit living docs `flightsim-hardware` and
+`mikemcmahon-dev-design`, unprotected until P2 plumbs system — plus a **recency net** for the
+~613 floaters. It does **not** make the 83% ungrounded corpus "temporally grounded" — that
+remains a curation reality. What it does: makes stale content *sink* (recency), makes designated
+living-docs *provably single-current* (transitions + index), and makes contradiction a *query a
+machine runs* rather than a thing a solo operator must notice.
+
+**Reconcile `environment='Archive'` first:** it is already in use (**9 rows**) — a
+retirement-adjacent concept predates this ADR. Before building a parallel mechanism, establish
+what those 9 are and whether `Archive` overlaps `historical`/`superseded`, so we extend rather
+than duplicate.
 
 ## Not doing
 
@@ -166,6 +210,9 @@ gain write access, or if we start grading agent predictions adversarially.
   than an UPDATE; a bad projection could silently diverge (mitigated by the reconciliation job
   + B9 drift test). The `knowledge_chunked` risk (#1) is *dissolved*, not just mitigated —
   chunks stop carrying status, so parent and chunks can't disagree about it.
+- **Rollback:** because `supersession_events` is append-only truth, `knowledge.status` can be
+  rebuilt from it at any time — a faulty projection is recovered by **replay, not restore**.
+  State it so nobody improvises something worse under pressure.
 - **Validation:** every phase measured before/after; C3 (boost-off regression) + C4 (evergreen
   negative control) wired into CI; a **read-only dry run against the real corpus with a
   hand-reviewed retire/demote list before anything is applied to production** (test-harness
