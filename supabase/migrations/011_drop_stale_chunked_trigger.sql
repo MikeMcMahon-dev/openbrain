@@ -1,0 +1,43 @@
+-- OB2 Migration 011: drop the stale knowledge_chunked insert-validation trigger + function
+--
+-- ⚠ AS-APPLIED 2026-08-06 (direct psycopg, trialed BEGIN..ROLLBACK first; prod committed). ⚠
+--
+-- WHY: migration 005 created validate_knowledge_chunked_insert() to enforce a per-DOCUMENT
+-- duplicate-current guard, reading NEW.status / NEW.system / NEW.tags off the chunk row.
+-- Migration 007 then made knowledge_chunked content-only and DROPPED status/system/tags
+-- (metadata now JOINs from the parent knowledge row). 007 handled the index and RLS-policy
+-- dependents of those columns but LEFT this trigger + function in place. Postgres records no
+-- catalog dependency from a PL/pgSQL function body to the columns it names, so the drop
+-- succeeded silently and every subsequent INSERT into knowledge_chunked raised:
+--     record "new" has no field "status"
+-- The ingest dual-write (_dual_write_chunks) swallows chunk-write errors by design — a chunk
+-- failure must never fail the canonical parent write — so from 2026-08-01 every ingest wrote
+-- the parent but never chunked. Retrieval reads the chunked store, so those notes (4 rows,
+-- all `current`) were invisible to search. Detected 2026-08-06; see docs post-mortem.
+--
+-- FIX: the guard is now DEAD, not merely broken. Under the content-only/join model the chunk
+-- no longer owns status/system/tags, and the invariant it enforced (one current DOCUMENT per
+-- (system, component)) is already guaranteed at the PARENT by migration 006's
+-- one_current_per_component unique index + validate_knowledge_insert(), which fire on the
+-- parent INSERT that precedes any chunk write. Re-adding the columns would reopen the drift
+-- bug 007 closed; rewriting the function to JOIN the parent would re-check an invariant the
+-- parent already owns. So the correct fix is to DROP both.
+--
+-- EVIDENCE ON RECORD (pre-apply):
+--   * sql_trial.py on this exact block: TRIAL PASSED.
+--   * before/after harness in one rolled-back txn: a real embedded chunk INSERT FAILED with
+--     the trigger present and SUCCEEDED after the drop, then read back correctly through the
+--     knowledge_chunked -> knowledge retrieval JOIN.
+--   * post-apply: scripts/backfill_orphan_chunks.py --execute re-chunked the 4 orphaned rows;
+--     live prod search returns them at rank 1; scripts/chunk_integrity_check.py is green.
+
+DROP TRIGGER IF EXISTS knowledge_chunked_insert_validation ON public.knowledge_chunked;
+DROP FUNCTION IF EXISTS public.validate_knowledge_chunked_insert();
+
+-- ── Rollback (restores the migration-005 form — only if the chunked store ever regains its
+--    own status/system/tags columns; against the current content-only schema this function
+--    would immediately re-break, so do NOT restore it as-is) ─────────────────────────────
+--   CREATE OR REPLACE FUNCTION public.validate_knowledge_chunked_insert() ... (see 005);
+--   CREATE TRIGGER knowledge_chunked_insert_validation
+--     BEFORE INSERT ON public.knowledge_chunked
+--     FOR EACH ROW EXECUTE FUNCTION public.validate_knowledge_chunked_insert();
