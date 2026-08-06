@@ -102,10 +102,14 @@ days.
   will not catch a column referenced via dynamic SQL (`EXECUTE format(...)`) or read from another
   table inside the body. Those are rarer and noisier; the regex covers the common trigger-guard
   shape that actually bit us. Revisit if a dynamic-SQL body ever hides a reference.
-- **Discipline, not enforcement:** like `sql_trial`, the gate only works if the migration author
-  runs it. It is convention backed by the PM reviewer and by smoke, not a pre-commit block. If
-  that proves insufficient, the next step is a hook that refuses a migration diff touching
-  `DROP COLUMN` without an attached preflight artifact.
+- **Enforcement moved off the author.** The weak version of this gate ("works only if the author
+  runs it") is closed by the PM reviewer persona (ADR-019 §3, `home-lab/.claude/agents/pm.md`),
+  which now **runs the preflight itself from the diff** — it does not accept an attached artifact
+  (stale/forgeable) — and treats a dropped column that appears in a trigger/function body as a hard
+  STOP. It is a **project-init precondition** for any column DROP/RENAME/retype, not only a
+  merge-time check: catching it at planning is the point, review is the backstop. The remaining
+  belt-and-suspenders, if ever needed, is a pre-commit hook refusing a `DROP COLUMN` diff with no
+  preflight artifact on the record.
 
 ## Not doing
 
