@@ -79,6 +79,12 @@ Provider: **OpenRouter** (`OPENROUTER_API_KEY` + `OPENROUTER_BASE_URL=https://op
 This is the standard across Slack ingest and Obsidian/DB import paths to keep vector dimensions consistent.
 No direct OpenAI key is required — all embedding calls route through OpenRouter.
 
+> **Deliberate, cheap (~$0.03 since March 2026), and NOT a leftover from before the Supabase move.**
+> `text-embedding-3-small` is an OpenAI model and **Anthropic has no embeddings API**, so "all-in on
+> Anthropic" cannot include embeddings — OpenRouter is just the billing account for the one model we
+> use. Before proposing to "move off OpenRouter," read `docs/embedding-provider-decision.md`; this
+> question has been asked and answered.
+
 ---
 
 ## 5. Vercel API Layer
