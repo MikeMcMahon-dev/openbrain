@@ -107,9 +107,13 @@ days.
   which now **runs the preflight itself from the diff** — it does not accept an attached artifact
   (stale/forgeable) — and treats a dropped column that appears in a trigger/function body as a hard
   STOP. It is a **project-init precondition** for any column DROP/RENAME/retype, not only a
-  merge-time check: catching it at planning is the point, review is the backstop. The remaining
-  belt-and-suspenders, if ever needed, is a pre-commit hook refusing a `DROP COLUMN` diff with no
-  preflight artifact on the record.
+  merge-time check: catching it at planning is the point, review is the backstop. And the
+  belt-and-suspenders is now built: `scripts/pre-commit` §3 refuses a migration diff that
+  drops/renames a column or table unless a co-committed `<migration>.preflight.txt` artifact is
+  present (static + offline-safe — at commit time the migration is not yet applied, so a live scan
+  would read stale state; the artifact is the reviewable evidence the author ran the scan). Three
+  independent layers now: author ritual (hook), planning/review gate (PM runs it), runtime net
+  (integrity check in smoke).
 
 ## Not doing
 
