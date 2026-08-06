@@ -1026,7 +1026,42 @@ def smoke_local(idempotency_source: str | None = None, idempotency_owner: str | 
     # OB2 knowledge/wiki smoke cases
     failed += _smoke_ob2_cases_local()
 
+    # DB integrity guardrails (stale triggers + chunk coverage) — see 2026-08-06 post-mortem
+    failed += _smoke_db_integrity_local()
+
     return failed
+
+
+def _smoke_db_integrity_local() -> int:
+    """Live DB invariants for the knowledge / knowledge_chunked stores.
+
+    Guards the two failures behind the 2026-08-06 silent-unchunked-ingest incident:
+    a trigger function referencing a dropped column, and `current` knowledge rows with
+    no chunk children (invisible to the chunked read path). Requires SUPABASE_DB_URL;
+    skips (non-failing) if the DB is unreachable, so the HTTP smoke suite still runs
+    in environments without direct Postgres access.
+    """
+    dsn = os.getenv("SUPABASE_DB_URL") or os.getenv("DATABASE_URL")
+    if not dsn:
+        print("db-integrity: SKIP (no SUPABASE_DB_URL in env)")
+        return 0
+    try:
+        import psycopg
+
+        from scripts.chunk_integrity_check import run_all
+
+        conn = psycopg.connect(dsn)
+        conn.autocommit = True
+        problems = run_all(conn)
+    except Exception as exc:  # unreachable DB / missing driver — do not block HTTP smoke
+        print(f"db-integrity: SKIP (DB check unavailable: {exc})")
+        return 0
+    if problems:
+        for p in problems:
+            print(f"db-integrity: FAIL — {p}")
+        return 1
+    print("db-integrity: ok (no stale triggers, full chunk coverage)")
+    return 0
 
 
 def _smoke_ob2_cases_local() -> int:

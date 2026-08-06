@@ -33,6 +33,8 @@ if _ENV.exists():
 import psycopg  # noqa: E402
 
 _WRITE = re.compile(r"\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM|ALTER\s+TABLE|DROP\s+TABLE)\b", re.I)
+# NEW./OLD. field references inside a PL/pgSQL trigger function body.
+_REC_FIELD = re.compile(r"\b(?:NEW|OLD)\.([a-z_][a-z0-9_]*)", re.I)
 
 
 def _dsn() -> str | None:
@@ -88,6 +90,32 @@ def code_refs(table: str) -> list[tuple[str, str, str]]:
     return hits
 
 
+def triggers(table: str, table_cols: set[str]):
+    """Triggers on the table + which of the table's columns each function body reads.
+
+    THE blind spot behind the 2026-08-06 incident: Postgres records NO catalog dependency
+    from a PL/pgSQL function body to the columns it names (the body is opaque text, resolved
+    only at execute time). So DROP COLUMN succeeds silently even when a trigger function reads
+    that column, and the error surfaces only at the next INSERT/UPDATE — which, for the ingest
+    dual-write, was swallowed for 6 days. Enumerate them here so a column drop's real blast
+    radius is on the record BEFORE the apply. Returns (tgname, proname, [cols_read]).
+    """
+    with psycopg.connect(_dsn()) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT t.tgname, p.proname, pg_get_functiondef(p.oid) "
+            "FROM pg_trigger t JOIN pg_proc p ON p.oid = t.tgfoid "
+            "WHERE t.tgrelid = ('public.' || %s)::regclass AND NOT t.tgisinternal "
+            "ORDER BY t.tgname",
+            [table],
+        )
+        rows = cur.fetchall()
+    out = []
+    for tgname, proname, body in rows:
+        refs = {m.lower() for m in _REC_FIELD.findall(body or "")}
+        out.append((tgname, proname, sorted(r for r in refs if r in table_cols)))
+    return out
+
+
 def main() -> int:
     if len(sys.argv) != 2:
         print("usage: preflight_migration.py <table>")
@@ -127,6 +155,18 @@ def main() -> int:
             print(f"      USING:      {qual}")
         if wc:
             print(f"      WITH CHECK: {wc}")
+
+    col_names = {c[0] for c in cols}
+    print("\ntriggers (a trigger FUNCTION body reading a column has NO catalog dependency —")
+    print("Postgres DROPs the column silently and the function breaks at the next write):")
+    trigs = triggers(table, col_names)
+    if not trigs:
+        print("  (none)")
+    for tgname, proname, cols_read in trigs:
+        print(f"  {tgname} -> {proname}()")
+        if cols_read:
+            print(f"      reads columns: {cols_read}")
+            print(f"      ^ dropping any of these WITHOUT updating {proname}() = SILENT breakage")
 
     refs = code_refs(table)
     writers = [h for h in refs if h[0] == "WRITE"]

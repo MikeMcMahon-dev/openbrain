@@ -39,6 +39,38 @@ for file in $STAGED_FILES; do
     done
 done
 
+# ── 3. Schema-change dependency gate (ADR-020) ────────────────────────────────
+# A migration that DROPs/RENAMEs/retypes a column (or DROPs a table) can orphan a
+# trigger/function whose PL/pgSQL body still reads it — Postgres records no catalog
+# dependency for that, so the drop succeeds and fails SILENTLY at the next write (the
+# 2026-08-06 incident: 6 days of ingests invisible to search). This is the belt to the
+# PM reviewer's braces: block such a migration unless a preflight artifact is committed
+# alongside it. Convention: <migration>.sql needs a co-committed <migration>.preflight.txt
+# — produce it with:  python scripts/preflight_migration.py <table> | tee <migration>.preflight.txt
+# Static + offline-safe by design: at commit time the migration is NOT yet applied, so a
+# live scan would check stale state; the artifact is the reviewable evidence the author ran it.
+DDL_RE='(DROP[[:space:]]+COLUMN|RENAME[[:space:]]+COLUMN|ALTER[[:space:]]+COLUMN[[:space:]].+TYPE|DROP[[:space:]]+TABLE)'
+for file in $STAGED_FILES; do
+    case "$file" in
+        supabase/migrations/*.sql) ;;
+        *) continue ;;
+    esac
+    # Ignore full-line SQL comments so a DROP COLUMN in a rollback note doesn't false-trip.
+    body=$(git show ":$file" 2>/dev/null | grep -vE '^[[:space:]]*--' || true)
+    if echo "$body" | grep -qiE "$DDL_RE"; then
+        artifact="${file%.sql}.preflight.txt"
+        if echo "$STAGED_FILES" | grep -qxF "$artifact"; then
+            continue
+        fi
+        echo "BLOCKED: '$file' drops/renames a column or table but no preflight artifact" >&2
+        echo "         is committed (ADR-020). Trigger/function bodies that read a dropped" >&2
+        echo "         column break SILENTLY — Postgres won't stop you." >&2
+        echo "         Run:  python scripts/preflight_migration.py <table> | tee $artifact" >&2
+        echo "         then 'git add $artifact' and commit both." >&2
+        FAIL=1
+    fi
+done
+
 # ── Result ────────────────────────────────────────────────────────────────────
 if [[ $FAIL -ne 0 ]]; then
     echo "" >&2
