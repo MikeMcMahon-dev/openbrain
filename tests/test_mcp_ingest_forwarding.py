@@ -145,6 +145,11 @@ def test_hosted_schema_and_forwarding_stay_in_sync():
             "system": "OpenBrain",
             "component": "probe",
             "valid_from": "2026-08-22",
+            # Plan/apply handshake fields. If the schema advertises these and _call_tool drops
+            # them, every gated commit 409s with no way for the client to comply.
+            "plan_token": "probe.token",
+            "acknowledged_not_updating": ["some-component"],
+            "decline_reason": "probe",
         }
     )
     missing = [p for p in props if p not in forwarded]
