@@ -14,6 +14,7 @@ from api._openbrain_api import (
     response_payload,
     search_payload,
 )
+from api.canonical_systems import CANONICAL_SYSTEMS
 from api.chatgpt import _inject_token_owner
 
 
@@ -262,6 +263,35 @@ def _list_tools() -> list[dict]:
                             "not auto-applied."
                         ),
                     },
+                    "system": {
+                        "type": "string",
+                        "description": (
+                            "Namespace this note belongs to — the ADR-018 supersession "
+                            "pivot. REQUIRED whenever component is set. Choose the closest "
+                            "existing value; do not invent new systems."
+                        ),
+                        "enum": sorted(CANONICAL_SYSTEMS),
+                    },
+                    "component": {
+                        "type": "string",
+                        "description": (
+                            "Living-doc identity (ADR-008). Set ONLY for a canonical "
+                            "current-state document that should REPLACE its prior version "
+                            "on re-ingest (e.g. dns-current-state) — never for append-only "
+                            "session notes. Requires system. Re-ingesting the same "
+                            "(system, component) retires the old version via a "
+                            "supersession event."
+                        ),
+                    },
+                    "valid_from": {
+                        "type": "string",
+                        "description": (
+                            "ISO-8601 fact-onset (valid-time), e.g. 2026-07-15. Set only "
+                            "when the fact became true BEFORE now (backdating a change you "
+                            "are recording after the fact); otherwise omit — it defaults to "
+                            "ingest time. ADR-018 bitemporality."
+                        ),
+                    },
                 },
             },
         },
@@ -354,6 +384,13 @@ def _call_tool(name: str, arguments: dict, metadata: dict) -> dict[str, Any]:
             "domain": arguments.get("domain"),
             "environment": arguments.get("environment"),
             "tags": arguments.get("tags"),
+            # ADR-008/018 living-doc identity. This allowlist DROPS anything not named
+            # here, so advertising these in the inputSchema without forwarding them
+            # would silently write a keyless row that looks like a successful ingest —
+            # the exact failure that stranded the FlightSim doc (2026-08-21).
+            "system": arguments.get("system"),
+            "component": arguments.get("component"),
+            "valid_from": arguments.get("valid_from"),
         }
         normalized = {k: v for k, v in normalized.items() if v}
         status, body = ingest_payload(normalized, metadata)
