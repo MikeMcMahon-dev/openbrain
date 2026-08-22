@@ -18,6 +18,14 @@ from mcp.server import Server
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
+# Run as a script (`python mcp_server/openbrain.py`), sys.path[0] is mcp_server/, so the
+# repo root has to be added before `api.*` is importable. Only the canonical-system
+# vocabulary is pulled in — the server stays a thin HTTP client otherwise.
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
+from api.canonical_systems import CANONICAL_SYSTEMS  # noqa: E402
+
 
 def _read_env() -> None:
     """Load .env.local without requiring dotenv."""
@@ -78,7 +86,10 @@ async def list_tools() -> list[types.Tool]:
                 "required": ["query"],
                 "properties": {
                     "query": {"type": "string", "description": "Question or topic to look up."},
-                    "n_results": {"type": "integer", "description": "Max chunks to return. Default 5."},
+                    "n_results": {
+                        "type": "integer",
+                        "description": "Max chunks to return. Default 5.",
+                    },
                 },
             },
         ),
@@ -92,30 +103,70 @@ async def list_tools() -> list[types.Tool]:
                 "type": "object",
                 "required": ["source_type", "source"],
                 "properties": {
-                    "source_type": {"type": "string", "description": "Type of content. Use 'text' for inline notes."},
-                    "source": {"type": "string", "description": "The content to save (for source_type 'text')."},
+                    "source_type": {
+                        "type": "string",
+                        "description": "Type of content. Use 'text' for inline notes.",
+                    },
+                    "source": {
+                        "type": "string",
+                        "description": "The content to save (for source_type 'text').",
+                    },
                     "subject": {"type": "string", "description": "Subject or domain label."},
                     "topic": {"type": "string", "description": "Topic tag."},
                     "domain": {
                         "type": "string",
-                        "description": "Canonical knowledge domain. Choose the closest existing value; do not invent new domains.",
+                        "description": (
+                            "Canonical knowledge domain. Choose the closest existing value; "
+                            "do not invent new domains."
+                        ),
                         "enum": ["Network", "K8s", "Security", "Study", "OpenBrain", "Personal"],
                     },
                     "environment": {
                         "type": "string",
-                        "description": "Canonical lifecycle environment. Choose the closest existing value; do not invent new environments.",
+                        "description": (
+                            "Canonical lifecycle environment. Choose the closest existing value; "
+                            "do not invent new environments."
+                        ),
                         "enum": ["Production", "Lab", "Study", "Archive"],
                     },
                     "tags": {
                         "type": "array",
                         "items": {"type": "string"},
                         "description": (
-                            "Optional topical tags from the controlled vocabulary, e.g. IaC, Terraform, "
-                            "Ansible, Bash, Python, K8s, CKA, Network, Security, Architecture, AI, Ops, "
-                            "Lab, Production, OpenBrain, Homelab, SpectreNet, Personal, Family, Annie, "
-                            "Science, Biology, Geometry, Math, Study, Health, Career, Interview. Use "
-                            "existing tags where possible; novel tags are queued for human approval, not "
-                            "auto-applied."
+                            "Optional topical tags from the controlled vocabulary, e.g. IaC, "
+                            "Terraform, Ansible, Bash, Python, K8s, CKA, Network, Security, "
+                            "Architecture, AI, Ops, Lab, Production, OpenBrain, Homelab, "
+                            "SpectreNet, Personal, Family, Annie, Science, Biology, Geometry, "
+                            "Math, Study, Health, Career, Interview. Use existing tags where "
+                            "possible; novel tags are queued for human approval, not auto-applied."
+                        ),
+                    },
+                    "system": {
+                        "type": "string",
+                        "description": (
+                            "Namespace this note belongs to — the ADR-018 supersession pivot. "
+                            "REQUIRED whenever component is set. Choose the closest existing "
+                            "value; do not invent new systems."
+                        ),
+                        "enum": sorted(CANONICAL_SYSTEMS),
+                    },
+                    "component": {
+                        "type": "string",
+                        "description": (
+                            "Living-doc identity (ADR-008). Set ONLY for a canonical "
+                            "current-state document that should REPLACE its prior version on "
+                            "re-ingest (e.g. dns-current-state) — never for append-only session "
+                            "notes. Requires system. Re-ingesting the same (system, component) "
+                            "retires the old version via a supersession event."
+                        ),
+                    },
+                    "valid_from": {
+                        "type": "string",
+                        "description": (
+                            "ISO-8601 fact-onset (valid-time), e.g. 2026-07-15. Set only when "
+                            "the fact became true BEFORE now (backdating a change you are "
+                            "recording after the fact); otherwise omit — it defaults to ingest "
+                            "time. ADR-018 bitemporality."
                         ),
                     },
                 },
@@ -128,8 +179,14 @@ async def list_tools() -> list[types.Tool]:
                 "type": "object",
                 "required": ["query"],
                 "properties": {
-                    "query": {"type": "string", "description": "Topic to generate quiz questions about."},
-                    "n_results": {"type": "integer", "description": "Number of chunks to draw from. Default 5."},
+                    "query": {
+                        "type": "string",
+                        "description": "Topic to generate quiz questions about.",
+                    },
+                    "n_results": {
+                        "type": "integer",
+                        "description": "Number of chunks to draw from. Default 5.",
+                    },
                 },
             },
         ),
@@ -141,7 +198,10 @@ async def list_tools() -> list[types.Tool]:
                 "required": ["query"],
                 "properties": {
                     "query": {"type": "string", "description": "Topic to generate flashcards for."},
-                    "n_results": {"type": "integer", "description": "Number of chunks to draw from. Default 5."},
+                    "n_results": {
+                        "type": "integer",
+                        "description": "Number of chunks to draw from. Default 5.",
+                    },
                 },
             },
         ),
