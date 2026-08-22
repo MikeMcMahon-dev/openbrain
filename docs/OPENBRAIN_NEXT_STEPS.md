@@ -80,11 +80,38 @@ so this has real teeth in both directions.
   a domain-wide decay, and it leaves identity docs untouched with no tagging pass required.
 - [ ] ~~P3 — enable for `Personal`~~ **NOT RECOMMENDED on current evidence.** Revisit only if the career
   corpus stops refreshing (median age climbs past ~90d) or P1 lands first.
-- [ ] **P1 — `durable` tagging pass (still worth doing on its own merits).** Classify the identity /
-  family / mental-health rows; hand-reviewed list for Mike's sign-off; tag `durable`. Independent of
-  any allowlist change — it hardens those rows against *any* future recency tuning. `UPDATE ... tags`
-  fires `knowledge_tags_validation`, so `sql_trial.py` gates it. UPDATE, not re-ingest — re-ingesting
-  would generate pointless supersession churn.
+- [x] **P1 — `durable` tagging pass. APPLIED 2026-08-22 (18 rows, `sql_trial` PASSED `UPDATE 18`).**
+  Mental-health series (8) + clean identity/family (10). `durable` now has 26 members vault-wide
+  (Personal 18, K8s 3, Network 3, Security 2). Mike's requirement: the mental-health set survives
+  indefinitely — these rows are now exempt from any future recency tuning by tag, not by the accident
+  that `Personal` is off the allowlist.
+
+  **Deliberately NOT tagged — `durable` must mean "permanently TRUE", not "permanently kept":**
+  - `7d401b92`, `87984bda`, `90112142` (Annie context), `be162393` — carry stale facts (`Las Vegas`;
+    `be162393` also has Technitium + "5-node cluster"). Pinning them would make wrong data permanent.
+    **These need content correction first, then tagging.**
+  - `725e287e` — titled "Test save: …", a probable test artifact in the mental-health cluster.
+    Needs Mike's call: keep, or retire as junk.
+  - Duplication noted for later: ~5 rows all cover Betrayal Wound *Session 1*
+    (`74fd0bd0`, `8d4a5ee3`, `da792a30`, `866e1fd2`, `14bbe0f7`). Not touched — consolidating
+    someone's therapy record is not an agent's call.
+
+- [x] **Health/food cleanup. APPLIED 2026-08-22 — 10 rows + 12 chunks deleted** (`sql_trial` PASSED
+  `DELETE 12`; guard confirmed 0 events / 0 parents / 0 contradiction refs before executing; 0 orphan
+  chunks after). A three-day burst from 2026-04-12..14, dead 130d, superseded by CarbManager as the
+  system of record. Not a decay problem — these should never have been durable knowledge.
+
+  **HELD, needs Mike's call (not deleted):**
+  - `82b2416c` / `fcfdf235` — "Weight Loss Project Log — April 12" (+Updated). Contain behavioural
+    strategy ("kitchen closed after dinner", "cravings are habit loops, not hunger"), not just intake
+    numbers. Different in kind from the food logs; irreversible, so held.
+  - `58ac3885` — *"User directive: Maintain a running daily food log."* A standing instruction that is
+    now false. **Actively hazardous** — an agent reading this may resume food logging. Retire or
+    correct it; do not just leave it.
+  - `FOOD_LOG_FORMAT_SPEC.md` + `FOOD_LOG_IMPLEMENTATION_GUIDE.md` describe a feature that was never
+    built — only the tag vocabulary landed (`canonical_tags.py`, `taxonomy_map.py`). Same dormant
+    shape as the wiki. Give it a decomm date or drop the specs; unimplemented specs get mistaken for
+    working features.
 - [ ] **P2 — make the allowlist env-driven (cheap, do regardless).** `_RECENCY_DOMAINS` is hardcoded
   while halflife/floor are already `_env_float`. `OPENBRAIN_RECENCY_DOMAINS` makes any future change
   toggleable without a deploy, matching how the original net shipped behaviour-neutral.
