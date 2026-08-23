@@ -113,7 +113,8 @@ def test_security_subject():
 
 # ── Study — Annie school subjects ────────────────────────────────────────────
 
-@pytest.mark.parametrize("subject", ["Science", "Biology", "Geometry", "Math", "4th Quarter Science"])
+@pytest.mark.parametrize(
+    "subject", ["Science", "Biology", "Geometry", "Math", "4th Quarter Science"])
 def test_annie_subjects_to_study(subject):
     r = map_to_taxonomy(subject, "test prep", "anneliesepaige", "text", "content")
     assert (r["domain"], r["environment"]) == ("Study", "Study")

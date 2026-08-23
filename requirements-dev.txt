@@ -1,3 +1,15 @@
 ruff==0.9.10
 pymarkdownlnt==0.9.24
 fpdf2>=2.7.0
+
+# Test runner.
+pytest>=8.0
+
+# Needed to import mcp_server/openbrain.py, which the stdio-schema tests exercise. These stay
+# OUT of requirements.txt on purpose: that file is the minimal set Vercel installs, and it has to
+# stay under the Lambda size limit (see CLAUDE.md). The stdio server never runs on Vercel.
+#
+# CI caught this — the tests passed locally because a dev venv already had httpx, and failed on a
+# clean runner with ModuleNotFoundError. Exactly the class of gap a local-only workflow hides.
+httpx==0.28.1
+mcp==1.26.0

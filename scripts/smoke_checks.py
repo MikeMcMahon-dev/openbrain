@@ -719,7 +719,16 @@ def _smoke_mcp_cases_local() -> int:
     return failed
 
 
-def smoke_local(idempotency_source: str | None = None, idempotency_owner: str | None = None) -> int:
+def smoke_local(idempotency_source: str | None = None, idempotency_owner: str | None = None,
+                read_only: bool = False) -> int:
+    """Local smoke suite.
+
+    `read_only=True` skips the only two groups that WRITE to the vault — the PDF and DOCX/URL
+    ingest cases, which POST real fixtures to /api/ingest. Everything else is safe to run
+    unattended: the OB2 group is entirely negative cases (asserting 401/400, never writing), and
+    the MCP, DB-integrity and wire groups only read. This is the mode CI runs, so a pull request
+    cannot inject fixture rows into the production vault.
+    """
     query_body = json.dumps({"query": "test"})
     _token = os.getenv("OPENBRAIN_TOOL_ACCESS_TOKEN", "")
     _auth = {"Authorization": f"Bearer {_token}"} if _token else {}
@@ -1014,11 +1023,13 @@ def smoke_local(idempotency_source: str | None = None, idempotency_owner: str | 
         print(f"\nRunning local ingest idempotency check for source: {idempotency_source}")
         failed += _smoke_local_idempotency_check(idempotency_source, idempotency_owner)
 
-    # PDF-specific smoke cases (cases 27–29)
-    failed += _smoke_pdf_cases_local()
-
-    # DOCX + URL smoke cases (cases 30–35)
-    failed += _smoke_docx_url_cases_local()
+    # PDF (27–29) and DOCX/URL (30–35) cases POST real fixtures to /api/ingest — the only
+    # groups in this suite that write. Skipped in read-only mode so CI never mutates the vault.
+    if read_only:
+        print("PDF + DOCX/URL ingest cases skipped: --read-only (they write to the vault)")
+    else:
+        failed += _smoke_pdf_cases_local()
+        failed += _smoke_docx_url_cases_local()
 
     # MCP endpoint smoke cases (cases 36–46)
     failed += _smoke_mcp_cases_local()
@@ -1028,6 +1039,68 @@ def smoke_local(idempotency_source: str | None = None, idempotency_owner: str | 
 
     # DB integrity guardrails (stale triggers + chunk coverage) — see 2026-08-06 post-mortem
     failed += _smoke_db_integrity_local()
+
+    # Wire-serialization guardrails — see the 2026-08-22 plan_ingest Decimal incident
+    failed += _smoke_wire_serialization_local()
+
+    return failed
+
+
+def _smoke_wire_serialization_local() -> int:
+    """Every tool response must survive being written out as JSON.
+
+    Guards the 2026-08-22 incident: `plan_ingest` shipped with full unit coverage and raised
+    "Object of type Decimal is not JSON serializable" on every production call. Postgres
+    `round(extract(epoch ...))` returns numeric -> psycopg Decimal, which has no JSON encoder.
+    The object was correct in Python and only failed being serialized, so every test below the
+    wire boundary passed. Unit tests verify objects; consumers receive payloads.
+
+    Two things make this cheap: `mcp_http.handler()` is the same entry point Vercel invokes, so
+    no deployment or HTTP server is needed; and a tool failure comes back as HTTP 200 with the
+    error INSIDE the JSON-RPC envelope, so this asserts on the envelope rather than the status —
+    a status-only check would have called the Decimal bug a success.
+    """
+    _token = os.getenv("OPENBRAIN_TOOL_ACCESS_TOKEN", "")
+    if not _token:
+        print("Wire-serialization checks skipped: OPENBRAIN_TOOL_ACCESS_TOKEN not set")
+        return 0
+
+    try:
+        from api.mcp_http import handler as _mcp_handler
+    except Exception as exc:  # pragma: no cover - import guard
+        print(f"FAIL wire-serialization: could not import mcp_http ({exc})")
+        return 1
+
+    tool_calls = [
+        ("query", {"query": "flight sim rig", "n_results": 2}),
+        ("search", {"query": "flight sim rig", "n_results": 2}),
+        ("plan_ingest", {"source": "Test.", "system": "FlightSim",
+                         "component": "flightsim-hardware"}),
+    ]
+
+    failed = 0
+    for name, arguments in tool_calls:
+        request = {
+            "method": "POST",
+            "headers": {"Authorization": f"Bearer {_token}", "content-type": "application/json"},
+            "body": json.dumps({
+                "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                "params": {"name": name, "arguments": arguments},
+            }),
+        }
+        try:
+            response = _mcp_handler(request)
+            body = json.loads(response["body"])
+        except Exception as exc:
+            print(f"FAIL wire-serialization {name}: handler raised {type(exc).__name__}: {exc}")
+            failed += 1
+            continue
+
+        if "error" in body:
+            print(f"FAIL wire-serialization {name}: {body['error'].get('message')}")
+            failed += 1
+        else:
+            print(f"PASS wire-serialization {name}")
 
     return failed
 
@@ -1776,6 +1849,13 @@ def parse_args() -> argparse.Namespace:
             "Defaults to OPENBRAIN_DEFAULT_OWNER."
         ),
     )
+    parser.add_argument(
+        "--read-only",
+        action="store_true",
+        help=("Skip the PDF and DOCX/URL groups, the only cases that write to the vault. "
+              "Use for unattended runs (CI) so a pull request cannot inject fixture rows "
+              "into production."),
+    )
     return parser.parse_args()
 
 
@@ -1787,7 +1867,8 @@ def main() -> int:
         return smoke_live(args.live)
 
     print("Running local smoke checks against handler in this repository")
-    return smoke_local(args.idempotency_source, args.idempotency_owner)
+    return smoke_local(args.idempotency_source, args.idempotency_owner,
+                       read_only=args.read_only)
 
 
 if __name__ == "__main__":

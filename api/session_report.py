@@ -236,7 +236,8 @@ def handler(request) -> dict[str, Any]:
         return auth_error
 
     if not isinstance(payload, Mapping):
-        return response_payload(400, {"error": "validation_error", "message": "Malformed JSON payload.", "status": 400})
+        return response_payload(400, {"error": "validation_error",
+                                      "message": "Malformed JSON payload.", "status": 400})
 
     owner = (payload.get("owner") or "").strip()
     date = (payload.get("date") or datetime.now(timezone.utc).strftime("%Y-%m-%d")).strip()
@@ -244,7 +245,8 @@ def handler(request) -> dict[str, Any]:
     report_type = payload.get("report_type", "study_session")
 
     if not owner:
-        return response_payload(400, {"error": "validation_error", "message": "owner is required.", "status": 400})
+        return response_payload(400, {"error": "validation_error",
+                                      "message": "owner is required.", "status": 400})
     if not isinstance(recipients, list) or not recipients:
         return response_payload(400, {
             "error": "validation_error",

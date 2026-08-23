@@ -1,0 +1,82 @@
+# CI for OpenBrain.
+#
+# Until now there was no CI at all: `make lint`, `make smoke` and the pytest suite existed and
+# worked, but nothing ran them. "We run the smoke tests" meant "we remember to" — and on
+# 2026-08-22 a serialization bug (plan_ingest returning Decimal) reached production through a PR
+# whose unit tests all passed. Discipline is not a control; this is.
+#
+# SAFETY: OpenBrain is a production system with one live vault and no staging database. So CI runs
+# ONLY read-only work:
+#   * pytest — DB-touching tests use rollback()/ROLLBACK TO SAVEPOINT and never commit; the rest
+#     are mocked. Every DB test skips when SUPABASE_DB_URL is absent.
+#   * smoke --read-only — skips the PDF and DOCX/URL groups, the only cases that POST to
+#     /api/ingest. Without that flag a pull request would inject fixture rows into the live vault.
+# Never drop --read-only here, and never add a step that writes.
+#
+# SECRETS are optional by design. Without them lint still runs and the suite runs its mocked
+# subset (DB tests skip, smoke exits early). That keeps CI meaningful on a fork or before secrets
+# are configured, while a fully-configured run exercises the wire contract against the real vault.
+#
+# To enable the full run, add these repository secrets:
+#   SUPABASE_DB_URL, OPENBRAIN_TOOL_ACCESS_TOKEN, OPENROUTER_API_KEY
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  # A new push supersedes an in-flight run for the same ref — no point finishing a stale one.
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # Job-level so every step inherits them AND so `if: env.X != ''` works — the `secrets`
+    # context is not available in a step-level `if`.
+    env:
+      SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+      OPENBRAIN_TOOL_ACCESS_TOKEN: ${{ secrets.OPENBRAIN_TOOL_ACCESS_TOKEN }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      # requirements.txt is the minimal set Vercel installs and must stay small (Lambda limit).
+      # requirements-dev.txt carries the test-only deps — ruff, pytest, and httpx/mcp, which are
+      # needed to import the stdio server that the schema tests exercise.
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      # Scoped to the directories that are clean today, so this gate is green on arrival and a
+      # red build always means "you broke something". `scripts/` carries ~100 pre-existing E501s
+      # (the tracked "Lint pass 2" backlog item) and joins this list once that chore PR lands.
+      # A CI that fails on day one is a CI everyone learns to ignore.
+      - name: Lint
+        run: ruff check api/ mcp_server/ tests/
+
+      # The suite must run from inside tests/: the repo root holds a `vault/` symlink into an
+      # iCloud store that is unreadable for some users, and pytest's rootdir scan crashes on it.
+      # Documented in tests/conftest.py.
+      - name: Unit + integration tests
+        working-directory: tests
+        run: python -m pytest -q
+
+      # Read-only by force. This is the gate that would have caught the plan_ingest Decimal bug:
+      # it drives mcp_http.handler() the way Vercel does, so a response that is a valid Python
+      # object but an invalid JSON payload fails here instead of in production.
+      - name: Smoke (read-only)
+        if: env.SUPABASE_DB_URL != ''
+        run: python scripts/smoke_checks.py --read-only
