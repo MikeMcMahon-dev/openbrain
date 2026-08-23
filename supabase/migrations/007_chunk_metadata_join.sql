@@ -2,9 +2,10 @@
 -- (ADR-018a Decision item 3). SUPERSEDES migration 006 §A's addition of component_key to
 -- knowledge_chunked, and removes the five other mirrored metadata columns.
 --
--- ⚠⚠ STAGED — NOT YET APPLIED. Needs sign-off + a read-only dry run. Two sections, applied
--- AROUND a code deploy (expand/contract), because domain/environment/status/tags are NOT NULL
--- and the mirror INSERT can only stop writing them once they are nullable. ⚠⚠
+-- APPLIED to production (date unrecorded — predates migration_log.md; verified 2026-08-23 by
+-- catalog inspection: all six mirrored columns are gone from knowledge_chunked). Two sections,
+-- applied AROUND a code deploy (expand/contract), because domain/environment/status/tags are
+-- NOT NULL and the mirror INSERT can only stop writing them once they are nullable.
 --
 -- WHY: knowledge_chunked hand-mirrored knowledge's metadata (system, status, component_key,
 -- tags, domain, environment) via app code; anything synced by code a human must remember to
