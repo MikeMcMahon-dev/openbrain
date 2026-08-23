@@ -17,9 +17,119 @@ metadata joins from the parent, `component_key` has a writer, `auto_supersede` k
   backfill the **5** `supersedes_id` chains as `reason_code='migration'`. Needs an ephemeral test
   schema for Suites A/B. (`environment='Archive'` reconciliation: RESOLVED — it's a sensitivity
   bucket, not retirement; P3 does nothing with it.)
-- [ ] **P1.5 durable first-pass (parallel, AMBER).** Recency net is live with **0 durable members**;
-  ~12 foundational non-keyed Network/K8s/Security docs are exposed to decay. Mike marks the set;
-  Claude produces the candidate list (reason per row). Open Q: should `component_key` imply `durable`?
+- [ ] **P1.5 durable first-pass (parallel, AMBER).** *Partially done — counts restated 2026-08-22.*
+  `durable` now has **8 members** (K8s 3, Network 3, Security 2), not 0. Still exposed to decay in the
+  allowlisted domains: **57** plain rows (Network 36, K8s 18, Security 3) with neither `durable` nor a
+  `component_key`. Mike marks the foundational set; Claude produces the candidate list (reason per row).
+  **Open Q RESOLVED:** `component_key` does *not* need to imply `durable` — `_is_component_row()` is
+  already its own exemption clause in `knowledge_retrieval.py:461`, so keyed rows never decay regardless
+  of tags.
+
+---
+
+## Recency net — extend to `Personal` (2026-08-22)
+
+`_RECENCY_DOMAINS = {"Network", "K8s", "Security"}` (`knowledge_retrieval.py:90`) is an allowlist, so
+`Personal` never decays. That is correct for identity/family docs and wrong for the career pipeline
+sharing the domain with them: a recruiter note from March still ranks as if written today. Surfaced
+while diagnosing the FlightSim split-retrieval issue (PR #102/#103).
+
+`Personal` current rows = 48 (2 component-keyed, 0 durable, 46 plain). The 46 are **three** populations,
+not two:
+
+| cluster | tags | ~rows | wanted |
+|---|---|---|---|
+| Identity / family | `Mike`, `Mental-health`, `Family` | 12 | never decay |
+| Career pipeline | `Career`, `Interview` | 12 | decay fast |
+| Health log | `Health`, `Nutrition`, `FoodLog` | 12 | dated records — decay likely desirable |
+
+Ages: 7 rows <30d, 26 at 90–150d, 13 >150d — most of the corpus sits where a 90-day halflife bites,
+so this has real teeth in both directions.
+
+- [x] **P0 — baseline. DONE 2026-08-22 (`scripts/recency_baseline.py`).** Two findings, and together
+  they argue **against** proceeding to P3 as scoped.
+
+  **(a) Family-GPT risk is CLOSED.** `Personal` is 100% `created_by=mike.mcmahon67`. Annie owns only
+  `Study` (65 rows), Beth 2. Owner scoping is a per-row `created_by` predicate independent of domain
+  (`knowledge_retrieval.py:182`), so no allowlist change can reach the family tutor paths. The
+  Annie/family content inside `Personal` is Mike's own: 5 identity/context rows (154d) + 5
+  mental-health session rows (110–111d). None of Annie's school content is there.
+
+  **(b) The intervention is aimed backwards.** Measured projected decay at halflife=90:
+
+  | cluster | n | age min/median/max | projected factor |
+  |---|---|---|---|
+  | Career / Interview | 12 | 4 / **23** / 154d | **x0.84–0.97** — barely demoted |
+  | Health / Nutrition / FoodLog | 12 | 130 / 131 / 132d | x0.37 — uniform, so internal order unchanged |
+  | Mike / Family / Mental-health | 23 | 110 / **154** / 154d | **x0.31** — crushed |
+
+  The career corpus *self-refreshes* (median 23 days), so recency barely touches the population it
+  was meant to demote — only 1 of 12 rows is old enough to sink. Meanwhile every identity doc takes
+  x0.31: "who is Annie and where does she go to school" drops its top hit 0.032266 → 0.009871. The
+  health log is uniformly ~131d, so decay reorders nothing within it and merely sinks the cluster.
+
+  **Conclusion: the career-pipeline problem is a LIFECYCLE problem, not a recency problem.** A filled
+  or dead req should stop being `status='current'` — decay is a blunt proxy for "no longer live" and a
+  poor one here precisely because the notes are recent. This also vindicates the original allowlist:
+  it was scoped to "the domains where the stale-ranking bug was actually measured," and P0 has now
+  measured `Personal` and not found that bug.
+
+- [ ] **REVISED next step — retire closed career threads, don't decay them.** Give the pipeline notes a
+  lifecycle: supersede or demote a req once it's filled/withdrawn/declined. Needs a status convention
+  for "closed" (`historical` via an expiry event is the existing mechanism). Far better targeted than
+  a domain-wide decay, and it leaves identity docs untouched with no tagging pass required.
+- [ ] ~~P3 — enable for `Personal`~~ **NOT RECOMMENDED on current evidence.** Revisit only if the career
+  corpus stops refreshing (median age climbs past ~90d) or P1 lands first.
+- [x] **P1 — `durable` tagging pass. APPLIED 2026-08-22 (18 rows, `sql_trial` PASSED `UPDATE 18`).**
+  Mental-health series (8) + clean identity/family (10). `durable` now has 26 members vault-wide
+  (Personal 18, K8s 3, Network 3, Security 2). Mike's requirement: the mental-health set survives
+  indefinitely — these rows are now exempt from any future recency tuning by tag, not by the accident
+  that `Personal` is off the allowlist.
+
+  **Deliberately NOT tagged — `durable` must mean "permanently TRUE", not "permanently kept":**
+  - `7d401b92`, `87984bda`, `90112142` (Annie context), `be162393` — carry stale facts (`Las Vegas`;
+    `be162393` also has Technitium + "5-node cluster"). Pinning them would make wrong data permanent.
+    **These need content correction first, then tagging.**
+  - `725e287e` — titled "Test save: …", a probable test artifact in the mental-health cluster.
+    Needs Mike's call: keep, or retire as junk.
+  - Duplication noted for later: ~5 rows all cover Betrayal Wound *Session 1*
+    (`74fd0bd0`, `8d4a5ee3`, `da792a30`, `866e1fd2`, `14bbe0f7`). Not touched — consolidating
+    someone's therapy record is not an agent's call.
+
+- [x] **Health/food cleanup. APPLIED 2026-08-22 — 10 rows + 12 chunks deleted** (`sql_trial` PASSED
+  `DELETE 12`; guard confirmed 0 events / 0 parents / 0 contradiction refs before executing; 0 orphan
+  chunks after). A three-day burst from 2026-04-12..14, dead 130d, superseded by CarbManager as the
+  system of record. Not a decay problem — these should never have been durable knowledge.
+
+  **HELD, needs Mike's call (not deleted):**
+  - `82b2416c` / `fcfdf235` — "Weight Loss Project Log — April 12" (+Updated). Contain behavioural
+    strategy ("kitchen closed after dinner", "cravings are habit loops, not hunger"), not just intake
+    numbers. Different in kind from the food logs; irreversible, so held.
+  - `58ac3885` — *"User directive: Maintain a running daily food log."* A standing instruction that is
+    now false. **Actively hazardous** — an agent reading this may resume food logging. Retire or
+    correct it; do not just leave it.
+  - `FOOD_LOG_FORMAT_SPEC.md` + `FOOD_LOG_IMPLEMENTATION_GUIDE.md` describe a feature that was never
+    built — only the tag vocabulary landed (`canonical_tags.py`, `taxonomy_map.py`). Same dormant
+    shape as the wiki. Give it a decomm date or drop the specs; unimplemented specs get mistaken for
+    working features.
+- [ ] **P2 — make the allowlist env-driven (cheap, do regardless).** `_RECENCY_DOMAINS` is hardcoded
+  while halflife/floor are already `_env_float`. `OPENBRAIN_RECENCY_DOMAINS` makes any future change
+  toggleable without a deploy, matching how the original net shipped behaviour-neutral.
+- [ ] **P4 — `Study` / `OpenBrain`: decided.** **Neither joins.** `Study` is 494 rows at 151d average —
+  Annie's curriculum; study notes do not become false with age, and that population is exactly what the
+  allowlist was scoped to protect. `OpenBrain` is 127 plain rows of design history where age is not
+  staleness either.
+
+**Residual risks:** (1) Health logs may want `as_of` rather than decay — decide, don't default; P0 shows
+decay reorders nothing within them anyway. (2) If P1 is skipped and a later change adds `Personal` to the
+allowlist, identity docs take x0.31 immediately — P1 is the guardrail that makes any future tuning safe.
+
+**Re-run the measurement:**
+```bash
+python scripts/recency_baseline.py --json baseline-pre.json     # capture
+python scripts/recency_baseline.py --compare pre.json post.json # diff top-1 per query
+```
+Keep `QUERY_SET` stable — changing it invalidates comparison against an earlier capture.
 - [ ] **Lint pass 2.** ~98 `E501` wraps + 4 minor (2 unused vars, 1 import placement, 1 semicolon).
   Pass 1 (#88) fixed a real bug (missing `BeautifulSoup` import) + 50 autofixes.
 - [ ] **Process controls now MANDATORY:** `scripts/sql_trial.py` (rolled-back trial before any prod
