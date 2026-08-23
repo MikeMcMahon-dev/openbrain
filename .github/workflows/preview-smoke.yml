@@ -1,0 +1,65 @@
+# Tier 2 — smoke a Vercel PREVIEW deployment, before it is merged.
+#
+# ci.yml runs against the checkout: lint, tests, and a read-only smoke driving the handler
+# in-process. That catches most things, but it never exercises the deployed artifact — routing,
+# the Vercel runtime, cold start, or the environment variables that build actually got. This
+# workflow closes that gap by hitting the real preview URL over HTTPS after Vercel finishes.
+#
+# WHY IT NEEDS A BYPASS SECRET: the project runs `ssoProtection: all_except_custom_domains`, so
+# every preview URL answers 401/302 to an unauthenticated caller. A Protection Bypass for
+# Automation secret is the supported way through. Add it as the repository secret
+# VERCEL_AUTOMATION_BYPASS_SECRET; without it this job skips rather than fails, so the workflow
+# is inert until deliberately enabled.
+#
+# KNOWN ENVIRONMENT DIVERGENCE (2026-08-23): preview does NOT inherit OPENBRAIN_READ_TARGET,
+# OPENBRAIN_WRITE_TARGET or OPENBRAIN_COMPONENT_BOOST — they are scoped to production only. So a
+# preview currently reads the legacy `thoughts` store with no component boost, and this smoke
+# therefore proves the deployment SERVES, not that it ranks like production. Adding READ_TARGET
+# and COMPONENT_BOOST to the Preview scope would close that. Leaving WRITE_TARGET off preview is
+# deliberate: it keeps a preview build from ever writing into public.knowledge.
+
+name: Preview smoke
+
+on:
+  deployment_status:
+
+jobs:
+  smoke:
+    # Only successful Preview deployments. `deployment_status` fires for pending and failure too,
+    # and for Production — none of which should trigger this.
+    if: >
+      github.event.deployment_status.state == 'success' &&
+      github.event.deployment.environment == 'Preview'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    # Job-level so `if: env.X != ''` works below. The `secrets` context is NOT available in a
+    # step-level `if` — using it there is not a no-op, it fails the whole workflow at parse time
+    # with zero jobs and no log, which is a genuinely opaque way to find out.
+    env:
+      OPENBRAIN_TOOL_ACCESS_TOKEN: ${{ secrets.OPENBRAIN_TOOL_ACCESS_TOKEN }}
+      SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+      PREVIEW_URL: ${{ github.event.deployment_status.environment_url }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Smoke the preview deployment
+        # Skip rather than fail when the bypass secret is absent — a preview URL is unreachable
+        # without it, and a red X for missing configuration teaches people to ignore red Xs.
+        if: env.VERCEL_AUTOMATION_BYPASS_SECRET != ''
+        run: |
+          echo "Smoking $PREVIEW_URL"
+          python scripts/smoke_checks.py --live "$PREVIEW_URL"

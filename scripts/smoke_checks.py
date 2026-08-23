@@ -1352,6 +1352,31 @@ def _smoke_ob2_cases_local() -> int:
     return failed
 
 
+def _preview_bypass_headers() -> dict[str, str]:
+    """Headers that let smoke reach a PROTECTED Vercel preview deployment.
+
+    The project runs `ssoProtection: all_except_custom_domains`, so every preview URL answers 401
+    to an unauthenticated caller — which is correct for humans and useless for automation. A
+    Protection Bypass for Automation secret is the supported way through; without it there is no
+    way to smoke a build BEFORE merging, which is exactly when a bug is cheapest to find.
+
+    Absent the env var this returns {} and live smoke behaves as before, so production runs
+    (openbrain-rouge.vercel.app, a custom domain and therefore unprotected) are unaffected.
+
+    The secret is a credential: it grants read access to every preview build. It lives in
+    gitignored .env.local locally and in repository secrets for CI. Never commit it.
+    """
+    secret = os.getenv("VERCEL_AUTOMATION_BYPASS_SECRET", "").strip()
+    if not secret:
+        return {}
+    return {
+        "x-vercel-protection-bypass": secret,
+        # Stops Vercel setting a bypass cookie on the response — irrelevant for a one-shot
+        # scripted request and it keeps the exchange stateless.
+        "x-vercel-set-bypass-cookie": "false",
+    }
+
+
 def _call_live(
     url: str,
     method: str,
@@ -1361,7 +1386,7 @@ def _call_live(
 ) -> tuple[int, Any]:
     target = urllib.parse.urljoin(url.rstrip("/") + "/", path.lstrip("/"))
     payload = json.dumps(body or {}).encode("utf-8") if body is not None else None
-    req_headers = {"x-openbrain-owner": "tenant-a-owner"}
+    req_headers = {"x-openbrain-owner": "tenant-a-owner", **_preview_bypass_headers()}
     if payload is not None:
         req_headers["Content-Type"] = "application/json"
     if headers:
@@ -1396,7 +1421,8 @@ def _live_post_as_token_owner(
         target,
         data=data,
         method="POST",
-        headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}",
+                 **_preview_bypass_headers()},
     )
     ctx = ssl.create_default_context()
     try:
@@ -1693,14 +1719,20 @@ def smoke_oauth(base_url: str) -> int:
         return v, c
 
     def _no_redirect_get(url: str) -> tuple[int, str, str]:
-        """GET without following redirects. Returns (status, location, body)."""
+        """GET without following redirects. Returns (status, location, body).
+
+        Carries the preview-bypass headers like the other live helpers: without them a protected
+        preview answers with its own 302 to vercel.com/sso-api, and the OAuth cases then fail
+        reporting a "garbled Location" — a confusing symptom for a pure auth problem.
+        """
         class _NoRedirect(urllib.request.HTTPErrorProcessor):
             def http_response(self, req, resp):
                 return resp
             https_response = http_response
 
         opener = urllib.request.build_opener(_NoRedirect)
-        resp = opener.open(url, timeout=10)
+        request = urllib.request.Request(url, headers=_preview_bypass_headers())
+        resp = opener.open(request, timeout=10)
         location = resp.headers.get("Location", "")
         body = resp.read().decode("utf-8", errors="replace")
         return resp.status, location, body
@@ -1779,7 +1811,8 @@ def smoke_oauth(base_url: str) -> int:
                     req = urllib.request.Request(
                         f"{base_url}/token",
                         data=token_body.encode(),
-                        headers={"Content-Type": "application/x-www-form-urlencoded"},
+                        headers={"Content-Type": "application/x-www-form-urlencoded",
+                                 **_preview_bypass_headers()},
                         method="POST",
                     )
                     with urllib.request.urlopen(req, timeout=10) as resp:
