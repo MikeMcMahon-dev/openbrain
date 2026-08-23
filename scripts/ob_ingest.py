@@ -81,6 +81,11 @@ def main() -> None:
                    help="ADR-018 P5 fact-onset (valid-time), ISO-8601 e.g. 2026-07-15 — set it "
                         "when the fact predates ingest; default is now(). Also becomes the "
                         "retired predecessor's fact-offset (contiguous lifespans).")
+    p.add_argument("--plan", action="store_true",
+                   help="PREVIEW only: show the living docs already in scope and what a commit "
+                        "would supersede, then exit. Writes nothing. Run before any living-doc "
+                        "ingest — it is the only way to see what exists before deciding whether "
+                        "this is an update.")
     p.add_argument("--endpoint", default="/api/ingest")
     p.add_argument("--base", default=DEFAULT_BASE)
     p.add_argument("--token", help="override; else $OPENBRAIN_TOOL_ACCESS_TOKEN or .env.local")
@@ -118,6 +123,47 @@ def main() -> None:
         payload["auto_supersede"] = False
     if args.valid_from:
         payload["valid_from"] = args.valid_from
+
+    # --plan: read-only preview, then stop. Prints the living docs already in scope and what a
+    # commit would supersede, so "is this an update?" is answered from the vault rather than from
+    # memory. Nothing is written. Run this before any living-doc ingest.
+    if args.plan:
+        plan_req = urllib.request.Request(
+            args.base.rstrip("/") + "/api/plan_ingest",
+            data=json.dumps({
+                "source": body,
+                "system": args.system,
+                "component": args.component,
+            }).encode(),
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(plan_req, timeout=30) as r:
+                plan = json.loads(r.read().decode())
+        except urllib.error.HTTPError as exc:
+            sys.exit(f"plan failed: HTTP {exc.code} {exc.read().decode()[:400]}")
+
+        state = plan.get("current_state", {})
+        print("PLAN — nothing written.\n")
+        living = state.get("living_docs_in_system") or []
+        print(f"Living docs in system={args.system or '(none declared)'}:")
+        for d in living:
+            print(f"  - {d['component_key']:<34} ({d['age_days']}d)  {str(d['title'])[:44]!r}")
+        if not living:
+            print("  (none)")
+        similar = state.get("similar_living_docs") or []
+        if similar:
+            print("\nSimilar living docs (suggestion only — similarity cannot tell an update "
+                  "from a note):")
+            for d in similar:
+                print(f"  - {d['similarity']:.3f}  {d['component_key']}")
+        ws = plan.get("would_supersede")
+        print(f"\nWould supersede: {ws['id']} ({ws['component_key']})" if ws
+              else "\nWould supersede: nothing (this would be a NEW row)")
+        print(f"\n{plan.get('decision_required', '')}")
+        print(f"\nplan_token (valid {plan.get('expires_in')}s):\n{plan.get('plan_token')}")
+        return
 
     req = urllib.request.Request(
         args.base.rstrip("/") + args.endpoint,

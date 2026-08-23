@@ -169,6 +169,69 @@ async def list_tools() -> list[types.Tool]:
                             "time. ADR-018 bitemporality."
                         ),
                     },
+                    "plan_token": {
+                        "type": "string",
+                        "description": (
+                            "Token from openbrain_plan_ingest, valid 10 minutes and bound to "
+                            "this exact content. Required when plan enforcement is on. Run the "
+                            "plan first — it lists the living docs that already exist, which is "
+                            "the only way to tell an update from a new note."
+                        ),
+                    },
+                    "acknowledged_not_updating": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "Every component from the plan's `candidates` that this note does "
+                            "NOT update. Required in full when writing an append-only note and "
+                            "the plan listed candidates. Naming them records that you saw the "
+                            "list and chose."
+                        ),
+                    },
+                    "decline_reason": {
+                        "type": "string",
+                        "description": (
+                            "Why this is a new record rather than an update. Required only when "
+                            "declining a candidate the plan scored as a close match."
+                        ),
+                    },
+                },
+            },
+        ),
+        types.Tool(
+            name="openbrain_plan_ingest",
+            description=(
+                "PREVIEW an ingest before committing it — a 'terraform plan' for the vault. "
+                "Writes nothing. Returns the living docs already in scope, what a commit would "
+                "supersede, and a plan_token to pass to openbrain_ingest.\n\n"
+                "Run this FIRST for any note about a system you have written about before. You "
+                "cannot reliably tell an update from a new note without seeing what already "
+                "exists, and this is the only way to see it."
+            ),
+            inputSchema={
+                "type": "object",
+                "required": ["source"],
+                "properties": {
+                    "source": {
+                        "type": "string",
+                        "description": "The exact content you intend to ingest, verbatim.",
+                    },
+                    "system": {
+                        "type": "string",
+                        "description": (
+                            "Namespace you believe this belongs to. Supplying it gives an exact "
+                            "list of that system's living docs; omitting it falls back to "
+                            "similarity, which is weaker."
+                        ),
+                        "enum": sorted(CANONICAL_SYSTEMS),
+                    },
+                    "component": {
+                        "type": "string",
+                        "description": (
+                            "Living-doc identity you believe this updates. Supplying it makes "
+                            "the plan report exactly which row would be superseded."
+                        ),
+                    },
                 },
             },
         ),
@@ -214,6 +277,8 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         result = _call("/openbrain_query", arguments)
     elif name == "openbrain_ingest":
         result = _call("/openbrain_ingest", {"tool_input": arguments})
+    elif name == "openbrain_plan_ingest":
+        result = _call("/openbrain_plan_ingest", {"tool_input": arguments})
     elif name == "openbrain_generate_quiz":
         result = _call("/openbrain_generate_quiz", arguments)
     elif name == "openbrain_generate_flashcards":
