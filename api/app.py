@@ -21,6 +21,7 @@ from api.ob2_state import (
 from api.ob2_wiki import handle_compile_wiki, handle_get_wiki
 from api.plan_ingest_route import handler as plan_ingest_handler
 from api.query import handler as query_handler
+from api.retirement_route import handler as retirement_handler
 from api.search import handler as search_handler
 from api.session_report import handler as session_report_handler
 
@@ -70,6 +71,13 @@ def handler(request):
                 "/tools/openbrain_plan_ingest", "/claude_plan_ingest",
                 "/tools/claude_plan_ingest"}:
         return plan_ingest_handler(request)
+    # Retirement airlock. Same one-route-for-every-surface shape as plan_ingest above, and for
+    # the same reason: 012 shipped the airlock with no caller at all, so an agent could not
+    # request a removal. Queues a pending request; removes nothing.
+    if path in {"/propose_retirement", "/api/propose_retirement", "/openbrain_propose_retirement",
+                "/tools/openbrain_propose_retirement", "/claude_propose_retirement",
+                "/tools/claude_propose_retirement"}:
+        return retirement_handler(request)
     if path in {"/openbrain_query", "/tools/openbrain_query"}:
         return chatgpt_handler(request, tool_mode="query")
     if path in {"/openbrain_generate_quiz", "/tools/openbrain_generate_quiz"}:
