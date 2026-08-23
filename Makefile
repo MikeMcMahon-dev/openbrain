@@ -2,7 +2,7 @@ PYTHON_SRCS := scripts brain_server api
 LOG_DIR := .logs
 NOW := $(shell date +%Y%m%d-%H%M%S)
 
-.PHONY: lint lint-py lint-md lint-py-fix smoke smoke-local smoke-live check
+.PHONY: lint lint-py lint-md lint-py-fix smoke smoke-local smoke-live smoke-ci ci check
 .PHONY: check-log smoke-log smoke-live-log
 .PHONY: pdf-fixtures pdf-unit pdf-eval pdf-eval-live
 .PHONY: docx-fixtures docx-unit url-unit docx-url-eval docx-url-eval-live
@@ -53,6 +53,14 @@ smoke: smoke-local
 
 smoke-local:
 	@python scripts/smoke_checks.py
+
+# What CI runs. --read-only skips the PDF and DOCX/URL groups, the only cases that POST to
+# /api/ingest — there is one live vault and no staging DB, so an unattended run must not write.
+smoke-ci:
+	@python scripts/smoke_checks.py --read-only
+
+# Reproduce the full CI gate locally, in the same order.
+ci: lint-py test smoke-ci
 
 smoke-live:
 	@if [ -z "$(SMOKE_URL)" ]; then \

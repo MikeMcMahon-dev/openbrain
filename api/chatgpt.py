@@ -67,7 +67,9 @@ def handler(request, *, tool_mode: str) -> dict[str, Any]:
     if resolved_owner:
         _inject_token_owner(metadata, resolved_owner)
 
-    normalized_payload = dict(_resolve_tool_payload(payload) if isinstance(payload, Mapping) else {})
+    normalized_payload = dict(
+        _resolve_tool_payload(payload) if isinstance(payload, Mapping) else {}
+    )
 
     if tool_mode in {"query", "generate_quiz", "generate_flashcards"}:
         if tool_mode == "generate_quiz":
