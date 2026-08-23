@@ -1,51 +1,161 @@
 # OpenBrain — Session Handoff
 
-**Last updated:** 2026-06-18 (post-flip session)
-**Status:** ✅ **OB2 FLIP IS LIVE** — `knowledge` serves prod. Post-flip: deploy pipeline
-restored, smoke content check added, session notes ingested, ADR-013 (keyword retrieval)
-**approved & awaiting merge**.
-**Read this before making changes.** Then `docs/OPENBRAIN_NEXT_STEPS.md` for the backlog.
+**Last updated:** 2026-08-23 (late session, ended for a macOS update)
+**Status:** ✅ Prod healthy. CI/CD exists for the first time. Plan/apply shipped but **dark**.
+**Read this first.** Then `docs/OPENBRAIN_NEXT_STEPS.md` for the backlog.
 
 ---
 
-## ⏩ WHERE WE ARE NOW (2026-06-18, post-flip) — start here
+## ⏩ WHERE WE ARE NOW (2026-08-23) — start here
 
-OB2 is live and healthy on `public.knowledge`. Everything below the next `---` is the
-flip-execution history; this block is the current state.
+### The through-line of this session
 
-### Open — needs owner action
-- **openbrain PR #59 — ADR-013 OR-ranked keyword retrieval. APPROVED by Mike; awaiting
-  MERGE** (assistant can't `gh pr merge`). Merging auto-deploys it. Tag enrichment already
-  run. After merge: live smoke (content check stays green) + re-run the ADR-013 A/B queries.
-- **portfolio-blog PRs** (separate repo at `/Users/Shared/portfolio-blog`, Astro;
-  `draft:true` ⇒ "Coming Soon"/inactive in the sidebar): **#54** OB2 cutover war story,
-  **#55** sidebar date-ordering fix, **#56** failure-detection session post. #54/#56 are
-  `draft:false` on-branch for preview; review tone, then merge to publish.
+One bug kept reappearing in different costumes: **a capability existed in the backend that no
+surface exposed, so nobody could use it and nobody could tell.** First `system`/`component` (the
+supersession keys), then the ingest plan, then retirement. Every fix in this session is a variant
+of *close the gap between what the backend can do and what a caller can reach.*
 
-### Done & live since the flip
-- **Auto-deploy restored.** The Vercel↔GitHub App had silently lost repo access (no deploys
-  for weeks) — re-granted. Plus the `.vercelignore` `/app.py` root-anchor fix (a bare
-  `app.py` had also excluded `api/app.py`, 500-ing every route). PR previews + prod-on-merge
-  both work now.
-- **Smoke content check (PR #57, merged).** `_smoke_live_content_check` fails on
-  HTTP-200-but-empty and reports the serving backend (catches broken DB / silent flip-revert).
-- **Session notes in the brain.** 6 rows (`source='live:text'`, owner mike.mcmahon67):
-  Failure Detection Dashboard monitoring (3) + OB2 cutover lessons & two interview stories
-  (3, tagged `Career`/`Interview` for interview prep). Tags enriched via
-  `scripts/enrich_session_tags.py` (executed 2026-06-18).
+### Shipped and LIVE in prod
 
-### Key facts for a fresh session
-- Vercel flags `OPENBRAIN_READ_TARGET` / `OPENBRAIN_WRITE_TARGET` = `knowledge`. Rollback =
-  set both to `thoughts` + redeploy; `thoughts` is the untouched hot standby.
-- Family read is **temporal-aware**: prefer `status='current'`, broaden to `historical` on
-  low-confidence/empty (NOT a hard current-only filter).
-- **Per-owner ingest**: mike.mcmahon67's explicit `domain`/`environment` are *honored* (with a
-  mismatch/typo alert in the ingest response `details`); family accounts *derive*. Producer
-  `tags` are NOT honored — derived from subject/topic (ADR-013 "Related finding").
-- **ADR-013** (keyword OR-ranking) replaces `websearch_to_tsquery`'s implicit AND with a
-  stemmed OR-ranked tsquery — fixes the recall cliff (8-term queries matched 0 under AND).
-  Lives on `feat/keyword-or-retrieval-adr` until #59 merges.
+| PR | What | State |
+|---|---|---|
+| #106 | plan/apply handshake (`plan_ingest` + token) | live, **enforcement OFF** |
+| #107 | Decimal serialization fix + wire-contract tests | live |
+| #108 | plan surfaces: one REST route for stdio + both Action specs, `ob_ingest --plan` | live |
+| #109 | Tier 2 preview smoke (restored after a merge race) | live |
+| #105 | retirement airlock (code) | live; **migration 012 APPLIED 2026-08-23** |
 
+### Three-tier validation gate (new — none of this existed yesterday)
+
+There was **no CI at all** before this session. `make smoke` and pytest existed and worked; nothing
+ran them. "We run the smoke tests" meant "we remember to," which is how a serialization bug reached
+production through a PR whose unit tests were all green.
+
+1. **`.github/workflows/ci.yml`** — lint + pytest + `smoke --read-only`, on every PR.
+2. **`.github/workflows/preview-smoke.yml`** — hits the real Vercel preview URL over HTTPS after
+   deployment, via a Protection Bypass for Automation secret.
+3. **`make ci`** — reproduces the gate locally in the same order.
+
+**CI caught three real bugs in its first three runs**, two of them mine (a missing `httpx` dep that
+a dev venv was masking, and a `secrets`-in-step-`if` that fails a workflow at parse time with zero
+jobs and no log).
+
+**SAFETY — do not remove `--read-only` from CI.** Local smoke WRITES: the PDF and DOCX/URL groups
+POST real fixtures to `/api/ingest`. There is one live vault and no staging DB. That flag is the
+only thing stopping a pull request from injecting fixture rows into production.
+
+### Prod data changes applied this session
+
+- **FlightSim consolidated.** Three-generation lineage, contiguous, no gaps:
+  `0ccc7e4a` (3,784) → `b5041d45` (12,750) → **`6899a59a` (18,953, current)**, 26 chunks.
+  Two keyless strays (`400a4e85`, `997ce045`) hard-deleted after verification. Zero keyless
+  FlightSim rows remain.
+- **`durable` tagging** — 18 rows (mental-health series + clean identity/family). Vault-wide
+  `durable` membership is now 26.
+- **Food/health cleanup** — 10 dead food-log rows deleted; 3 more retired to `historical`
+  (two Weight Loss Project Logs + a now-false "maintain a daily food log" standing directive that
+  would have made an agent resume logging).
+- **Migration 012 applied** — `retirement_requests`, 13 columns / 8 constraints / 4 indexes,
+  0 rows. `scripts/retirement_review.py list` works.
+
+---
+
+## 🔜 NEXT THREE ACTIONS
+
+1. **Teach `ob_ingest.py` to auto-plan.** ~10 lines reusing the `--plan` code path: run the plan,
+   fold `plan_token` into the ingest payload. **This is a hard prerequisite for #2** — see the trap
+   below.
+2. **Enable `OPENBRAIN_REQUIRE_INGEST_PLAN=1`** in Vercel (production + preview). Only after #1.
+3. **Exercise the retirement airlock end-to-end** — a real propose → deny → propose → approve →
+   execute cycle. The table is live but has never been used; the CLI is unproven against real data.
+
+---
+
+## ⚠️ TRAPS — read before touching these
+
+**Enabling plan enforcement today would break `ob_ingest.py`.** The gate fires on
+`source_type=text` + honor-owner, which is exactly what `ob_ingest.py` sends, and its normal path
+carries no `plan_token` (the only `plan_token` reference is inside the `--plan` preview branch).
+Every session wrap would 409 — including the WAF-workaround path we depend on. Unaffected: smoke
+(`source_type=obsidian`), the PDF/DOCX evals, family GPTs (not honor-owners), and Chat (it has
+`plan_ingest`).
+
+**A `retire` forecloses a later `delete`.** `supersession_events` is append-only (enforced by
+`supersession_events_no_mutate`) and its FK to `knowledge` is NOT deferrable, so once an event
+references a row, that row is permanently pinned as historical. Deleting stays open either way —
+so when both are viable, decide deliberately. The three food-log rows retired this session are now
+permanently non-deletable, which was the intended tradeoff.
+
+**MCP clients cache `tools/list` at connect time.** A schema change deploys fine and the client
+keeps offering the old fields until the connector is disconnected and reconnected. From the client
+side this is indistinguishable from a failed deploy. Documented in `docs/MCP_SETUP.md` with a
+verification `curl`; confirm the server side before anyone cycles connectors.
+
+**A merge race is invisible from the branch you are standing on.** PR #107 merged at `870eaed`
+while two later commits were still in flight; they never reached main, and the failure looked like
+an environment problem for three tool calls. If a check goes green and then behaves differently on
+main, run `git merge-base --is-ancestor <sha> main` on your last few commits *before* debugging the
+environment. Note cherry-picked commits are correctly "not ancestors" — compare **content**, not
+SHAs.
+
+**Preview does not automatically mirror production.** Vercel env vars are per-environment and are
+baked in at deploy time. `OPENBRAIN_READ_TARGET` and `OPENBRAIN_COMPONENT_BOOST` are now scoped to
+preview as well; `OPENBRAIN_WRITE_TARGET` is deliberately production-only so a preview build can
+never write into `public.knowledge`. **Keep it that way.** Changing a var does not update existing
+deployments — a redeploy is required.
+
+**Similarity cannot distinguish an update from a note.** Measured across 228 keyless rows: the one
+genuine mis-filed update scored 0.810 and ranked *fourth*, below three legitimate session wraps at
+0.834/0.823/0.815. Topic similarity measures SUBJECT; update-vs-note is INTENT. Do not build a
+detector on it — the plan shows candidates and a human/agent decides.
+
+**The component boost is load-bearing, not a tiebreak.** On the FlightSim query the keyless stray
+beat the merged living doc on raw RRF (0.032787 vs 0.031025); the merged doc only won via the ×2
+boost. Consolidation trades chunk-level precision for coherence and the boost pays for it. Turning
+`OPENBRAIN_COMPONENT_BOOST` off would quietly regress living-doc retrieval.
+
+---
+
+## 📋 OPEN / DEFERRED
+
+- **Four identity rows deliberately left un-`durable`** pending content correction — `7d401b92`,
+  `87984bda`, `90112142` (Annie context), `be162393`. All carry stale facts (Las Vegas;
+  `be162393` also Technitium and "5-node cluster"). `durable` must mean *permanently true*, not
+  *permanently kept* — tagging them would pin wrong data.
+- **`725e287e`** — titled "Test save: …" inside the mental-health cluster. Probable test artifact;
+  needs Mike's call. Also ~5 near-duplicate Betrayal Wound *Session 1* rows, deliberately untouched.
+- **Recency net for `Personal`: NOT RECOMMENDED** on current evidence (P0 measured it —
+  `scripts/recency_baseline.py`). The career corpus self-refreshes (median 23d) so decay barely
+  demotes it, while identity docs at 154d would take ×0.31. The career-staleness problem is a
+  **lifecycle** problem — a filled req should stop being `current` — not a recency one.
+- **Career pipeline has no `system`** and therefore cannot participate in supersession. ~33 rows
+  per 60 days land unfilable, including a "Job Search — Pipeline Status" doc and an ADR that are
+  textbook living-doc candidates.
+- **`scripts/` carries ~100 pre-existing `E501`s** ("Lint pass 2"). CI lint is scoped to
+  `api/ mcp_server/ tests/` so it is green on arrival; `scripts/` joins once that chore lands.
+- **Food-log specs describe an unbuilt feature** — `FOOD_LOG_FORMAT_SPEC.md` +
+  `FOOD_LOG_IMPLEMENTATION_GUIDE.md`. Only the tag vocabulary was ever implemented. Same dormant
+  shape as the wiki: give them a decomm date or delete them.
+
+---
+
+## 🔑 Access notes
+
+- `VERCEL_AUTOMATION_BYPASS_SECRET` lives in gitignored `.env.local` and as a GitHub **repo**
+  secret. It grants read access to every preview build; revocable via the Vercel project API.
+- GitHub repo secrets configured: `SUPABASE_DB_URL`, `OPENBRAIN_TOOL_ACCESS_TOKEN`,
+  `OPENROUTER_API_KEY`, `VERCEL_AUTOMATION_BYPASS_SECRET`. With them present the suite runs
+  `169 passed`; without, `143 passed, 26 skipped` — **the skip count is the tell** that secrets
+  are missing.
+- Branch `fix/plan-ingest-decimal-serialization` is safe to delete (content-verified identical to
+  main on all files its unmerged commits touched).
+
+---
+
+## 📜 PRIOR STATE — 2026-06-18 OB2 flip (historical, kept for the arc)
+
+Everything below predates the 2026-08-23 session above. Retained because the OB2
+cutover reasoning is still the best explanation of why `knowledge` serves prod.
 ---
 
 ## TL;DR — the flip is DONE
