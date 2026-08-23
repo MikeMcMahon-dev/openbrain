@@ -2,7 +2,7 @@ PYTHON_SRCS := scripts brain_server api
 LOG_DIR := .logs
 NOW := $(shell date +%Y%m%d-%H%M%S)
 
-.PHONY: lint lint-py lint-md lint-py-fix lint-ci smoke smoke-local smoke-live smoke-ci ci check
+.PHONY: lint lint-py lint-md lint-py-fix lint-ci smoke smoke-local smoke-live smoke-preview smoke-ci ci check
 .PHONY: check-log smoke-log smoke-live-log
 .PHONY: pdf-fixtures pdf-unit pdf-eval pdf-eval-live
 .PHONY: docx-fixtures docx-unit url-unit docx-url-eval docx-url-eval-live
@@ -67,6 +67,11 @@ lint-ci:
 
 # Reproduce the full CI gate locally, in the same order.
 ci: lint-ci test smoke-ci
+
+# Tier 2: smoke a protected Vercel PREVIEW build before merging. Needs
+# VERCEL_AUTOMATION_BYPASS_SECRET in .env.local (the project runs SSO protection on previews).
+#   make smoke-preview SMOKE_URL=https://openbrain-<hash>-....vercel.app
+smoke-preview: smoke-live
 
 smoke-live:
 	@if [ -z "$(SMOKE_URL)" ]; then \
