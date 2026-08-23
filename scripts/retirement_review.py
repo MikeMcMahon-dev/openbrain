@@ -88,10 +88,13 @@ def cmd_list(_args) -> int:
 
 def cmd_show(args) -> int:
     with _conn() as c:
+        # LEFT JOIN, not JOIN: after an executed delete the target is gone, and an inner join
+        # made the audit record unreadable at exactly the moment it is the only evidence the
+        # removal happened. Fall back to the evidence snapshot captured at request time.
         r = c.execute(
             """SELECT r.*, k.content, k.tags, k.domain, k.environment, k.system, k.component_key
                  FROM public.retirement_requests r
-                 JOIN public.knowledge k ON k.id = r.target_id
+                 LEFT JOIN public.knowledge k ON k.id = r.target_id
                 WHERE r.id = %s""", [args.request_id]).fetchone()
     if not r:
         print(f"No such request: {args.request_id}")
@@ -103,7 +106,13 @@ def cmd_show(args) -> int:
           f"component={r['component_key']} tags={r['tags']}")
     print(f"rationale: {r['rationale']}")
     print(f"evidence : {json.dumps(r['evidence'], indent=2, default=str)}")
-    print(f"\n--- target content ---\n{r['content']}")
+    if r["content"] is None:
+        ev = r["evidence"] or {}
+        print(f"\n--- target content ---\n(target row no longer exists — removed by this "
+              f"request. Snapshot at request time: {ev.get('title')!r}, "
+              f"{ev.get('content_len')} chars)")
+    else:
+        print(f"\n--- target content ---\n{r['content']}")
     return 0
 
 
@@ -174,6 +183,7 @@ def cmd_execute(args) -> int:
                 print("Aborted. Nothing changed.")
                 return 1
 
+        failures = 0
         for r in rows:
             ok, why = _recheck(c, r["target_id"], r["method"])
             if not ok:
@@ -182,29 +192,50 @@ def cmd_execute(args) -> int:
                                     coalesce(decision_note,'') || ' | execute refused: ' || %s
                               WHERE id = %s""", [why, r["id"]])
                 c.commit()
+                failures += 1
                 print(f"  REFUSED {r['id'][:8]}: {why}")
                 continue
 
-            if r["method"] == "retire":
-                c.execute(
-                    """INSERT INTO public.supersession_events
-                         (superseded_id, superseding_id, reason_code, reason_note, actor, method)
-                       VALUES (%s, NULL, %s, %s, %s, 'human')""",
-                    [r["target_id"], r["reason_code"],
-                     f"approved retirement request {r['id']}", REVIEWER])
-                detail = "retired (status -> historical)"
-            else:
-                ch = c.execute("DELETE FROM public.knowledge_chunked WHERE document_id = %s",
-                               [r["target_id"]]).rowcount
-                kn = c.execute("DELETE FROM public.knowledge WHERE id = %s",
-                               [r["target_id"]]).rowcount
-                detail = f"deleted ({kn} row, {ch} chunks)"
+            try:
+                detail = _perform(c, r)
+            except Exception as exc:
+                # Any DB error here (the target FK violation was the original one) previously
+                # escaped as a traceback, leaving the request 'approved' — so the next run
+                # retried it and failed identically, forever. Record it and keep going.
+                c.rollback()
+                reason = str(exc).split("\n")[0][:180]
+                c.execute("""UPDATE public.retirement_requests
+                                SET status='failed', decision_note =
+                                    coalesce(decision_note,'') || ' | execute failed: ' || %s
+                              WHERE id = %s""", [reason, r["id"]])
+                c.commit()
+                failures += 1
+                print(f"  FAILED  {r['id'][:8]}: {reason}")
+                continue
 
             c.execute("""UPDATE public.retirement_requests
                             SET status='executed', executed_at=now() WHERE id = %s""", [r["id"]])
             c.commit()
             print(f"  OK      {r['id'][:8]}: {detail}")
-    return 0
+    return 1 if failures else 0
+
+
+def _perform(c, r) -> str:
+    """Perform the removal. Raises on failure; the caller records it and moves on."""
+    if r["method"] == "retire":
+        c.execute(
+            """INSERT INTO public.supersession_events
+                 (superseded_id, superseding_id, reason_code, reason_note, actor, method)
+               VALUES (%s, NULL, %s, %s, %s, 'human')""",
+            [r["target_id"], r["reason_code"],
+             f"approved retirement request {r['id']}", REVIEWER])
+        return "retired (status -> historical)"
+
+    ch = c.execute("DELETE FROM public.knowledge_chunked WHERE document_id = %s",
+                   [r["target_id"]]).rowcount
+    kn = c.execute("DELETE FROM public.knowledge WHERE id = %s",
+                   [r["target_id"]]).rowcount
+    return f"deleted ({kn} row, {ch} chunks)"
 
 
 def main(argv: list[str]) -> int:

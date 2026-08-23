@@ -1,7 +1,8 @@
 -- OB2 Migration 012: retirement_requests — human-approval queue for removals
 -- Additive; touches no existing table. Apply via Supabase Dashboard SQL editor.
 --
--- ⚠⚠ STAGED — NOT YET APPLIED. Needs Mike's sign-off. Trialed in BEGIN..ROLLBACK. ⚠⚠
+-- APPLIED to production 2026-08-23. See 013 for the target_id FK drop: the `delete`
+-- method could never execute while this table's FK pinned its own target.
 --
 -- WHY: every surface can CREATE; none can CLOSE. `ingest` is exposed on the hosted MCP, the stdio
 -- server, and the Custom GPT Actions, but retirement lives only in scripts/ and internal modules
