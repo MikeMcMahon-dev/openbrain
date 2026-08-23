@@ -15,17 +15,16 @@ from api._openbrain_api import (
 def _caller(metadata: Any, resolved_owner: str | None) -> str:
     """The identity acting on this request. NEVER read from the request body.
 
-    `_require_tool_auth` returns an owner only for a token in OPENBRAIN_TOKEN_OWNER_MAP — the
-    per-owner tokens the family GPTs hold. The shared OPENBRAIN_TOOL_ACCESS_TOKEN authenticates
-    without resolving one, and these handlers used to fall back to `body["owner"]` in that case.
-    That made every ownership check below decorative: a caller could simply declare itself to be
-    whoever owns the row it wanted to supersede. `owner` is not an advertised request field on any
-    surface (it appears in the Action specs only as a RESPONSE property), so nothing legitimate
-    was relying on it.
+    `_require_tool_auth` resolves an owner from OPENBRAIN_TOKEN_OWNER_MAP, which is consulted
+    BEFORE the shared-token comparison. In the deployed configuration OPENBRAIN_TOOL_ACCESS_TOKEN
+    is itself one of the map's keys, so every real caller resolves an owner and the old
+    `body["owner"]` fallback was unreachable. This is therefore defence in depth, not the repair
+    of a live bypass: the fallback only becomes reachable if a token is ever issued outside the
+    map, or the map loses an entry — at which point the body would silently start choosing the
+    identity that the ownership checks below are measured against.
 
-    Header-supplied identity (x-openbrain-owner, via request_context) still applies for the shared
-    token, which is the admin/dev credential — anyone holding it is already privileged. Family
-    tokens resolve an owner and the adapters overwrite the header with it, so they cannot spoof.
+    `owner` is not an advertised request field on any surface (it appears in the Action specs
+    only as a RESPONSE property), so nothing legitimate relied on it.
     """
     return resolved_owner or request_context(metadata)[0]
 

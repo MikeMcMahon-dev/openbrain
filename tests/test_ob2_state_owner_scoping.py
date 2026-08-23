@@ -9,10 +9,12 @@ Worse than the retirement airlock's equivalent gap, because the airlock delibera
 human to approve precisely BECAUSE removal is irreversible, while confirm performed an equally
 irreversible retire with no approval and no owner check.
 
-The second half is identity. `_require_tool_auth` resolves an owner only for the per-owner tokens
-in OPENBRAIN_TOKEN_OWNER_MAP; the shared token authenticates without one, and these handlers then
-fell back to `body["owner"]`. That made the ownership check bypassable by simply claiming to be
-the row's owner, so the body must never be able to set identity.
+The second half is identity, and it is DEFENCE IN DEPTH rather than a live bypass. The token
+owner map is consulted before the shared-token comparison, and OPENBRAIN_TOOL_ACCESS_TOKEN is
+itself one of its keys, so every real caller resolves an owner today and the old `body["owner"]`
+fallback was unreachable. It becomes reachable the moment a token is issued outside the map — and
+then the body would be choosing the identity the checks above are measured against. Pinned so
+that cannot happen quietly.
 """
 from __future__ import annotations
 
@@ -81,7 +83,7 @@ def test_not_found_and_not_yours_are_indistinguishable():
 
 
 def test_body_cannot_set_the_caller_identity():
-    """With the shared token no owner resolves; the body must not get to fill that gap."""
+    """Simulates a token that resolves no owner — not today's config, but the latent case."""
     theirs = {"id": TARGET, "status": "current", "created_by": THEIRS}
     body = dict(PROPOSE_BODY, owner=THEIRS)
     response, conn = _run(ob2.handle_propose_supersession, body, {TARGET: theirs},
