@@ -167,6 +167,40 @@ The MCP endpoint validates your token and owner ID before executing any tool.
 - Check that the token is being passed correctly as Bearer token
 - Try re-adding the connector
 
+### New Tool Parameters Missing After a Deploy
+
+**Problem:** A field was added to a tool's `inputSchema` and deployed to production, but the
+client still shows the old parameter list and cannot send the new field.
+
+**Cause:** MCP clients fetch `tools/list` once, when the connector is established, and cache it.
+A Vercel deploy changes what the server *would* return; it does not push anything to an
+already-connected client. The client keeps using the schema it captured at connect time.
+
+**Solution:** In the client's connector settings, **disconnect and reconnect** the connector.
+That forces a fresh `tools/list`. Confirmed 2026-08-22, after PR #102 added `system` /
+`component` / `valid_from` to `ingest`: production served the new schema immediately, Chat kept
+offering the old seven fields until the connector was cycled.
+
+**Confirm the server side first**, so you are not cycling connectors against a failed deploy:
+
+```bash
+curl -s https://openbrain-rouge.vercel.app/mcp/messages \
+  -H "Authorization: Bearer $OPENBRAIN_TOOL_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' \
+  | python3 -c 'import json,sys; print(sorted(
+      next(t for t in json.load(sys.stdin)["result"]["tools"]
+           if t["name"]=="ingest")["inputSchema"]["properties"]))'
+```
+
+If the field is present here but absent in the client, it is a stale cache — reconnect. If it is
+absent here, the deploy is the problem.
+
+**Applies to every consumer**, so plan a schema change as a fanout: the hosted MCP surface
+(`api/mcp_http.py`), the local stdio server (`mcp_server/openbrain.py`), and the Custom GPT
+Action specs (`docs/*_ACTION_SPEC.yaml`) are separate surfaces, and each connected client caches
+independently.
+
 ### Tool Calls Failing
 
 **Problem:** Tools execute but return errors
