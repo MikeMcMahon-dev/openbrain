@@ -103,13 +103,21 @@ def test_confirm_refuses_a_draft_you_do_not_own():
 
 
 def test_confirm_refuses_when_only_the_target_is_someone_elses():
-    """A draft you own must not be usable to retire a row you do not."""
+    """A draft you own must not be usable to retire a row you do not.
+
+    Also pins the ORDER of the two checks. The confirm gate echoes the target's title back in
+    `would_retire` so a human can see what they are about to destroy — which means running it
+    before the ownership check would disclose another owner's content through the very gate added
+    to make retirement safe. Ownership first, always.
+    """
     rows = {DRAFT: {"id": DRAFT, "status": "draft", "supersedes_id": TARGET,
                     "domain": "OpenBrain", "system": "OpenBrain", "created_by": MINE},
-            TARGET: {"id": TARGET, "status": "current", "created_by": THEIRS}}
+            TARGET: dict(_confirm_rows(target_owner=THEIRS)[TARGET])}
     response, conn = _run(ob2.handle_confirm_supersession, {"proposal_id": DRAFT}, rows)
     assert response["statusCode"] == 404
     assert not conn.writes
+    assert "SpectreNet DNS" not in response["body"], (
+        "the confirm gate disclosed another owner's row title before checking ownership")
 
 
 def test_your_own_row_still_passes_the_ownership_gate():
@@ -118,3 +126,52 @@ def test_your_own_row_still_passes_the_ownership_gate():
     with patch.object(ob2, "write_knowledge", create=True):
         response, _ = _run(ob2.handle_propose_supersession, PROPOSE_BODY, {TARGET: mine})
     assert response["statusCode"] != 404, "a row the caller owns was refused as not-found"
+
+
+# --- confirming what you retire ------------------------------------------------------------------
+# The ownership checks close CROSS-owner damage. They do nothing for the likelier failure: an agent
+# holding a stale or mistaken proposal_id retiring the wrong row inside its own vault — same owner,
+# check passes, row gone. And gone is final: the event log is append-only with a non-deferrable FK,
+# so a mis-retired row can be neither restored nor deleted. Confirm must therefore state WHICH row
+# it means, the way the retirement airlock makes a human name its target.
+
+def _confirm_rows(target_owner=MINE):
+    return {DRAFT: {"id": DRAFT, "status": "draft", "supersedes_id": TARGET,
+                    "domain": "OpenBrain", "system": "OpenBrain", "created_by": MINE},
+            TARGET: {"id": TARGET, "status": "current", "created_by": target_owner,
+                     "title": "SpectreNet DNS — CURRENT STATE",
+                     "component_key": "dns-current-state", "system": "SpectreNet"}}
+
+
+def test_confirm_without_naming_the_target_is_refused():
+    response, conn = _run(ob2.handle_confirm_supersession, {"proposal_id": DRAFT}, _confirm_rows())
+    body = json.loads(response["body"])
+    assert response["statusCode"] == 409
+    assert body["error"] == "confirm_target_required"
+    assert not conn.writes, "a row was retired without the caller naming it"
+
+
+def test_the_refusal_names_the_row_it_would_have_retired():
+    """A gate the caller cannot answer is a gate they will route around."""
+    response, _ = _run(ob2.handle_confirm_supersession, {"proposal_id": DRAFT}, _confirm_rows())
+    would = json.loads(response["body"])["would_retire"]
+    assert would["id"] == TARGET
+    assert would["title"] == "SpectreNet DNS — CURRENT STATE"
+    assert would["component_key"] == "dns-current-state"
+
+
+def test_confirm_with_the_wrong_target_is_refused():
+    """The stale-proposal_id case: the caller names one row, the draft points at another."""
+    body = {"proposal_id": DRAFT, "confirm_retires_id": "99999999-9999-9999-9999-999999999999"}
+    response, conn = _run(ob2.handle_confirm_supersession, body, _confirm_rows())
+    assert response["statusCode"] == 409
+    assert json.loads(response["body"])["error"] == "confirm_target_required"
+    assert not conn.writes
+
+
+def test_confirm_with_the_matching_target_passes_the_gate():
+    """The gate must not block the legitimate path."""
+    body = {"proposal_id": DRAFT, "confirm_retires_id": TARGET}
+    response, _ = _run(ob2.handle_confirm_supersession, body, _confirm_rows())
+    err = json.loads(response["body"]).get("error")
+    assert err != "confirm_target_required", "a correctly-named target was still refused"

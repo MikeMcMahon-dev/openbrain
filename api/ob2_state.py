@@ -219,7 +219,9 @@ def handle_propose_supersession(request: Any) -> dict[str, Any]:
         "proposal_id": proposal_id,
         "supersedes_id": supersedes_id,
         "owner": owner,
-        "message": "Draft created. Call POST /api/confirm_supersession with proposal_id to commit.",
+        "message": ("Draft created. Nothing has been retired. Call POST /api/confirm_supersession "
+                    "with proposal_id AND confirm_retires_id=<supersedes_id above> to commit — "
+                    "confirming retires that row permanently."),
     })
 
 
@@ -269,6 +271,7 @@ def handle_confirm_supersession(request: Any) -> dict[str, Any]:
                     "message": "Proposal has no supersedes_id — cannot confirm",
                 })
 
+
             target = conn.execute(
                 "SELECT id, status, created_by FROM public.knowledge WHERE id = %s",
                 [superseded_id],
@@ -285,6 +288,50 @@ def handle_confirm_supersession(request: Any) -> dict[str, Any]:
                         f"Target record has status='{target['status']}' — "
                         "has it already been superseded?"
                     ),
+                })
+
+            # CONFIRM WHAT IS BEING RETIRED. Placed AFTER the target's owner
+            # and status are verified: `would_retire` echoes the row's title,
+            # so disclosing it before the ownership check would have turned
+            # this gate into the very leak the ownership check prevents.
+            #
+            # The caller must name the row it believes this promotes over, and it
+            # must match the draft's recorded target.
+            #
+            # The ownership check above closes CROSS-owner damage. It does nothing for the
+            # likelier failure: an agent passing a stale or mistaken proposal_id and retiring the
+            # wrong row inside its own vault — same owner, check passes, row gone. And "gone" is
+            # final here: the event log is append-only and its FK is not deferrable, so a
+            # mis-retired row cannot be restored OR deleted. The other irreversible path in this
+            # system (the retirement airlock) requires a human to approve the specific target for
+            # exactly this reason; this one asked for nothing.
+            #
+            # Refusing tells the caller WHICH row it would have retired, so the answer to a
+            # mismatch is visible rather than guessed at.
+            confirm_target = (body.get("confirm_retires_id") or "").strip()
+            if not confirm_target or confirm_target != superseded_id:
+                retiring = conn.execute(
+                    "SELECT split_part(regexp_replace(content,'^#+\\s*',''), E'\\n',1) AS title,"
+                    " component_key, system FROM public.knowledge WHERE id = %s",
+                    [superseded_id],
+                ).fetchone()
+                return response_payload(409, {
+                    "error": "confirm_target_required",
+                    "message": (
+                        "Confirming this proposal RETIRES a row, and that cannot be undone. "
+                        "Re-send with confirm_retires_id set to the id below to state which row "
+                        "you mean."
+                        if not confirm_target else
+                        "confirm_retires_id does not match what this proposal supersedes — you "
+                        "are holding a different proposal than you think. Nothing was retired."
+                    ),
+                    "would_retire": {
+                        "id": superseded_id,
+                        "title": (retiring or {}).get("title"),
+                        "component_key": (retiring or {}).get("component_key"),
+                        "system": (retiring or {}).get("system"),
+                    },
+                    "status": 409,
                 })
 
             now = datetime.now(timezone.utc)
