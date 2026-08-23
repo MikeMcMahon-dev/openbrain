@@ -191,6 +191,7 @@ def build_plan(content: str, owner: str, *, system: str | None = None,
                       "not distinguish an update from a note. Use it to catch a missing system."),
         },
         "would_supersede": would_supersede,
+        "decline_reason_threshold": DECLINE_REASON_THRESHOLD,
         "decision_required": (
             "Commit with EITHER component=<one of the above> to update that living doc, OR "
             "acknowledged_not_updating=[<every component you were shown>] to write an "
