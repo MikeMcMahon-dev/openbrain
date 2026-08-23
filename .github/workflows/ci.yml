@@ -80,3 +80,14 @@ jobs:
       - name: Smoke (read-only)
         if: env.SUPABASE_DB_URL != ''
         run: python scripts/smoke_checks.py --read-only
+
+      # The same suite with the ingest gate ON. A feature flag has two states and only one of
+      # them is ever exercised by default, so the other breaks silently until someone flips it —
+      # /claude_ingest was found this way, 409ing under enforcement while green without it. This
+      # step is what makes flipping OPENBRAIN_REQUIRE_INGEST_PLAN a non-event instead of an
+      # incident. It stays after the flag is on: the pair then guards the rollback direction.
+      - name: Smoke (read-only, ingest gate ENFORCED)
+        if: env.SUPABASE_DB_URL != ''
+        env:
+          OPENBRAIN_REQUIRE_INGEST_PLAN: "1"
+        run: python scripts/smoke_checks.py --read-only
