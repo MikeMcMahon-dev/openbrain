@@ -615,7 +615,11 @@ def _smoke_mcp_cases_local() -> int:
                 ),
                 "headers": _auth,
             },
-            200,  # Returns error in JSON-RPC format
+            200,
+            # JSON-RPC signals application errors in the BODY, so 200 is expected and asserting
+            # it proves nothing. The claim worth checking is that an unknown method is actually
+            # reported as an error rather than quietly succeeding.
+            ("jsonrpc error for unknown method", lambda b: isinstance(b, dict) and "error" in b),
         ),
         # Tool execution: query
         (
@@ -684,12 +688,24 @@ def _smoke_mcp_cases_local() -> int:
                 }),
                 "headers": _auth,
             },
-            200,  # Returns error in result
+            200,
+            # Same shape: a tools/call with missing arguments returns 200 either way. What must
+            # be true is that the result says something went wrong.
+            ("tool result reports the missing param", _result_reports_error),
         ),
     ]
 
-    for label, request, expected in mcp_cases:
+    for case in mcp_cases:
+        label, request, expected = case[0], case[1], case[2]
+        body_check = case[3] if len(case) > 3 else None
         ok, message = run_case(request, expected)
+        if ok and body_check is not None:
+            claim, predicate = body_check
+            _status, body = _local_response(request)
+            if not predicate(body):
+                ok = False
+                message = (f"status ok but body check failed — expected {claim}; "
+                           f"got {str(body)[:180]}")
         print(f"{label}: {message}")
         if not ok:
             failed += 1
@@ -722,6 +738,48 @@ def _mcp_tool_call(tool: str, arguments: dict[str, Any],
         return response.get("statusCode"), json.loads(result["content"][0]["text"])
     except Exception:
         return response.get("statusCode"), result if result is not None else payload
+
+
+def _local_response(request: dict[str, Any]) -> tuple[int | None, Any]:
+    """Drive a request in-process and return (status, parsed body).
+
+    `run_case` returns only pass/fail, which is enough when the status discriminates. It is not
+    enough on surfaces that answer 200 whatever happens — JSON-RPC being the obvious one — so
+    body assertions need the body itself.
+    """
+    from api.app import handler
+
+    response = handler(request)
+    if not isinstance(response, dict):
+        return None, response
+    body = response.get("body")
+    try:
+        return response.get("statusCode"), json.loads(body) if isinstance(body, str) else body
+    except Exception:
+        return response.get("statusCode"), body
+
+
+def _result_reports_error(body: Any) -> bool:
+    """True when a JSON-RPC tool result signals a failure rather than a success.
+
+    Errors can surface three ways here: a transport-level `error`, the MCP `isError` flag, or —
+    most commonly in this codebase — an error object serialized into the result's text content.
+    """
+    if not isinstance(body, dict):
+        return False
+    if "error" in body:
+        return True
+    result = body.get("result")
+    if not isinstance(result, dict):
+        return False
+    if result.get("isError"):
+        return True
+    try:
+        inner = json.loads(result["content"][0]["text"])
+    except Exception:
+        return False
+    return isinstance(inner, dict) and bool(
+        inner.get("error") or str(inner.get("status", "")).startswith("4"))
 
 
 def _plan_args_local(content: str) -> dict[str, Any]:
