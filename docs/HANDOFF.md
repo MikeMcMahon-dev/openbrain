@@ -1,154 +1,217 @@
 # OpenBrain — Session Handoff
 
-**Last updated:** 2026-08-23 (late session, ended for a macOS update)
-**Status:** ✅ Prod healthy. CI/CD exists for the first time. Plan/apply shipped but **dark**.
+**Last updated:** 2026-08-23 (late session)
+**Status:** ✅ Prod healthy. **Plan enforcement is LIVE.** The retirement airlock works for the
+first time. Two authorization holes closed. `anon` no longer has any reach into the vault.
 **Read this first.** Then `docs/OPENBRAIN_NEXT_STEPS.md` for the backlog.
 
 ---
 
-## ⏩ WHERE WE ARE NOW (2026-08-23) — start here
+## ⏩ WHERE WE ARE NOW (2026-08-23, late) — start here
 
-### The through-line of this session
+### The through-line
 
-One bug kept reappearing in different costumes: **a capability existed in the backend that no
-surface exposed, so nobody could use it and nobody could tell.** First `system`/`component` (the
-supersession keys), then the ingest plan, then retirement. Every fix in this session is a variant
-of *close the gap between what the backend can do and what a caller can reach.*
+Everything shipped, reviewed, merged and covered by tests. Almost none of it had ever *run*.
+Plan/apply was live behind an off flag, so nobody had walked the enforced path. The airlock's
+`delete` method had never executed once. A smoke check had been green for months while being
+structurally incapable of failing. Two migration files claimed `STAGED — NOT YET APPLIED` while
+their objects were live in prod.
 
-### Shipped and LIVE in prod
+Every defect found across these two days lived in a **seam** — between a caller and a gate,
+between one surface and its siblings, between schema and code, between a doc and reality. 181
+green unit tests ran straight through all of them. What caught things was running them.
 
-| PR | What | State |
-|---|---|---|
-| #106 | plan/apply handshake (`plan_ingest` + token) | live, **enforcement OFF** |
-| #107 | Decimal serialization fix + wire-contract tests | live |
-| #108 | plan surfaces: one REST route for stdio + both Action specs, `ob_ingest --plan` | live |
-| #109 | Tier 2 preview smoke (restored after a merge race) | live |
-| #105 | retirement airlock (code) | live; **migration 012 APPLIED 2026-08-23** |
+### Enforcement is ON
 
-### Three-tier validation gate (new — none of this existed yesterday)
+`OPENBRAIN_REQUIRE_INGEST_PLAN=1` on **production and preview**. Verified live, not inferred:
 
-There was **no CI at all** before this session. `make smoke` and pytest existed and worked; nothing
-ran them. "We run the smoke tests" meant "we remember to," which is how a serialization bug reached
-production through a PR whose unit tests were all green.
+```
+unplanned text ingest  -> HTTP 409 error='plan_required'   (0 rows written)
+ob_ingest (auto-plans) -> status: accepted
+```
 
-1. **`.github/workflows/ci.yml`** — lint + pytest + `smoke --read-only`, on every PR.
-2. **`.github/workflows/preview-smoke.yml`** — hits the real Vercel preview URL over HTTPS after
-   deployment, via a Protection Bypass for Automation secret.
-3. **`make ci`** — reproduces the gate locally in the same order.
+An unplanned `source_type=text` ingest by an honor-owner is now refused. `ob_ingest.py` plans
+automatically and folds the token in, so session wraps are unaffected. Anything NEW that writes
+text as Mike must plan first or it will 409.
 
-**CI caught three real bugs in its first three runs**, two of them mine (a missing `httpx` dep that
-a dev venv was masking, and a `secrets`-in-step-`if` that fails a workflow at parse time with zero
-jobs and no log).
+### Shipped and LIVE
 
-**SAFETY — do not remove `--read-only` from CI.** Local smoke WRITES: the PDF and DOCX/URL groups
-POST real fixtures to `/api/ingest`. There is one live vault and no staging DB. That flag is the
-only thing stopping a pull request from injecting fixture rows into production.
+| PR | What |
+|---|---|
+| #111 | `ob_ingest` auto-plans; decline-threshold served with the plan; gate fails **closed** |
+| #112 | Airlock `delete` fixed (migration 013) + migration ledger + `migration_status.py` |
+| #113 | CI runs both flag states; cross-surface conformance tests; assertion audit |
+| #114 | `propose_retirement` exposed on every surface + owner scoping |
+| #115 | `ob2_state` owner scoping + confirm-what-you-retire gate |
+| home-lab #50/#51 | PM rubric: check applied migrations; "done means it ran" |
 
-### Prod data changes applied this session
+### The airlock now works
 
-- **FlightSim consolidated.** Three-generation lineage, contiguous, no gaps:
-  `0ccc7e4a` (3,784) → `b5041d45` (12,750) → **`6899a59a` (18,953, current)**, 26 chunks.
-  Two keyless strays (`400a4e85`, `997ce045`) hard-deleted after verification. Zero keyless
-  FlightSim rows remain.
-- **`durable` tagging** — 18 rows (mental-health series + clean identity/family). Vault-wide
-  `durable` membership is now 26.
-- **Food/health cleanup** — 10 dead food-log rows deleted; 3 more retired to `historical`
-  (two Weight Loss Project Logs + a now-false "maintain a daily food log" standing directive that
-  would have made an agent resume logging).
-- **Migration 012 applied** — `retirement_requests`, 13 columns / 8 constraints / 4 indexes,
-  0 rows. `scripts/retirement_review.py list` works.
+Migration 012 shipped it with `delete` unable to execute: `retirement_requests.target_id` carried
+a FK to the row it existed to request the deletion of, so Postgres refused. The error escaped as a
+traceback and left the request `approved`, so every retry failed identically. And once deletion
+did work, `cmd_show` inner-joined the deleted row, making the audit record unreadable exactly when
+it mattered. Migration **013** drops the FK (deliberately not `ON DELETE CASCADE` — that destroys
+the audit record along with the target). Exercised end to end against prod:
+
+```
+OK  6a3f2b7d: deleted (1 row, 1 chunks)
+```
+
+### Migrations are now knowable
+
+There was no record of what had been applied. Supabase's `schema_migrations` holds four CLI-era
+rows from March and none of the numbered series. `supabase/migrations/migration_log.md` is the
+human record; `scripts/migration_status.py` is what keeps it honest, verifying each migration
+against an object that must exist (or must be gone) rather than against prose.
+
+```
+13/13 applied.   exit=0
+```
+
+### Database access changes applied
+
+- **`anon` and `authenticated` revoked** across the `public` schema (tables, sequences, default
+  privileges). They had held `TRUNCATE` on 15 tables — and RLS does not gate `TRUNCATE`. Verified
+  denied afterwards by live attempt; app unaffected.
+- **RLS enabled on `retirement_requests`** (was the only public table without it).
+- **Role `openbrain_app` created** — `NOBYPASSRLS`, grants on all tables, no `TRUNCATE`. Its
+  connection string is in `.env.local` as `SUPABASE_DB_URL_RLS`. **Not yet in use** — see the
+  next-actions note; connecting to it today returns zero rows because no policy matches it.
 
 ---
 
-## 🔜 NEXT THREE ACTIONS
+## 🔜 NEXT ACTIONS
 
-1. **Teach `ob_ingest.py` to auto-plan.** ~10 lines reusing the `--plan` code path: run the plan,
-   fold `plan_token` into the ingest payload. **This is a hard prerequisite for #2** — see the trap
-   below.
-2. **Enable `OPENBRAIN_REQUIRE_INGEST_PLAN=1`** in Vercel (production + preview). Only after #1.
-3. **Exercise the retirement airlock end-to-end** — a real propose → deny → propose → approve →
-   execute cycle. The table is live but has never been used; the CLI is unproven against real data.
+1. **RLS project (the big one).** The vault's owner isolation is enforced *only* in application
+   code. The app connects as `postgres`, which has `BYPASSRLS`, and no policy on `knowledge`
+   references `created_by` at all. Two forgotten-filter bugs were found this session for exactly
+   that reason. Staged plan: write owner policies keyed on `current_setting('app.current_owner')`
+   → wrap DB access in explicit transactions setting it with `SET LOCAL` (session-level `SET`
+   would leak identity across pooled connections) → verify with shadow reads while still on
+   `postgres` → only then swap `SUPABASE_DB_URL` to `SUPABASE_DB_URL_RLS`. Carve-outs needed for
+   cron reconcile, session_report, migrations, and the retirement CLI.
+2. **Cheaper first: a query helper that REQUIRES an owner argument**, so omitting it is a
+   `TypeError` rather than a silent full-table read. Targets the actual failure mode at a fraction
+   of the RLS risk, and can land independently.
+3. **`get_verified_subscribers` on the blog side** — see portfolio-blog PR #80. That Supabase
+   project is SHARED with this vault; a DB change from either side lands on both.
 
 ---
 
 ## ⚠️ TRAPS — read before touching these
 
-**Enabling plan enforcement today would break `ob_ingest.py`.** The gate fires on
-`source_type=text` + honor-owner, which is exactly what `ob_ingest.py` sends, and its normal path
-carries no `plan_token` (the only `plan_token` reference is inside the `--plan` preview branch).
-Every session wrap would 409 — including the WAF-workaround path we depend on. Unaffected: smoke
-(`source_type=obsidian`), the PDF/DOCX evals, family GPTs (not honor-owners), and Chat (it has
-`plan_ingest`).
+**RLS is not protecting this vault.** The app connects as `postgres`, which has `BYPASSRLS`, so no
+policy applies to any API request. And the policies that exist do not scope by owner —
+`knowledge_anon_read` is `status='current'` with no `created_by` clause. Owner isolation lives
+entirely in application code (`created_by = %s` in `knowledge_retrieval.py`). Any handler that
+forgets that filter has **nothing underneath it**.
+
+**RLS does not gate `TRUNCATE`.** Proven in a rolled-back transaction: `TRUNCATE as anon:
+SUCCEEDED (1998 -> 0 rows)`. Row policies cover SELECT/INSERT/UPDATE/DELETE only. A role with the
+`TRUNCATE` privilege empties the table regardless of policy. This is why the anon revoke mattered
+more than the read exposure did.
+
+**A migration file's header is not evidence.** On 2026-08-23 both `007` and `012` still read
+`STAGED — NOT YET APPLIED` while live in production. Run `scripts/migration_status.py` — and if a
+migration is applied but its `migration_log.md` row is missing, fix the record before trusting
+anything built on it.
+
+**A test that cannot fail is not coverage.** The MCP ingest smoke asserted HTTP 200 against a
+surface that returns 200 regardless (`status, body = ingest_payload(...)` discards the status),
+over a write that upserts by content-derived id. Refusal, silent no-op and success were
+indistinguishable. When a test is offered as a receipt, ask what result would turn it red.
+
+**Guards must fail closed.** Several defects shared one shape: lacking information, the guard
+allowed the write. A decline threshold absent from an older server read as "nothing is close" and
+let a 0.777 near-duplicate through. A gate that cannot evaluate its own rule must BLOCK.
+
+**`sql_trial.py`'s "last statement" line is unreliable.** It reported `CREATE ROLE` and `SET` on
+blocks where later statements demonstrably ran. `TRIAL PASSED` (nothing raised) is the real
+signal; when the claim matters, verify inside the transaction instead. Worth fixing.
 
 **A `retire` forecloses a later `delete`.** `supersession_events` is append-only (enforced by
 `supersession_events_no_mutate`) and its FK to `knowledge` is NOT deferrable, so once an event
-references a row, that row is permanently pinned as historical. Deleting stays open either way —
-so when both are viable, decide deliberately. The three food-log rows retired this session are now
-permanently non-deletable, which was the intended tradeoff.
+references a row, that row is permanently pinned as historical and cannot be deleted. When both
+are viable, decide deliberately.
+
+**Ownership checks do not cover the likelier failure.** They close *cross-owner* damage. The
+realistic case is an agent passing a stale id and retiring the wrong row inside its **own** vault —
+same owner, check passes, row gone irreversibly. `confirm_supersession` now requires
+`confirm_retires_id` naming the target, but there is still no human gate on that path the way the
+airlock has one.
 
 **MCP clients cache `tools/list` at connect time.** A schema change deploys fine and the client
 keeps offering the old fields until the connector is disconnected and reconnected. From the client
-side this is indistinguishable from a failed deploy. Documented in `docs/MCP_SETUP.md` with a
-verification `curl`; confirm the server side before anyone cycles connectors.
+side this is indistinguishable from a failed deploy.
 
-**A merge race is invisible from the branch you are standing on.** PR #107 merged at `870eaed`
-while two later commits were still in flight; they never reached main, and the failure looked like
-an environment problem for three tool calls. If a check goes green and then behaves differently on
-main, run `git merge-base --is-ancestor <sha> main` on your last few commits *before* debugging the
-environment. Note cherry-picked commits are correctly "not ancestors" — compare **content**, not
-SHAs.
-
-**Preview does not automatically mirror production.** Vercel env vars are per-environment and are
-baked in at deploy time. `OPENBRAIN_READ_TARGET` and `OPENBRAIN_COMPONENT_BOOST` are now scoped to
-preview as well; `OPENBRAIN_WRITE_TARGET` is deliberately production-only so a preview build can
+**Preview does not automatically mirror production.** Vercel env vars are per-environment and baked
+in at deploy time. `OPENBRAIN_WRITE_TARGET` is deliberately production-only so a preview build can
 never write into `public.knowledge`. **Keep it that way.** Changing a var does not update existing
 deployments — a redeploy is required.
 
+**A merge race is invisible from the branch you are standing on.** If a check goes green and then
+behaves differently on main, run `git merge-base --is-ancestor <sha> main` on your last few commits
+*before* debugging the environment. Cherry-picked commits are correctly "not ancestors" — compare
+**content**, not SHAs.
+
 **Similarity cannot distinguish an update from a note.** Measured across 228 keyless rows: the one
-genuine mis-filed update scored 0.810 and ranked *fourth*, below three legitimate session wraps at
-0.834/0.823/0.815. Topic similarity measures SUBJECT; update-vs-note is INTENT. Do not build a
-detector on it — the plan shows candidates and a human/agent decides.
+genuine mis-filed update scored 0.810 and ranked *fourth*, below three legitimate session wraps.
+Topic similarity measures SUBJECT; update-vs-note is INTENT. Do not build a detector on it.
 
 **The component boost is load-bearing, not a tiebreak.** On the FlightSim query the keyless stray
-beat the merged living doc on raw RRF (0.032787 vs 0.031025); the merged doc only won via the ×2
-boost. Consolidation trades chunk-level precision for coherence and the boost pays for it. Turning
+beat the merged living doc on raw RRF; the merged doc only won via the ×2 boost. Turning
 `OPENBRAIN_COMPONENT_BOOST` off would quietly regress living-doc retrieval.
 
 ---
 
 ## 📋 OPEN / DEFERRED
 
+- **`handle_query_state` still honors an `owner` filter from the body** when no owner resolves.
+  Read path, and the shared token is already the admin credential, so it was called out rather
+  than silently changed. Revisit with the RLS work.
 - **Four identity rows deliberately left un-`durable`** pending content correction — `7d401b92`,
-  `87984bda`, `90112142` (Annie context), `be162393`. All carry stale facts (Las Vegas;
-  `be162393` also Technitium and "5-node cluster"). `durable` must mean *permanently true*, not
-  *permanently kept* — tagging them would pin wrong data.
+  `87984bda`, `90112142` (Annie context), `be162393`. All carry stale facts. `durable` must mean
+  *permanently true*, not *permanently kept*.
 - **`725e287e`** — titled "Test save: …" inside the mental-health cluster. Probable test artifact;
   needs Mike's call. Also ~5 near-duplicate Betrayal Wound *Session 1* rows, deliberately untouched.
-- **Recency net for `Personal`: NOT RECOMMENDED** on current evidence (P0 measured it —
-  `scripts/recency_baseline.py`). The career corpus self-refreshes (median 23d) so decay barely
-  demotes it, while identity docs at 154d would take ×0.31. The career-staleness problem is a
-  **lifecycle** problem — a filled req should stop being `current` — not a recency one.
-- **Career pipeline has no `system`** and therefore cannot participate in supersession. ~33 rows
-  per 60 days land unfilable, including a "Job Search — Pipeline Status" doc and an ADR that are
-  textbook living-doc candidates.
-- **`scripts/` carries ~100 pre-existing `E501`s** ("Lint pass 2"). CI lint is scoped to
-  `api/ mcp_server/ tests/` so it is green on arrival; `scripts/` joins once that chore lands.
-- **Food-log specs describe an unbuilt feature** — `FOOD_LOG_FORMAT_SPEC.md` +
-  `FOOD_LOG_IMPLEMENTATION_GUIDE.md`. Only the tag vocabulary was ever implemented. Same dormant
-  shape as the wiki: give them a decomm date or delete them.
+- **Recency net for `Personal`: NOT RECOMMENDED** on current evidence
+  (`scripts/recency_baseline.py`). The career-staleness problem is a **lifecycle** problem — a
+  filled req should stop being `current` — not a recency one.
+- **Career pipeline has no `system`** and cannot participate in supersession. ~33 rows per 60 days
+  land unfilable.
+- **`scripts/` carries ~100 pre-existing `E501`s.** CI lint is scoped to `api/ mcp_server/ tests/`
+  so it is green on arrival; `scripts/` joins once that chore lands.
+- **Food-log specs describe an unbuilt feature** — give them a decomm date or delete them.
+- **Blog:** `session-ai-compliance-failure.md` was written as penance and Mike wants it reframed.
+  Retitling changes a live URL, so it is his call on timing.
 
 ---
 
 ## 🔑 Access notes
 
-- `VERCEL_AUTOMATION_BYPASS_SECRET` lives in gitignored `.env.local` and as a GitHub **repo**
-  secret. It grants read access to every preview build; revocable via the Vercel project API.
-- GitHub repo secrets configured: `SUPABASE_DB_URL`, `OPENBRAIN_TOOL_ACCESS_TOKEN`,
-  `OPENROUTER_API_KEY`, `VERCEL_AUTOMATION_BYPASS_SECRET`. With them present the suite runs
-  `169 passed`; without, `143 passed, 26 skipped` — **the skip count is the tell** that secrets
-  are missing.
-- Branch `fix/plan-ingest-decimal-serialization` is safe to delete (content-verified identical to
-  main on all files its unmerged commits touched).
+- Suite is **213 passed, 1 xfailed** with secrets present. Without them, the skip count is the
+  tell that secrets are missing.
+- GitHub repo secrets: `SUPABASE_DB_URL`, `OPENBRAIN_TOOL_ACCESS_TOKEN`, `OPENROUTER_API_KEY`,
+  `VERCEL_AUTOMATION_BYPASS_SECRET`.
+- **Vercel env values are not readable via the REST API** — `?decrypt=true` still returns
+  ciphertext with the project token. Read them in the dashboard, or `vercel env pull`. Do not
+  infer a flag's state by probing production.
+- `OPENBRAIN_TOOL_ACCESS_TOKEN` is itself a key in `OPENBRAIN_TOKEN_OWNER_MAP` and resolves to
+  `mike.mcmahon67`, so every real caller resolves an owner. The map is consulted BEFORE the
+  shared-token comparison.
+- **This Supabase project is shared with portfolio-blog.** DB-level changes land on both.
+
+---
+
+## 📜 PRIOR STATE — 2026-08-23 early session (historical)
+
+The session that created CI/CD. Before it there was none: `make smoke` and pytest existed and
+nothing ran them. It shipped the plan/apply handshake (#106–#109), the retirement airlock code
+(#105), a three-tier validation gate (`ci.yml`, `preview-smoke.yml`, `make ci`), and consolidated
+the FlightSim lineage. **SAFETY, still true:** local smoke WRITES — the PDF and DOCX/URL groups
+POST real fixtures to `/api/ingest`. There is one live vault and no staging DB. Do not remove
+`--read-only` from CI.
 
 ---
 
