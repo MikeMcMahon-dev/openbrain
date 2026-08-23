@@ -137,7 +137,6 @@ PLAN_SURFACES = [
 def _planned_content(request: dict[str, Any]) -> str | None:
     """The exact string a surface hands to build_plan — i.e. what its token is bound to."""
     import api.ingest_plan as ip
-
     from api.app import handler
 
     seen: list[str] = []
