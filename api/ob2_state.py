@@ -6,9 +6,29 @@ from typing import Any
 from api._openbrain_api import (
     get_db_conn,
     parse_request,
+    request_context,
     require_auth_owner,
     response_payload,
 )
+
+
+def _caller(metadata: Any, resolved_owner: str | None) -> str:
+    """The identity acting on this request. NEVER read from the request body.
+
+    `_require_tool_auth` returns an owner only for a token in OPENBRAIN_TOKEN_OWNER_MAP — the
+    per-owner tokens the family GPTs hold. The shared OPENBRAIN_TOOL_ACCESS_TOKEN authenticates
+    without resolving one, and these handlers used to fall back to `body["owner"]` in that case.
+    That made every ownership check below decorative: a caller could simply declare itself to be
+    whoever owns the row it wanted to supersede. `owner` is not an advertised request field on any
+    surface (it appears in the Action specs only as a RESPONSE property), so nothing legitimate
+    was relying on it.
+
+    Header-supplied identity (x-openbrain-owner, via request_context) still applies for the shared
+    token, which is the admin/dev credential — anyone holding it is already privileged. Family
+    tokens resolve an owner and the adapters overwrite the header with it, so they cannot spoof.
+    """
+    return resolved_owner or request_context(metadata)[0]
+
 
 VALID_DOMAINS = {"Network", "K8s", "Security", "Study", "OpenBrain", "Personal"}
 VALID_ENVIRONMENTS = {"Production", "Lab", "Study", "Archive"}
@@ -77,7 +97,7 @@ def handle_ingest_state(request: Any) -> dict[str, Any]:
     supersedes_id = body.get("supersedes_id") or None
     valid_from = (body.get("valid_from") or "").strip() or None
     source = (body.get("source") or "api/ingest_state").strip()
-    owner = resolved_owner or (body.get("owner") or "").strip() or "mmcmahon"
+    owner = _caller(metadata, resolved_owner)
     auto_supersede = body.get("auto_supersede", True) is not False
 
     # Route through write_knowledge (ADR-018) so this endpoint gets the SAME guarantees as
@@ -144,19 +164,25 @@ def handle_propose_supersession(request: Any) -> dict[str, Any]:
     if not isinstance(tags, list):
         tags = []
     source = (body.get("source") or "api/propose_supersession").strip()
-    owner = resolved_owner or (body.get("owner") or "").strip() or "mmcmahon"
+    owner = _caller(metadata, resolved_owner)
     valid_from = (body.get("valid_from") or "").strip() or None
 
     try:
         with get_db_conn() as conn:
             target = conn.execute(
-                "SELECT id, status FROM public.knowledge WHERE id = %s",
+                "SELECT id, status, created_by FROM public.knowledge WHERE id = %s",
                 [supersedes_id],
             ).fetchone()
-        if not target:
+        # You may only supersede your OWN rows. supersedes_id is caller-supplied and the vault is
+        # multi-owner, so without this any authenticated caller could name any row — and confirm
+        # would then RETIRE it. That retirement is irreversible by construction: the event log is
+        # append-only and its FK is not deferrable, so the row cannot even be deleted afterwards.
+        # Not-found and not-yours answer identically so this is not an existence oracle.
+        if not target or target["created_by"] != owner:
             return response_payload(404, {
                 "error": "not_found",
-                "message": f"Record {supersedes_id} not found",
+                "message": (f"Record {supersedes_id} not found among your rows. You may only "
+                            "supersede content you own."),
             })
         if target["status"] != "current":
             return response_payload(409, {
@@ -201,9 +227,10 @@ def handle_propose_supersession(request: Any) -> dict[str, Any]:
 def handle_confirm_supersession(request: Any) -> dict[str, Any]:
     body, metadata = parse_request(request)
 
-    auth_err, _resolved_owner = require_auth_owner(metadata)
+    auth_err, resolved_owner = require_auth_owner(metadata)
     if auth_err:
         return auth_err
+    owner = _caller(metadata, resolved_owner)
 
     proposal_id = (body.get("proposal_id") or "").strip()
     if not proposal_id:
@@ -217,14 +244,18 @@ def handle_confirm_supersession(request: Any) -> dict[str, Any]:
     try:
         with get_db_conn() as conn:
             draft = conn.execute(
-                "SELECT id, status, supersedes_id, domain, system"
+                "SELECT id, status, supersedes_id, domain, system, created_by"
                 " FROM public.knowledge WHERE id = %s",
                 [proposal_id],
             ).fetchone()
-            if not draft:
+            # Confirm is the step that actually retires the target, so it re-checks ownership
+            # rather than trusting that propose did. Both halves must be yours: the draft you are
+            # promoting AND the row it would retire.
+            if not draft or draft["created_by"] != owner:
                 return response_payload(404, {
                     "error": "not_found",
-                    "message": f"Proposal {proposal_id} not found",
+                    "message": (f"Proposal {proposal_id} not found among your rows. You may only "
+                                "confirm proposals you own."),
                 })
             if draft["status"] != "draft":
                 return response_payload(409, {
@@ -240,13 +271,13 @@ def handle_confirm_supersession(request: Any) -> dict[str, Any]:
                 })
 
             target = conn.execute(
-                "SELECT id, status FROM public.knowledge WHERE id = %s",
+                "SELECT id, status, created_by FROM public.knowledge WHERE id = %s",
                 [superseded_id],
             ).fetchone()
-            if not target:
+            if not target or target["created_by"] != owner:
                 return response_payload(404, {
                     "error": "not_found",
-                    "message": f"Target record {superseded_id} not found",
+                    "message": (f"Target record {superseded_id} not found among your rows."),
                 })
             if target["status"] != "current":
                 return response_payload(409, {
@@ -270,7 +301,7 @@ def handle_confirm_supersession(request: Any) -> dict[str, Any]:
                      reason_code, actor, method)
                 VALUES (%s, %s, %s, %s, 'manual', %s, 'human')
                 """,
-                [superseded_id, proposal_id, now, fact_valid_until, _resolved_owner or None],
+                [superseded_id, proposal_id, now, fact_valid_until, owner],
             )
             # Promote the successor from the same moment the prior fact ended, so the two
             # lifespans are contiguous (backdated offset when given, else now).
