@@ -191,6 +191,7 @@ def build_plan(content: str, owner: str, *, system: str | None = None,
                       "not distinguish an update from a note. Use it to catch a missing system."),
         },
         "would_supersede": would_supersede,
+        "decline_reason_threshold": DECLINE_REASON_THRESHOLD,
         "decision_required": (
             "Commit with EITHER component=<one of the above> to update that living doc, OR "
             "acknowledged_not_updating=[<every component you were shown>] to write an "
@@ -202,14 +203,32 @@ def build_plan(content: str, owner: str, *, system: str | None = None,
     }
 
 
+def component_identity(payload: dict[str, Any]) -> str | None:
+    """The living-doc identity this payload declares, however it chose to spell it.
+
+    Two spellings are both first-class at ingest: a `component` field (the Action/MCP shape,
+    which the ingest path rewrites into a tag) and a `component:*` tag attached directly (ADR-008
+    — what ob_ingest --component and any direct-API caller send). The gate read only the field,
+    so `ob_ingest --component dns-current-state` was answered with decision_required: an update
+    rejected for failing to declare the update it had just declared. Read both.
+    """
+    explicit = payload.get("component")
+    if explicit:
+        return str(explicit)
+    for tag in payload.get("tags") or []:
+        if str(tag).startswith("component:"):
+            return str(tag).split(":", 1)[1] or None
+    return None
+
+
 def verify_apply(payload: dict[str, Any], owner: str, content: str) -> tuple[bool, dict[str, Any]]:
     """Gate an apply. Returns (ok, error_body). Only enforced for gated owners."""
     chash = content_hash(content)
     token = payload.get("plan_token")
 
     if not token:
-        plan = build_plan(content, owner,
-                          system=payload.get("system"), component=payload.get("component"))
+        plan = build_plan(content, owner, system=payload.get("system"),
+                          component=component_identity(payload))
         return False, {
             "error": "plan_required",
             "status": 409,
@@ -223,7 +242,7 @@ def verify_apply(payload: dict[str, Any], owner: str, content: str) -> tuple[boo
         return False, {"error": "plan_token_invalid", "status": 409, "message": reason}
 
     # An update names its target; the schema already requires system alongside component.
-    if payload.get("component"):
+    if component_identity(payload):
         return True, {}
 
     # Declining is not a boolean. Name what you are declining, so "nah" has to be stated.

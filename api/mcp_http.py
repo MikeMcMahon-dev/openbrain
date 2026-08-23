@@ -468,8 +468,13 @@ def _call_tool(name: str, arguments: dict, metadata: dict) -> dict[str, Any]:
         from api._openbrain_api import request_context
         from api.ingest_plan import build_plan
         owner, _tenant = request_context(metadata)
+        # .strip() is load-bearing, not tidying. The apply path hashes `source.strip()`
+        # (_openbrain_api.py) and the REST plan route strips too — this surface did not, so a
+        # token minted here over content with a trailing newline (i.e. almost any document) no
+        # longer matched at apply time. Invisible while enforcement is off; it would have made
+        # plan/apply unusable from the Claude connector the moment the flag flipped.
         return _wrap_content(build_plan(
-            arguments.get("source") or "", owner,
+            (arguments.get("source") or "").strip(), owner,
             system=arguments.get("system"), component=arguments.get("component")))
 
     elif name == "generate_quiz":
