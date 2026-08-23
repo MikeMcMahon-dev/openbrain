@@ -359,6 +359,52 @@ def _list_tools() -> list[dict]:
             },
         },
         {
+            "name": "propose_retirement",
+            "description": (
+                "REQUEST that a row be removed from the vault. Queues it for human approval and "
+                "removes NOTHING — Mike reviews every request and only he can execute one.\n\n"
+                "Use this when you find content that is wrong, superseded, or a dead artifact, "
+                "instead of leaving it to compete with current knowledge. You may only propose "
+                "removal of rows you own.\n\n"
+                "Prefer method='retire' (the default): it preserves the content and marks it "
+                "historical, still reachable by an as-of read. 'delete' is irreversible and only "
+                "legal when nothing references the row. A retire FORECLOSES a later delete, so "
+                "if you genuinely mean delete, say so the first time."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "required": ["target_id", "rationale"],
+                "properties": {
+                    "target_id": {
+                        "type": "string",
+                        "description": "id of the knowledge row to remove.",
+                    },
+                    "rationale": {
+                        "type": "string",
+                        "description": (
+                            "WHY this row should go, in prose, at least 20 characters. This is "
+                            "what the human actually reads; a request they cannot evaluate "
+                            "should be denied."
+                        ),
+                    },
+                    "method": {
+                        "type": "string",
+                        "enum": ["retire", "delete"],
+                        "description": (
+                            "retire (default, reversible, content preserved) or delete "
+                            "(irreversible, only when nothing references the row)."
+                        ),
+                    },
+                    "reason_code": {
+                        "type": "string",
+                        "enum": ["explicit", "component_collision", "contradiction_confirmed",
+                                 "ttl_expiry", "manual", "migration"],
+                        "description": "Category for the removal. Defaults to 'manual'.",
+                    },
+                },
+            },
+        },
+        {
             "name": "generate_quiz",
             "description": (
                 "Generate quiz questions from your vault notes on a given topic. "
@@ -463,6 +509,17 @@ def _call_tool(name: str, arguments: dict, metadata: dict) -> dict[str, Any]:
         normalized = {k: v for k, v in normalized.items() if v}
         status, body = ingest_payload(normalized, metadata)
         return _wrap_content(body if isinstance(body, dict) else json.loads(body))
+
+    elif name == "propose_retirement":
+        from api._openbrain_api import request_context
+        from api.retirement_request import propose_retirement
+        owner, _tenant = request_context(metadata)
+        return _wrap_content(propose_retirement(
+            (arguments.get("target_id") or "").strip(),
+            rationale=arguments.get("rationale") or "",
+            requested_by=owner,
+            method=arguments.get("method") or "retire",
+            reason_code=arguments.get("reason_code") or "manual"))
 
     elif name == "plan_ingest":
         from api._openbrain_api import request_context

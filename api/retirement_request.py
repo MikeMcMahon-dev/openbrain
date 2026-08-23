@@ -16,6 +16,9 @@ Two refusals are built in, and both matter more than they look:
     deleting. The denial IS the memory.
   * OPEN REQUEST — one pending/approved request per (target, method), enforced by a partial
     unique index, so a retry storm cannot queue the same removal fifty times.
+  * NOT YOURS — a caller may only name rows it owns. target_id is caller-supplied and the vault
+    is multi-owner, so an unscoped proposal let any surface name any row and read its title and
+    taxonomy back out of the rejection. Not-yours and not-found answer identically, on purpose.
 
 Evidence is captured at request time and re-checked at execution time; see
 `scripts/retirement_review.py`, which refuses to execute on drift.
@@ -89,8 +92,18 @@ def propose_retirement(
 
     with get_db_conn() as conn:
         evidence = collect_evidence(conn, target_id)
-        if not evidence:
-            return _reject("target_id not found in public.knowledge", target_id=target_id)
+
+        # You may only propose removal of your OWN rows. This vault is multi-owner (Mike, Annie,
+        # Beth) and target_id is caller-supplied, so without this any surface could name any row
+        # — and the rejection used to hand back that row's title, tags and taxonomy in `evidence`.
+        # Missing and not-yours deliberately return the SAME message: distinguishing them turns
+        # this into an existence oracle for other people's ids.
+        if not evidence or evidence.get("created_by") != requested_by:
+            return _reject(
+                "target_id not found among your rows in public.knowledge. You may only propose "
+                "removal of content you own.",
+                target_id=target_id,
+            )
 
         denied = conn.execute(
             """SELECT id::text, decision_note, decided_at FROM public.retirement_requests

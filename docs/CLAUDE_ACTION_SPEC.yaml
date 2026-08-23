@@ -284,6 +284,65 @@ paths:
                     type: object
                   decision_required:
                     type: string
+  /claude_propose_retirement:
+    post:
+      operationId: claude_propose_retirement
+      summary: Request that a row be removed from the vault
+      description: >-
+        REQUEST a removal. Queues it for human approval and removes NOTHING — Mike reviews every
+        request and only he can execute one. Use this when you find content that is wrong,
+        superseded, or a dead artifact, rather than leaving it to compete with current knowledge.
+        You may only propose removal of rows you own. Prefer method=retire (the default): the
+        content is preserved and marked historical, still reachable by an as-of read. delete is
+        irreversible and only legal when nothing references the row, and a retire FORECLOSES a
+        later delete — so if you genuinely mean delete, say so the first time.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [target_id, rationale]
+              properties:
+                target_id:
+                  type: string
+                  description: id of the knowledge row to remove.
+                rationale:
+                  type: string
+                  description: >-
+                    WHY this row should go, in prose, at least 20 characters. This is what the human
+                    actually reads; a request they cannot evaluate should be denied.
+                method:
+                  type: string
+                  description: retire (default, reversible) or delete (irreversible).
+                  enum:
+                    - retire
+                    - delete
+                reason_code:
+                  type: string
+                  description: Category for the removal. Defaults to manual.
+                  enum:
+                    - explicit
+                    - component_collision
+                    - contradiction_confirmed
+                    - ttl_expiry
+                    - manual
+                    - migration
+      responses:
+        "202":
+          description: Queued for human approval. Nothing has been removed.
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: >-
+            Rejected — bad method/reason_code, a rationale under 20 characters, a target you do not
+            own, an open request already queued, or a removal already denied.
+          content:
+            application/json:
+              schema:
+                type: object
   /claude_ingest:
     post:
       operationId: ingest_content_to_vault

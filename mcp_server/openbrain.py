@@ -236,6 +236,50 @@ async def list_tools() -> list[types.Tool]:
             },
         ),
         types.Tool(
+            name="openbrain_propose_retirement",
+            description=(
+                "REQUEST that a row be removed from the vault. Queues it for human approval and "
+                "removes NOTHING — Mike reviews every request and only he can execute one.\n\n"
+                "Use this when you find content that is wrong, superseded, or a dead artifact, "
+                "rather than leaving it to compete with current knowledge. You may only propose "
+                "removal of rows you own.\n\n"
+                "Prefer method='retire' (the default): content is preserved and marked "
+                "historical, still reachable by an as-of read. 'delete' is irreversible and only "
+                "legal when nothing references the row. A retire FORECLOSES a later delete."
+            ),
+            inputSchema={
+                "type": "object",
+                "required": ["target_id", "rationale"],
+                "properties": {
+                    "target_id": {
+                        "type": "string",
+                        "description": "id of the knowledge row to remove.",
+                    },
+                    "rationale": {
+                        "type": "string",
+                        "description": (
+                            "WHY this row should go, in prose, at least 20 characters. This is "
+                            "what the human actually reads."
+                        ),
+                    },
+                    "method": {
+                        "type": "string",
+                        "enum": ["retire", "delete"],
+                        "description": (
+                            "retire (default, reversible) or delete (irreversible, only when "
+                            "nothing references the row)."
+                        ),
+                    },
+                    "reason_code": {
+                        "type": "string",
+                        "enum": ["explicit", "component_collision", "contradiction_confirmed",
+                                 "ttl_expiry", "manual", "migration"],
+                        "description": "Category for the removal. Defaults to 'manual'.",
+                    },
+                },
+            },
+        ),
+        types.Tool(
             name="openbrain_generate_quiz",
             description="Generate quiz questions from vault notes on a given topic.",
             inputSchema={
@@ -279,6 +323,8 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         result = _call("/openbrain_ingest", {"tool_input": arguments})
     elif name == "openbrain_plan_ingest":
         result = _call("/openbrain_plan_ingest", {"tool_input": arguments})
+    elif name == "openbrain_propose_retirement":
+        result = _call("/openbrain_propose_retirement", {"tool_input": arguments})
     elif name == "openbrain_generate_quiz":
         result = _call("/openbrain_generate_quiz", arguments)
     elif name == "openbrain_generate_flashcards":
