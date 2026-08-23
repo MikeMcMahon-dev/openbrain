@@ -6,9 +6,28 @@ from typing import Any
 from api._openbrain_api import (
     get_db_conn,
     parse_request,
+    request_context,
     require_auth_owner,
     response_payload,
 )
+
+
+def _caller(metadata: Any, resolved_owner: str | None) -> str:
+    """The identity acting on this request. NEVER read from the request body.
+
+    `_require_tool_auth` resolves an owner from OPENBRAIN_TOKEN_OWNER_MAP, which is consulted
+    BEFORE the shared-token comparison. In the deployed configuration OPENBRAIN_TOOL_ACCESS_TOKEN
+    is itself one of the map's keys, so every real caller resolves an owner and the old
+    `body["owner"]` fallback was unreachable. This is therefore defence in depth, not the repair
+    of a live bypass: the fallback only becomes reachable if a token is ever issued outside the
+    map, or the map loses an entry — at which point the body would silently start choosing the
+    identity that the ownership checks below are measured against.
+
+    `owner` is not an advertised request field on any surface (it appears in the Action specs
+    only as a RESPONSE property), so nothing legitimate relied on it.
+    """
+    return resolved_owner or request_context(metadata)[0]
+
 
 VALID_DOMAINS = {"Network", "K8s", "Security", "Study", "OpenBrain", "Personal"}
 VALID_ENVIRONMENTS = {"Production", "Lab", "Study", "Archive"}
@@ -77,7 +96,7 @@ def handle_ingest_state(request: Any) -> dict[str, Any]:
     supersedes_id = body.get("supersedes_id") or None
     valid_from = (body.get("valid_from") or "").strip() or None
     source = (body.get("source") or "api/ingest_state").strip()
-    owner = resolved_owner or (body.get("owner") or "").strip() or "mmcmahon"
+    owner = _caller(metadata, resolved_owner)
     auto_supersede = body.get("auto_supersede", True) is not False
 
     # Route through write_knowledge (ADR-018) so this endpoint gets the SAME guarantees as
@@ -144,19 +163,25 @@ def handle_propose_supersession(request: Any) -> dict[str, Any]:
     if not isinstance(tags, list):
         tags = []
     source = (body.get("source") or "api/propose_supersession").strip()
-    owner = resolved_owner or (body.get("owner") or "").strip() or "mmcmahon"
+    owner = _caller(metadata, resolved_owner)
     valid_from = (body.get("valid_from") or "").strip() or None
 
     try:
         with get_db_conn() as conn:
             target = conn.execute(
-                "SELECT id, status FROM public.knowledge WHERE id = %s",
+                "SELECT id, status, created_by FROM public.knowledge WHERE id = %s",
                 [supersedes_id],
             ).fetchone()
-        if not target:
+        # You may only supersede your OWN rows. supersedes_id is caller-supplied and the vault is
+        # multi-owner, so without this any authenticated caller could name any row — and confirm
+        # would then RETIRE it. That retirement is irreversible by construction: the event log is
+        # append-only and its FK is not deferrable, so the row cannot even be deleted afterwards.
+        # Not-found and not-yours answer identically so this is not an existence oracle.
+        if not target or target["created_by"] != owner:
             return response_payload(404, {
                 "error": "not_found",
-                "message": f"Record {supersedes_id} not found",
+                "message": (f"Record {supersedes_id} not found among your rows. You may only "
+                            "supersede content you own."),
             })
         if target["status"] != "current":
             return response_payload(409, {
@@ -194,16 +219,19 @@ def handle_propose_supersession(request: Any) -> dict[str, Any]:
         "proposal_id": proposal_id,
         "supersedes_id": supersedes_id,
         "owner": owner,
-        "message": "Draft created. Call POST /api/confirm_supersession with proposal_id to commit.",
+        "message": ("Draft created. Nothing has been retired. Call POST /api/confirm_supersession "
+                    "with proposal_id AND confirm_retires_id=<supersedes_id above> to commit — "
+                    "confirming retires that row permanently."),
     })
 
 
 def handle_confirm_supersession(request: Any) -> dict[str, Any]:
     body, metadata = parse_request(request)
 
-    auth_err, _resolved_owner = require_auth_owner(metadata)
+    auth_err, resolved_owner = require_auth_owner(metadata)
     if auth_err:
         return auth_err
+    owner = _caller(metadata, resolved_owner)
 
     proposal_id = (body.get("proposal_id") or "").strip()
     if not proposal_id:
@@ -217,14 +245,18 @@ def handle_confirm_supersession(request: Any) -> dict[str, Any]:
     try:
         with get_db_conn() as conn:
             draft = conn.execute(
-                "SELECT id, status, supersedes_id, domain, system"
+                "SELECT id, status, supersedes_id, domain, system, created_by"
                 " FROM public.knowledge WHERE id = %s",
                 [proposal_id],
             ).fetchone()
-            if not draft:
+            # Confirm is the step that actually retires the target, so it re-checks ownership
+            # rather than trusting that propose did. Both halves must be yours: the draft you are
+            # promoting AND the row it would retire.
+            if not draft or draft["created_by"] != owner:
                 return response_payload(404, {
                     "error": "not_found",
-                    "message": f"Proposal {proposal_id} not found",
+                    "message": (f"Proposal {proposal_id} not found among your rows. You may only "
+                                "confirm proposals you own."),
                 })
             if draft["status"] != "draft":
                 return response_payload(409, {
@@ -239,14 +271,15 @@ def handle_confirm_supersession(request: Any) -> dict[str, Any]:
                     "message": "Proposal has no supersedes_id — cannot confirm",
                 })
 
+
             target = conn.execute(
-                "SELECT id, status FROM public.knowledge WHERE id = %s",
+                "SELECT id, status, created_by FROM public.knowledge WHERE id = %s",
                 [superseded_id],
             ).fetchone()
-            if not target:
+            if not target or target["created_by"] != owner:
                 return response_payload(404, {
                     "error": "not_found",
-                    "message": f"Target record {superseded_id} not found",
+                    "message": (f"Target record {superseded_id} not found among your rows."),
                 })
             if target["status"] != "current":
                 return response_payload(409, {
@@ -255,6 +288,50 @@ def handle_confirm_supersession(request: Any) -> dict[str, Any]:
                         f"Target record has status='{target['status']}' — "
                         "has it already been superseded?"
                     ),
+                })
+
+            # CONFIRM WHAT IS BEING RETIRED. Placed AFTER the target's owner
+            # and status are verified: `would_retire` echoes the row's title,
+            # so disclosing it before the ownership check would have turned
+            # this gate into the very leak the ownership check prevents.
+            #
+            # The caller must name the row it believes this promotes over, and it
+            # must match the draft's recorded target.
+            #
+            # The ownership check above closes CROSS-owner damage. It does nothing for the
+            # likelier failure: an agent passing a stale or mistaken proposal_id and retiring the
+            # wrong row inside its own vault — same owner, check passes, row gone. And "gone" is
+            # final here: the event log is append-only and its FK is not deferrable, so a
+            # mis-retired row cannot be restored OR deleted. The other irreversible path in this
+            # system (the retirement airlock) requires a human to approve the specific target for
+            # exactly this reason; this one asked for nothing.
+            #
+            # Refusing tells the caller WHICH row it would have retired, so the answer to a
+            # mismatch is visible rather than guessed at.
+            confirm_target = (body.get("confirm_retires_id") or "").strip()
+            if not confirm_target or confirm_target != superseded_id:
+                retiring = conn.execute(
+                    "SELECT split_part(regexp_replace(content,'^#+\\s*',''), E'\\n',1) AS title,"
+                    " component_key, system FROM public.knowledge WHERE id = %s",
+                    [superseded_id],
+                ).fetchone()
+                return response_payload(409, {
+                    "error": "confirm_target_required",
+                    "message": (
+                        "Confirming this proposal RETIRES a row, and that cannot be undone. "
+                        "Re-send with confirm_retires_id set to the id below to state which row "
+                        "you mean."
+                        if not confirm_target else
+                        "confirm_retires_id does not match what this proposal supersedes — you "
+                        "are holding a different proposal than you think. Nothing was retired."
+                    ),
+                    "would_retire": {
+                        "id": superseded_id,
+                        "title": (retiring or {}).get("title"),
+                        "component_key": (retiring or {}).get("component_key"),
+                        "system": (retiring or {}).get("system"),
+                    },
+                    "status": 409,
                 })
 
             now = datetime.now(timezone.utc)
@@ -270,7 +347,7 @@ def handle_confirm_supersession(request: Any) -> dict[str, Any]:
                      reason_code, actor, method)
                 VALUES (%s, %s, %s, %s, 'manual', %s, 'human')
                 """,
-                [superseded_id, proposal_id, now, fact_valid_until, _resolved_owner or None],
+                [superseded_id, proposal_id, now, fact_valid_until, owner],
             )
             # Promote the successor from the same moment the prior fact ended, so the two
             # lifespans are contiguous (backdated offset when given, else now).
