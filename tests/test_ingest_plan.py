@@ -202,3 +202,50 @@ def test_enforcement_is_off_unless_explicitly_enabled(monkeypatch):
         assert ip.enforcement_enabled() is True
     monkeypatch.setenv("OPENBRAIN_REQUIRE_INGEST_PLAN", "0")
     assert ip.enforcement_enabled() is False
+
+
+# --- component identity: the gate must read both spellings -------------------------------------
+# ob_ingest --component sends the ADR-008 `component:*` TAG and no `component` field. The gate
+# originally short-circuited on the field alone, so a declared living-doc update was answered
+# with decision_required. Caught by a pre-merge enforcement trial, never in production, because
+# enforcement has never been on.
+
+def test_component_identity_reads_field():
+    assert ip.component_identity({"component": "dns-current-state"}) == "dns-current-state"
+
+
+def test_component_identity_reads_adr008_tag():
+    assert ip.component_identity(
+        {"tags": ["SpectreNet", "component:dns-current-state"]}) == "dns-current-state"
+
+
+def test_component_identity_absent():
+    assert ip.component_identity({"tags": ["SpectreNet", "shape:note"]}) is None
+
+
+def test_apply_accepts_a_tag_declared_update():
+    """The ob_ingest --component payload shape: tag only, no `component` field."""
+    tok = ip.encode_plan_token(ip.content_hash(CONTENT), OWNER)
+    plan = _plan({"flightsim-hardware"}, [{"component_key": "flightsim-hardware",
+                                           "similarity": 0.9}])
+    with patch.object(ip, "build_plan", return_value=plan):
+        ok, err = ip.verify_apply(
+            {"plan_token": tok, "system": "SpectreNet",
+             "tags": ["component:dns-current-state"]}, OWNER, CONTENT)
+    assert ok, f"a tag-declared update must pass the gate, got {err}"
+
+
+def test_plan_token_survives_trailing_whitespace_across_surfaces():
+    """Every surface must hash the SAME normalization of the content.
+
+    The apply path hashes source.strip(). A surface that hashed the raw string minted tokens that
+    failed at apply for any document ending in a newline — which is most of them. This pins the
+    normalization so a new surface cannot quietly pick a different one.
+    """
+    raw = "A living doc update from a client.\n"
+    tok = ip.encode_plan_token(ip.content_hash(raw.strip()), OWNER)
+    ok, why = ip.decode_plan_token(tok, ip.content_hash(raw.strip()), OWNER)
+    assert ok, why
+    stale = ip.encode_plan_token(ip.content_hash(raw), OWNER)
+    ok, _ = ip.decode_plan_token(stale, ip.content_hash(raw.strip()), OWNER)
+    assert not ok, "an unstripped-hash token must not validate — that was the latent bug"
