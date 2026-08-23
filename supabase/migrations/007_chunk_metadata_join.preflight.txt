@@ -1,0 +1,144 @@
+# RETROSPECTIVE preflight — 007 was applied to production long before this artifact.
+# Run 2026-08-23 to satisfy the ADR-020 commit gate on a comment-only header correction,
+# and to confirm 007 left no dangling dependents. It did leave one (the stale
+# validate_knowledge_chunked_insert trigger), which migration 011 removed on 2026-08-06;
+# this output is the check that nothing else remains.
+
+
+=== public.knowledge_chunked — 1377 rows ===
+
+columns (name | nullable | default | type):
+  id               NO   gen_random_uuid()          uuid
+  content          NO                              text
+  embedding        YES                             USER-DEFINED
+  document_id      NO                              uuid
+  chunk_index      NO                              integer
+  heading          YES                             text
+  valid_from       NO   now()                      timestamp with time zone
+  valid_until      YES                             timestamp with time zone
+  supersedes_id    YES                             uuid
+  ingest_id        YES                             text
+  source           YES                             text
+  created_by       NO   'mmcmahon'::text           text
+  created_at       NO   now()                      timestamp with time zone
+
+indexes (REAL names — use these in DROP INDEX, never guess):
+  knowledge_chunked_pkey
+      CREATE UNIQUE INDEX knowledge_chunked_pkey ON public.knowledge_chunked USING btree (id)
+  knowledge_chunked_embedding_idx
+      CREATE INDEX knowledge_chunked_embedding_idx ON public.knowledge_chunked USING hnsw (embedding vector_cosine_ops
+  knowledge_chunked_document_idx
+      CREATE INDEX knowledge_chunked_document_idx ON public.knowledge_chunked USING btree (document_id, chunk_index)
+  knowledge_chunked_doc_chunk_uniq
+      CREATE UNIQUE INDEX knowledge_chunked_doc_chunk_uniq ON public.knowledge_chunked USING btree (document_id, chunk
+
+constraints (name | type | validated):
+  knowledge_chunked_pkey                 p  validated=True
+
+RLS policies (a policy referencing a dropped column BLOCKS the drop —
+re-point it at the parent or drop it first):
+  knowledge_chunked_service_all  (ALL, roles={service_role})
+      USING:      true
+      WITH CHECK: true
+
+triggers (a trigger FUNCTION body reading a column has NO catalog dependency —
+Postgres DROPs the column silently and the function breaks at the next write):
+  (none)
+
+WRITERS (22) — EVERY one must be migrated before a
+column it writes is dropped:
+  api/knowledge_ingest.py:89:  INSERT INTO public.knowledge_chunked
+  scripts/backfill_chunks.py:102:  INSERT INTO public.knowledge_chunked
+  scripts/backfill_chunks.py:156:  "DELETE FROM public.knowledge_chunked WHERE document_id = %s",
+  scripts/backfill_orphan_chunks.py:5:  fix (migration 011), every INSERT into public.knowledge_chunked raised
+  scripts/retirement_review.py:234:  ch = c.execute("DELETE FROM public.knowledge_chunked WHERE document_id = %s",
+  supabase/migrations/005_knowledge_chunked.sql:107:  ALTER TABLE public.knowledge_chunked ENABLE ROW LEVEL SECURITY;
+  supabase/migrations/006_component_key_system.sql:27:  ALTER TABLE public.knowledge_chunked ADD COLUMN IF NOT EXISTS component_key TEXT;
+  supabase/migrations/006_component_key_system.sql:36:  UPDATE public.knowledge_chunked kc
+  supabase/migrations/006_component_key_system.sql:118:  --   ALTER TABLE public.knowledge_chunked DROP COLUMN IF EXISTS component_key;
+  supabase/migrations/007_chunk_metadata_join.sql:31:  ALTER TABLE public.knowledge_chunked ALTER COLUMN domain      DROP NOT NULL;
+  supabase/migrations/007_chunk_metadata_join.sql:32:  ALTER TABLE public.knowledge_chunked ALTER COLUMN environment DROP NOT NULL;
+  supabase/migrations/007_chunk_metadata_join.sql:33:  ALTER TABLE public.knowledge_chunked ALTER COLUMN status      DROP NOT NULL;
+  supabase/migrations/007_chunk_metadata_join.sql:34:  ALTER TABLE public.knowledge_chunked ALTER COLUMN tags        DROP NOT NULL;
+  supabase/migrations/007_chunk_metadata_join.sql:57:  ALTER TABLE public.knowledge_chunked DROP COLUMN IF EXISTS status;
+  supabase/migrations/007_chunk_metadata_join.sql:58:  ALTER TABLE public.knowledge_chunked DROP COLUMN IF EXISTS system;
+  supabase/migrations/007_chunk_metadata_join.sql:59:  ALTER TABLE public.knowledge_chunked DROP COLUMN IF EXISTS component_key;
+  supabase/migrations/007_chunk_metadata_join.sql:60:  ALTER TABLE public.knowledge_chunked DROP COLUMN IF EXISTS tags;
+  supabase/migrations/007_chunk_metadata_join.sql:61:  ALTER TABLE public.knowledge_chunked DROP COLUMN IF EXISTS domain;
+  supabase/migrations/007_chunk_metadata_join.sql:62:  ALTER TABLE public.knowledge_chunked DROP COLUMN IF EXISTS environment;
+  supabase/migrations/007_chunk_metadata_join.sql:67:  --   ALTER TABLE public.knowledge_chunked ADD COLUMN status TEXT, ADD COLUMN system TEXT,
+  supabase/migrations/007_chunk_metadata_join.sql:70:  --   UPDATE public.knowledge_chunked kc SET status=k.status, system=k.system,
+  supabase/migrations/011_drop_stale_chunked_trigger.sql:11:  -- succeeded silently and every subsequent INSERT into knowledge_chunked raised:
+
+readers / refs (68):
+  api/knowledge_ingest.py:55:  """Whether to mirror each ingest into public.knowledge_chunked (ADR-017 Phase H).
+  api/knowledge_ingest.py:71:  """Best-effort: chunk `content` and mirror it into public.knowledge_chunked.
+  api/knowledge_retrieval.py:124:  # =knowledge_chunked to serve chunked sections (adds document_id/heading and triggers
+  api/knowledge_retrieval.py:126:  _CHUNK_TABLE = "knowledge_chunked"
+  api/knowledge_retrieval.py:138:  On the chunked store (ADR-018a item 3) `knowledge_chunked` owns ONLY content +
+  api/knowledge_retrieval.py:150:  frm = "public.knowledge_chunked kc JOIN public.knowledge k ON k.id = kc.document_id"
+  api/knowledge_retrieval.py:584:  FROM public.knowledge_chunked kc
+  api/retirement_request.py:58:  (SELECT count(*) FROM public.knowledge_chunked kc
+  scripts/backfill_chunks.py:9:  The actual backfill (create public.knowledge_chunked, embed each chunk, INSERT,
+  scripts/backfill_chunks.py:116:  """Chunk + re-embed every knowledge row into knowledge_chunked as CONTENT-ONLY rows
+  scripts/backfill_chunks.py:146:  print(f"{mode} {len(docs)} documents into public.knowledge_chunked ...")
+  scripts/backfill_chunks.py:177:  n = conn.execute("SELECT count(*) n FROM public.knowledge_chunked").fetchone()["n"]
+  scripts/backfill_chunks.py:178:  print(f"done: {len(docs)} documents -> {n} rows in knowledge_chunked")
+  scripts/backfill_chunks.py:187:  help="write chunks into public.knowledge_chunked (re-embeds; idempotent)")
+  scripts/backfill_orphan_chunks.py:2:  """Backfill chunks for `knowledge` rows that have no children in `knowledge_chunked`.
+  scripts/backfill_orphan_chunks.py:6:  `record "new" has no field "status"` from the obsolete validate_knowledge_chunked_insert()
+  scripts/backfill_orphan_chunks.py:41:  where = "NOT EXISTS (SELECT 1 FROM public.knowledge_chunked c WHERE c.document_id = k.id)"
+  scripts/backfill_orphan_chunks.py:101:  "SELECT count(*) FROM public.knowledge_chunked WHERE document_id = %s",
+  scripts/chunk_integrity_check.py:2:  """Live DB integrity guardrails for the knowledge / knowledge_chunked stores.
+  scripts/chunk_integrity_check.py:5:  status/system/tags from public.knowledge_chunked but LEFT the migration-005 trigger
+  scripts/chunk_integrity_check.py:6:  `validate_knowledge_chunked_insert()` in place, whose PL/pgSQL body still read
+  scripts/chunk_integrity_check.py:21:  public.knowledge_chunked. (Catches the effect: silently-unchunked ingests.)
+  scripts/chunk_integrity_check.py:37:  _CHECKED_TABLES = ("knowledge", "knowledge_chunked")
+  scripts/chunk_integrity_check.py:89:  """Flag `current` knowledge rows with no children in knowledge_chunked."""
+  scripts/chunk_integrity_check.py:93:  AND NOT EXISTS (SELECT 1 FROM public.knowledge_chunked c
+  scripts/migration_status.py:37:  ("005 knowledge_chunked",     "SELECT to_regclass('public.knowledge_chunked') IS NOT NULL"
+  scripts/migration_status.py:44:  WHERE table_schema='public' AND table_name='knowledge_chunked'
+  scripts/migration_status.py:56:  "SELECT count(*) = 0 FROM pg_proc WHERE proname='validate_knowledge_chunked_insert'"),
+  scripts/recency_baseline.py:102:  FROM public.knowledge_chunked kc
+  scripts/smoke_checks.py:1109:  """Live DB invariants for the knowledge / knowledge_chunked stores.
+  supabase/migrations/005_knowledge_chunked.sql:1:  -- OB2 Migration 005: public.knowledge_chunked  (ADR-017 heading-based chunking)
+  supabase/migrations/005_knowledge_chunked.sql:14:  CREATE TABLE public.knowledge_chunked (
+  supabase/migrations/005_knowledge_chunked.sql:46:  CREATE INDEX knowledge_chunked_embedding_idx ON public.knowledge_chunked
+  supabase/migrations/005_knowledge_chunked.sql:53:  CREATE INDEX knowledge_chunked_status_domain_idx ON public.knowledge_chunked (status, doma
+  supabase/migrations/005_knowledge_chunked.sql:54:  CREATE INDEX knowledge_chunked_system_idx ON public.knowledge_chunked (system, status) WHE
+  supabase/migrations/005_knowledge_chunked.sql:55:  CREATE INDEX knowledge_chunked_tags_idx ON public.knowledge_chunked USING GIN (tags);
+  supabase/migrations/005_knowledge_chunked.sql:56:  CREATE INDEX knowledge_chunked_created_by_idx ON public.knowledge_chunked (created_by, sta
+  supabase/migrations/005_knowledge_chunked.sql:57:  CREATE INDEX knowledge_chunked_document_idx ON public.knowledge_chunked (document_id, chun
+  supabase/migrations/005_knowledge_chunked.sql:61:  CREATE UNIQUE INDEX knowledge_chunked_doc_chunk_uniq
+  supabase/migrations/005_knowledge_chunked.sql:62:  ON public.knowledge_chunked (document_id, chunk_index);
+  supabase/migrations/005_knowledge_chunked.sql:72:  CREATE OR REPLACE FUNCTION public.validate_knowledge_chunked_insert()
+  supabase/migrations/005_knowledge_chunked.sql:85:  SELECT 1 FROM public.knowledge_chunked
+  supabase/migrations/005_knowledge_chunked.sql:101:  CREATE TRIGGER knowledge_chunked_insert_validation
+  supabase/migrations/005_knowledge_chunked.sql:102:  BEFORE INSERT ON public.knowledge_chunked
+  supabase/migrations/005_knowledge_chunked.sql:103:  FOR EACH ROW EXECUTE FUNCTION public.validate_knowledge_chunked_insert();
+  supabase/migrations/005_knowledge_chunked.sql:109:  CREATE POLICY knowledge_chunked_service_all ON public.knowledge_chunked
+  supabase/migrations/005_knowledge_chunked.sql:112:  CREATE POLICY knowledge_chunked_anon_read ON public.knowledge_chunked
+  supabase/migrations/005_knowledge_chunked.sql:115:  CREATE POLICY knowledge_chunked_agent_insert ON public.knowledge_chunked
+  supabase/migrations/007_chunk_metadata_join.sql:1:  -- OB2 Migration 007: knowledge_chunked becomes content-only; metadata joins from parent
+  supabase/migrations/007_chunk_metadata_join.sql:3:  -- knowledge_chunked, and removes the five other mirrored metadata columns.
+  supabase/migrations/007_chunk_metadata_join.sql:6:  -- catalog inspection: all six mirrored columns are gone from knowledge_chunked). Two sect
+  supabase/migrations/007_chunk_metadata_join.sql:10:  -- WHY: knowledge_chunked hand-mirrored knowledge's metadata (system, status, component_ke
+  supabase/migrations/007_chunk_metadata_join.sql:48:  DROP POLICY IF EXISTS knowledge_chunked_anon_read ON public.knowledge_chunked;
+  supabase/migrations/007_chunk_metadata_join.sql:49:  DROP POLICY IF EXISTS knowledge_chunked_agent_insert ON public.knowledge_chunked;
+  supabase/migrations/007_chunk_metadata_join.sql:51:  DROP INDEX IF EXISTS public.knowledge_chunked_status_domain_idx;
+  supabase/migrations/007_chunk_metadata_join.sql:52:  DROP INDEX IF EXISTS public.knowledge_chunked_system_idx;
+  supabase/migrations/007_chunk_metadata_join.sql:53:  DROP INDEX IF EXISTS public.knowledge_chunked_tags_idx;
+  supabase/migrations/007_chunk_metadata_join.sql:55:  -- Dropping `status` auto-drops the CHECK `knowledge_chunked_status_check` that references
+  supabase/migrations/011_drop_stale_chunked_trigger.sql:1:  -- OB2 Migration 011: drop the stale knowledge_chunked insert-validation trigger + functio
+  supabase/migrations/011_drop_stale_chunked_trigger.sql:5:  -- WHY: migration 005 created validate_knowledge_chunked_insert() to enforce a per-DOCUMEN
+  supabase/migrations/011_drop_stale_chunked_trigger.sql:7:  -- Migration 007 then made knowledge_chunked content-only and DROPPED status/system/tags
+  supabase/migrations/011_drop_stale_chunked_trigger.sql:30:  --     knowledge_chunked -> knowledge retrieval JOIN.
+  supabase/migrations/011_drop_stale_chunked_trigger.sql:34:  DROP TRIGGER IF EXISTS knowledge_chunked_insert_validation ON public.knowledge_chunked;
+  supabase/migrations/011_drop_stale_chunked_trigger.sql:35:  DROP FUNCTION IF EXISTS public.validate_knowledge_chunked_insert();
+  supabase/migrations/011_drop_stale_chunked_trigger.sql:40:  --   CREATE OR REPLACE FUNCTION public.validate_knowledge_chunked_insert() ... (see 005);
+  supabase/migrations/011_drop_stale_chunked_trigger.sql:41:  --   CREATE TRIGGER knowledge_chunked_insert_validation
+  supabase/migrations/011_drop_stale_chunked_trigger.sql:42:  --     BEFORE INSERT ON public.knowledge_chunked
+  supabase/migrations/011_drop_stale_chunked_trigger.sql:43:  --     FOR EACH ROW EXECUTE FUNCTION public.validate_knowledge_chunked_insert();
+
+Apply-order reminder (expand/contract): a reader/writer must STOP touching a
+column before it is dropped; a NOT-NULL column needs DROP NOT NULL first.
