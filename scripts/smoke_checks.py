@@ -633,30 +633,8 @@ def _smoke_mcp_cases_local() -> int:
             },
             200,
         ),
-        # Tool execution: ingest
-        (
-            "MCP tools/call ingest",
-            {
-                "path": "/mcp/messages",
-                "method": "POST",
-                "body": json.dumps({
-                    "jsonrpc": "2.0",
-                    "method": "tools/call",
-                    "params": {
-                        "name": "ingest",
-                        "arguments": {
-                            "source_type": "text",
-                            "source": "MCP smoke test content",
-                            "subject": "mcp_smoke",
-                            "topic": "smoke_2026_05_01",
-                        },
-                    },
-                    "id": 1,
-                }),
-                "headers": _auth,
-            },
-            200,
-        ),
+        # Tool execution: ingest — see _smoke_mcp_ingest_plan_apply(),
+        # which needs two sequenced calls and so cannot be a static case.
         # Tool execution: generate_quiz
         (
             "MCP tools/call quiz",
@@ -716,6 +694,123 @@ def _smoke_mcp_cases_local() -> int:
         if not ok:
             failed += 1
 
+    failed += _smoke_mcp_ingest_plan_apply(_auth)
+    return failed
+
+
+def _mcp_tool_call(tool: str, arguments: dict[str, Any],
+                   auth: dict[str, str]) -> tuple[int | None, Any]:
+    """Invoke one MCP tool in-process and return (http_status, the tool's OWN result body).
+
+    Tool results arrive double-wrapped — JSON-RPC `result`, then an MCP content envelope whose
+    text is the real payload as a JSON string. Unwrapping both is the point: everything
+    interesting about an ingest lives in that innermost object.
+    """
+    from api.app import handler
+
+    response = handler({
+        "path": "/mcp/messages", "method": "POST", "headers": auth,
+        "body": json.dumps({"jsonrpc": "2.0", "method": "tools/call",
+                            "params": {"name": tool, "arguments": arguments}, "id": 1}),
+    })
+    if not isinstance(response, dict):
+        return None, response
+    body = response.get("body")
+    payload = json.loads(body) if isinstance(body, str) else body
+    result = payload.get("result") if isinstance(payload, dict) else None
+    try:
+        return response.get("statusCode"), json.loads(result["content"][0]["text"])
+    except Exception:
+        return response.get("statusCode"), result if result is not None else payload
+
+
+def _plan_args_local(content: str) -> dict[str, Any]:
+    """Mint a plan_token for `content` in-process, plus any decision the plan demands.
+
+    Every gated ingest surface needs this, not just MCP: the gate fires on
+    (source_type=text, honor-owner) regardless of which route the write arrived through. A smoke
+    case that omits it passes today and 409s the moment OPENBRAIN_REQUIRE_INGEST_PLAN is on —
+    which is how /claude_ingest was found to be the second such case.
+
+    Returns {} if the plan cannot be obtained, so the caller still issues the request and the
+    failure surfaces as a visible refusal rather than a skipped check.
+    """
+    from api.app import handler
+
+    token_env = os.getenv("OPENBRAIN_TOOL_ACCESS_TOKEN", "")
+    response = handler({
+        "path": "/api/plan_ingest", "method": "POST",
+        "headers": {"Content-Type": "application/json",
+                    "Authorization": f"Bearer {token_env}"},
+        "body": json.dumps({"source": content}),
+    })
+    if not isinstance(response, dict) or response.get("statusCode") != 200:
+        return {}
+    try:
+        plan = json.loads(response["body"])
+    except Exception:
+        return {}
+    token = plan.get("plan_token")
+    if not token:
+        return {}
+    args: dict[str, Any] = {"plan_token": token}
+    candidates = plan.get("candidates") or []
+    if candidates:
+        args["acknowledged_not_updating"] = candidates
+        args["decline_reason"] = "Smoke fixture: a fixed probe string, never a living-doc update."
+    return args
+
+
+def _smoke_mcp_ingest_plan_apply(auth: dict[str, str]) -> int:
+    """MCP ingest driven the way an agent must drive it: plan, then apply carrying the token.
+
+    This case previously asserted HTTP 200 and nothing else, which made it **incapable of
+    failing**. The MCP surface discards the ingest's real HTTP status (`status, body =
+    ingest_payload(...)` and only `body` is returned), and the write is an upsert on a
+    content-derived id, so a refused ingest, a silent no-op, and a successful write were all
+    indistinguishable — a green light wired to nothing.
+
+    Two fixes, deliberately together:
+      * assert the tool's own body says `accepted`, so a refusal is visible AT ALL; and
+      * carry a `plan_token`, so the case still exercises the real path once
+        OPENBRAIN_REQUIRE_INGEST_PLAN is on instead of going red and being deleted for noise.
+
+    Safe to run unattended: the row id is derived from the content, so repeat runs overwrite one
+    row rather than accumulating fixtures.
+    """
+    content = "MCP smoke test content"
+    failed = 0
+
+    status, plan = _mcp_tool_call("plan_ingest", {"source": content}, auth)
+    token = plan.get("plan_token") if isinstance(plan, dict) else None
+    if status != 200 or not token:
+        print(f"MCP plan_ingest: FAIL — status={status} plan_token={'yes' if token else 'MISSING'}")
+        return 1
+    print("MCP tools/call plan_ingest: ok (200, plan_token issued)")
+
+    args: dict[str, Any] = {
+        "source_type": "text", "source": content,
+        "subject": "mcp_smoke", "topic": "smoke_2026_05_01",
+        "plan_token": token,
+    }
+    # A plan that surfaced living docs must be answered, or the apply is refused once
+    # enforcement is on. Empty for this content today; declared anyway so a future living doc
+    # in range does not silently start failing the smoke.
+    candidates = plan.get("candidates") or []
+    if candidates:
+        args["acknowledged_not_updating"] = candidates
+        args["decline_reason"] = ("Smoke fixture: a fixed probe string, never an update to a "
+                                  "living doc.")
+
+    status, body = _mcp_tool_call("ingest", args, auth)
+    reported = body.get("status") if isinstance(body, dict) else None
+    if status != 200 or reported != "accepted":
+        detail = str(body.get("message") if isinstance(body, dict) else body)[:200]
+        print(f"MCP tools/call ingest: FAIL — http={status} status={reported!r} {detail}")
+        failed += 1
+    else:
+        print(f"MCP tools/call ingest: ok (200, accepted, "
+              f"{'plan enforced' if candidates else 'plan token carried'})")
     return failed
 
 
@@ -940,7 +1035,8 @@ def smoke_local(idempotency_source: str | None = None, idempotency_owner: str | 
                 "body": json.dumps({
                     "type": "tool_use",
                     "name": "claude_ingest",
-                    "input": {"source_type": "text", "source": "smoke test"},
+                    "input": {"source_type": "text", "source": "smoke test",
+                              **_plan_args_local("smoke test")},
                 }),
                 "headers": {"Content-Type": "application/json", **_auth},
             },
@@ -1408,6 +1504,28 @@ def _call_live(
         return status, response_body
 
 
+def _plan_args_live(base_url: str, content: str) -> dict[str, Any]:
+    """The live-HTTP twin of _plan_args_local: mint a plan_token against a deployed build.
+
+    Preview is where enforcement divergence surfaces first (Tier 2 hits a real URL), so the live
+    cases need the token exactly as the local ones do.
+    """
+    token_env = os.getenv("OPENBRAIN_TOOL_ACCESS_TOKEN", "")
+    try:
+        status, plan = _call_live(base_url, "POST", "/api/plan_ingest", {"source": content},
+                                  {"Authorization": f"Bearer {token_env}"})
+    except Exception:
+        return {}
+    if status != 200 or not isinstance(plan, dict) or not plan.get("plan_token"):
+        return {}
+    args: dict[str, Any] = {"plan_token": plan["plan_token"]}
+    candidates = plan.get("candidates") or []
+    if candidates:
+        args["acknowledged_not_updating"] = candidates
+        args["decline_reason"] = "Smoke fixture: a fixed probe string, never a living-doc update."
+    return args
+
+
 def _live_post_as_token_owner(
     base_url: str, path: str, body: dict[str, Any], token: str
 ) -> tuple[int, Any]:
@@ -1551,7 +1669,8 @@ def smoke_live(base_url: str) -> int:
             {
                 "type": "tool_use",
                 "name": "claude_ingest",
-                "input": {"source_type": "text", "source": "live smoke test note"},
+                "input": {"source_type": "text", "source": "live smoke test note",
+                          **_plan_args_live(base_url, "live smoke test note")},
             },
             200,
             {"Authorization": f"Bearer {os.getenv('OPENBRAIN_TOOL_ACCESS_TOKEN', '')}"},
