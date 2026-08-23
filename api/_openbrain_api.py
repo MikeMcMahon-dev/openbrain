@@ -1800,6 +1800,21 @@ def ingest_payload(
     owner, _tenant_id = request_context(method_metadata)
     subject, topic = derive_subject_topic(source, payload.get("subject"), payload.get("topic"))
 
+    # Plan/apply gate. A writer cannot decide "is this an update?" without knowing what living
+    # docs exist, and no surface could enumerate them — which is how two keyless rows ended up
+    # competing with the living docs they should have superseded. The plan supplies that state and
+    # its token is the only way through, so ignorance is structurally impossible.
+    #
+    # Scoped to honor-owners (the same split used for taxonomy overrides): Mike declares intent,
+    # family GPTs stay on the single-call append-only path and are unaffected. Text ingests only —
+    # a URL/PDF/DOCX import is never a living-doc update. OFF unless the env flag is set.
+    if source_type == "text" and source:
+        from api.ingest_plan import enforcement_enabled, verify_apply
+        if enforcement_enabled() and owner in _honor_owners():
+            _ok, _err = verify_apply(dict(payload), owner, source)
+            if not _ok:
+                return _err.get("status", 409), _err
+
     allowed = {"obsidian", "pdf", "docx", "url", "text"}
     status = "failed"
     message = ""

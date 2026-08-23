@@ -292,6 +292,69 @@ def _list_tools() -> list[dict]:
                             "ingest time. ADR-018 bitemporality."
                         ),
                     },
+                    "plan_token": {
+                        "type": "string",
+                        "description": (
+                            "Token returned by plan_ingest, valid 10 minutes and bound to this "
+                            "exact content. Required when plan enforcement is on. Call "
+                            "plan_ingest first — it shows which living docs already exist so "
+                            "you can tell an update from a new note."
+                        ),
+                    },
+                    "acknowledged_not_updating": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "Every component from the plan's `candidates` that this note does "
+                            "NOT update. Required (in full) when you are writing an append-only "
+                            "note and the plan listed candidates. Naming them is the record "
+                            "that you saw the list and chose."
+                        ),
+                    },
+                    "decline_reason": {
+                        "type": "string",
+                        "description": (
+                            "Why this is a new record rather than an update. Required only when "
+                            "declining a candidate the plan scored as a close match."
+                        ),
+                    },
+                },
+            },
+        },
+        {
+            "name": "plan_ingest",
+            "description": (
+                "PREVIEW an ingest before committing it — the vault's equivalent of a "
+                "'terraform plan'. Writes nothing. Returns the living docs already in scope, "
+                "what a commit would supersede, and a plan_token to pass to ingest.\n\n"
+                "Call this FIRST for any note about a system you have written about before. "
+                "You cannot reliably tell an update from a new note without seeing what "
+                "already exists, and this is the only way to see it."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "required": ["source"],
+                "properties": {
+                    "source": {
+                        "type": "string",
+                        "description": "The exact content you intend to ingest, verbatim.",
+                    },
+                    "system": {
+                        "type": "string",
+                        "description": (
+                            "Namespace you believe this belongs to. Supplying it gives an exact "
+                            "list of that system's living docs; omitting it falls back to "
+                            "similarity, which is weaker."
+                        ),
+                        "enum": sorted(CANONICAL_SYSTEMS),
+                    },
+                    "component": {
+                        "type": "string",
+                        "description": (
+                            "Living-doc identity you believe this updates. Supplying it makes "
+                            "the plan report exactly which row would be superseded."
+                        ),
+                    },
                 },
             },
         },
@@ -391,10 +454,23 @@ def _call_tool(name: str, arguments: dict, metadata: dict) -> dict[str, Any]:
             "system": arguments.get("system"),
             "component": arguments.get("component"),
             "valid_from": arguments.get("valid_from"),
+            # Plan/apply handshake. Same allowlist trap as above — advertising these without
+            # forwarding them would 409 every commit with no way for the client to comply.
+            "plan_token": arguments.get("plan_token"),
+            "acknowledged_not_updating": arguments.get("acknowledged_not_updating"),
+            "decline_reason": arguments.get("decline_reason"),
         }
         normalized = {k: v for k, v in normalized.items() if v}
         status, body = ingest_payload(normalized, metadata)
         return _wrap_content(body if isinstance(body, dict) else json.loads(body))
+
+    elif name == "plan_ingest":
+        from api._openbrain_api import request_context
+        from api.ingest_plan import build_plan
+        owner, _tenant = request_context(metadata)
+        return _wrap_content(build_plan(
+            arguments.get("source") or "", owner,
+            system=arguments.get("system"), component=arguments.get("component")))
 
     elif name == "generate_quiz":
         normalized = {
