@@ -115,8 +115,12 @@ def _living_docs(conn, system: str | None) -> list[dict[str, Any]]:
     if not system:
         return []
     rows = conn.execute(
+        # ::int / ::float casts are load-bearing, not cosmetic. Postgres `round()` over
+        # `extract(epoch ...)` returns numeric, which psycopg maps to Decimal, and Decimal is not
+        # JSON-serializable — so the plan built fine in Python and then 500'd the moment an MCP
+        # surface tried to serialize it. Cast at the source so no caller has to remember.
         """SELECT id::text, system, component_key,
-                  round(extract(epoch FROM (now() - created_at)) / 86400) AS age_days,
+                  round(extract(epoch FROM (now() - created_at)) / 86400)::int AS age_days,
                   split_part(regexp_replace(content, '^#+\\s*', ''), E'\\n', 1) AS title
              FROM public.knowledge
             WHERE system = %s AND component_key IS NOT NULL AND status = 'current'
@@ -134,8 +138,9 @@ def _similar_docs(conn, embedding_sql_param, limit: int = 3) -> list[dict[str, A
     if embedding_sql_param is None:
         return []
     rows = conn.execute(
+        # ::float for the same reason as _living_docs — see the note there.
         """SELECT id::text, system, component_key,
-                  1 - (embedding <=> %s::vector) AS similarity,
+                  (1 - (embedding <=> %s::vector))::float AS similarity,
                   split_part(regexp_replace(content, '^#+\\s*', ''), E'\\n', 1) AS title
              FROM public.knowledge
             WHERE component_key IS NOT NULL AND status = 'current' AND embedding IS NOT NULL

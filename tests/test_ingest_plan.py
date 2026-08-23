@@ -12,8 +12,12 @@ Run: cd tests && ../.venv/bin/python -m pytest test_ingest_plan.py -q
 """
 from __future__ import annotations
 
+import json
+import os
 import time
 from unittest.mock import patch
+
+import pytest
 
 from api import ingest_plan as ip
 
@@ -158,6 +162,34 @@ def test_no_living_docs_in_scope_means_no_friction():
     with patch.object(ip, "build_plan", return_value=_plan()):
         ok, err = ip.verify_apply({"plan_token": tok}, OWNER, CONTENT)
     assert ok, err
+
+
+# ── the real plan must survive JSON serialization ─────────────────────────────
+#
+# Regression for a bug that shipped: every test above stubs build_plan, so the DB -> JSON path
+# had zero coverage. Postgres round()/extract() returns numeric -> psycopg Decimal, and Decimal
+# is not JSON-serializable. The plan built correctly in Python and then 500'd the instant an MCP
+# surface serialized it — "Object of type Decimal is not JSON serializable" on every call,
+# including a three-word payload. A stub cannot catch a type that only exists on the wire.
+
+@pytest.mark.skipif(not os.getenv("SUPABASE_DB_URL"), reason="needs the live vault")
+def test_real_plan_is_json_serializable():
+    plan = ip.build_plan("Test.", "mike.mcmahon67",
+                         system="FlightSim", component="flightsim-hardware")
+    json.dumps(plan)  # raises TypeError on any Decimal that escapes the SQL casts
+
+
+@pytest.mark.skipif(not os.getenv("SUPABASE_DB_URL"), reason="needs the live vault")
+def test_real_plan_numeric_fields_are_native_types():
+    # Assert the types directly too — json.dumps alone would still pass if a future field
+    # were silently stringified instead of cast.
+    plan = ip.build_plan("Flight sim rig throttle mounting hardware.", "mike.mcmahon67",
+                         system="FlightSim")
+    for d in plan["current_state"]["living_docs_in_system"]:
+        assert isinstance(d["age_days"], int), f"age_days is {type(d['age_days']).__name__}"
+    for d in plan["current_state"]["similar_living_docs"]:
+        assert isinstance(d["similarity"], float), \
+            f"similarity is {type(d['similarity']).__name__}"
 
 
 # ── enforcement is dark by default ────────────────────────────────────────────
