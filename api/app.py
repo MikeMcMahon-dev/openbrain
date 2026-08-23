@@ -19,6 +19,7 @@ from api.ob2_state import (
     handle_query_state,
 )
 from api.ob2_wiki import handle_compile_wiki, handle_get_wiki
+from api.plan_ingest_route import handler as plan_ingest_handler
 from api.query import handler as query_handler
 from api.search import handler as search_handler
 from api.session_report import handler as session_report_handler
@@ -63,6 +64,12 @@ def handler(request):
         return flashcards_handler(request)
     if path in {"/ingest", "/api/ingest"}:
         return ingest_handler(request)
+    # Read-only ingest preview. One route for the stdio server and both Action specs — the
+    # hosted MCP calls build_plan() in-process, everything else needs HTTP.
+    if path in {"/plan_ingest", "/api/plan_ingest", "/openbrain_plan_ingest",
+                "/tools/openbrain_plan_ingest", "/claude_plan_ingest",
+                "/tools/claude_plan_ingest"}:
+        return plan_ingest_handler(request)
     if path in {"/openbrain_query", "/tools/openbrain_query"}:
         return chatgpt_handler(request, tool_mode="query")
     if path in {"/openbrain_generate_quiz", "/tools/openbrain_generate_quiz"}:

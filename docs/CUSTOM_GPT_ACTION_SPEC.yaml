@@ -211,6 +211,68 @@ paths:
         "500":
           description: Server or database error.
 
+  /openbrain_plan_ingest:
+    post:
+      operationId: openbrain_plan_ingest
+      summary: Preview an ingest before committing it
+      description: >-
+        Read-only PREVIEW of an ingest — a "terraform plan" for the vault. Writes nothing. Returns the
+        living docs that already exist in scope, what a commit would supersede, and a plan_token to pass
+        to openbrain_ingest. Call this FIRST for any note about a system you have written about before:
+        you cannot reliably tell an update from a new note without seeing what already exists, and this
+        is the only way to see it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [source]
+              properties:
+                source:
+                  type: string
+                  description: The exact content you intend to ingest, verbatim.
+                system:
+                  type: string
+                  description: >-
+                    Namespace you believe this belongs to. Supplying it returns an exact list of that
+                    system's living docs; omitting it falls back to similarity, which is weaker.
+                  enum:
+                    - SpectreNet
+                    - PMX-01
+                    - OpenBrain
+                    - FlightSim
+                    - MikeMcMahon-Dev
+                    - Annie
+                component:
+                  type: string
+                  description: >-
+                    Living-doc identity you believe this updates. Supplying it makes the plan report
+                    exactly which row would be superseded.
+      responses:
+        "200":
+          description: The plan. Nothing was written.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  plan_token:
+                    type: string
+                    description: Pass to openbrain_ingest. Valid 10 minutes, bound to this exact content.
+                  candidates:
+                    type: array
+                    items:
+                      type: string
+                    description: Every living doc in scope. Either update one, or list them all in acknowledged_not_updating.
+                  would_supersede:
+                    type: object
+                    nullable: true
+                    description: The row a commit would retire, or null if this would be a new record.
+                  current_state:
+                    type: object
+                  decision_required:
+                    type: string
   /openbrain_ingest:
     post:
       operationId: openbrain_ingest
@@ -281,6 +343,24 @@ paths:
                 valid_from:
                   type: string
                   description: ISO-8601 fact-onset (valid-time), e.g. 2026-07-15. Set only when the fact became true BEFORE now (backdating a change you are recording after the fact); otherwise omit — it defaults to ingest time. ADR-018 bitemporality.
+                plan_token:
+                  type: string
+                  description: >-
+                    Token from openbrain_plan_ingest, valid 10 minutes and bound to this exact content.
+                    Required when plan enforcement is on. Run the plan first.
+                acknowledged_not_updating:
+                  type: array
+                  items:
+                    type: string
+                  description: >-
+                    Every component from the plan's candidates that this note does NOT update. Required
+                    in full when writing an append-only note and the plan listed candidates. Naming them
+                    records that you saw the list and chose.
+                decline_reason:
+                  type: string
+                  description: >-
+                    Why this is a new record rather than an update. Required only when declining a
+                    candidate the plan scored as a close match.
       responses:
         "200":
           description: Ingest result.
