@@ -264,9 +264,13 @@ def map_to_taxonomy(
 ) -> dict[str, Any]:
     """Map legacy ingest signals to OB2 ``knowledge`` taxonomy.
 
-    Returns a dict: {domain, environment, system, tags, shape, drop, reason}.
+    Returns a dict: {domain, environment, system, tags, shape, drop, reason, drop_kind}.
     Never invents a domain for a dropped row (domain/environment are None when
     drop=True). Never silently defaults junk: malformed/smoke-test subjects drop.
+
+    ``drop_kind`` is None unless drop=True, and then distinguishes an opt-in no-write
+    ("allowlisted": smoke-test owner/subject) from a heuristic one ("malformed"). The
+    ingest path fails closed on the latter — see _write_text_ingest_knowledge.
     """
     subj = _norm(subject)
     top = _norm(topic)
@@ -289,6 +293,7 @@ def map_to_taxonomy(
         *,
         drop: bool,
         reason: str,
+        drop_kind: str | None = None,
     ) -> dict[str, Any]:
         # Normalize ALL emitted tags through the controlled vocabulary so the mapper
         # can never re-introduce drift (ADR-012). xtags are added before normalization.
@@ -301,21 +306,31 @@ def map_to_taxonomy(
             "shape": shape,
             "drop": drop,
             "reason": reason,
+            "drop_kind": drop_kind,
         }
+
+    # Not every drop means the same thing to the caller, and the ingest path has to tell them
+    # apart (2026-08-25). DROP_ALLOWLISTED is an opt-in "do not write this" — the smoke suite
+    # deliberately ingests under these owners/subjects so its probes never reach the vault, and
+    # it asserts `accepted`. DROP_MALFORMED is a heuristic firing on a note somebody meant to
+    # keep, so it fails closed instead: a real note discarded under a 200/accepted is exactly
+    # the silent-loss case that hid eight whitepaper sections. See _write_text_ingest_knowledge.
+    DROP_ALLOWLISTED = "allowlisted"
+    DROP_MALFORMED = "malformed"
 
     # 1. Drop: smoke-test artifact owner.
     if own.lower() in _DROP_OWNERS:
-        return result(None, None, None, [], drop=True,
+        return result(None, None, None, [], drop=True, drop_kind=DROP_ALLOWLISTED,
                       reason=f"drop: smoke-test owner '{own}'")
 
     # 2. Drop: malformed / sentence-as-subject / garbage.
     if subj and _looks_malformed(subj):
-        return result(None, None, None, [], drop=True,
+        return result(None, None, None, [], drop=True, drop_kind=DROP_MALFORMED,
                       reason=f"drop: malformed/garbage subject '{subj[:40]}'")
 
     # 3. Drop: known smoke-test subjects.
     if subj.lower() in _DROP_SUBJECTS:
-        return result(None, None, None, [], drop=True,
+        return result(None, None, None, [], drop=True, drop_kind=DROP_ALLOWLISTED,
                       reason=f"drop: smoke-test subject '{subj}'")
 
     # 3b. Annie schooling (assessment / study plans) — family-visible Study, system=Annie

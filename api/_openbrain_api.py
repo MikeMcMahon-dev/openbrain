@@ -1374,9 +1374,11 @@ def _write_text_ingest_knowledge(
     ignored and the governed mapper derives the taxonomy. Invalid honored values
     fall back to derive + a warning.
 
-    Returns None on success (or a deliberate curation drop), or an error string on
-    failure — matching the _write_text_ingest contract. Lazy imports avoid a
-    circular dependency and keep the legacy path import-light."""
+    Returns None on success (or an allowlisted curation drop, which writes nothing and
+    reports the reason via ``warnings``), or an error string on failure — matching the
+    _write_text_ingest contract. A malformed-subject drop is a failure, not a success:
+    it returns its reason so the caller gets status=failed rather than a silent discard.
+    Lazy imports avoid a circular dependency and keep the legacy path import-light."""
     from api.knowledge_ingest import write_knowledge
     from api.taxonomy_map import VALID_DOMAINS, VALID_ENVIRONMENTS, map_to_taxonomy
 
@@ -1384,8 +1386,26 @@ def _write_text_ingest_knowledge(
         subject=subject, topic=topic, owner=owner, source_type="text", content=content
     )
     if tax.get("drop"):
-        # Smoke-test / malformed content — curation drop. Silently succeed without
-        # writing (mirrors the legacy SafeIngest silent-accept posture).
+        # A curation drop writes nothing. What the caller is told about it depends on which
+        # kind fired (2026-08-25).
+        #
+        # ALLOWLISTED (smoke-test owner/subject) is an opt-in no-write: the smoke suite ingests
+        # under those keys precisely so its probes never land, and asserts `accepted`. Keep the
+        # legacy silent-accept posture for those, but surface the reason in `warnings` so even
+        # the intentional discard is visible in the response rather than invisible.
+        #
+        # MALFORMED is a heuristic firing on a note somebody meant to keep — the >80-char
+        # subject rule silently swallowed eight whitepaper sections on 2026-08-24, returning
+        # "accepted" over a write that never happened, and chunk_integrity_check reported
+        # healthy because there was no orphan to find: no parent row ever existed. That fails
+        # closed now. A discarded note must never be reported as an accepted one.
+        if tax.get("drop_kind") == "malformed":
+            return (
+                f"{tax.get('reason')} — nothing was written. Subjects are short identifying "
+                "keys, not sentences; shorten the subject (<= 80 chars) and re-ingest."
+            )
+        if warnings is not None:
+            warnings.append(f"ingest: {tax.get('reason')} — nothing was written.")
         return None
 
     domain, environment = tax["domain"], tax["environment"]
