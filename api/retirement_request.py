@@ -49,7 +49,12 @@ def collect_evidence(conn, target_id: str) -> dict[str, Any]:
     row = conn.execute(
         """SELECT k.id::text, k.status, k.domain, k.environment, k.system,
                   k.component_key, k.tags, k.created_by,
-                  round(extract(epoch FROM (now() - k.created_at)) / 86400) AS age_days,
+                  -- ::int matters. Postgres round() returns numeric, psycopg maps that to
+                  -- Decimal, and the evidence dict goes into the HTTP response - which serializes
+                  -- without a default, so the whole call died with "Object of type Decimal is not
+                  -- JSON serializable". The row insert below survived it only because that one
+                  -- passes default=str.
+                  round(extract(epoch FROM (now() - k.created_at)) / 86400)::int AS age_days,
                   length(k.content) AS content_len,
                   split_part(regexp_replace(k.content, '^#+\\s*', ''), E'\\n', 1) AS title,
                   (SELECT count(*) FROM public.supersession_events e
