@@ -591,6 +591,23 @@ and default-off. Remaining:
   measure against. If it lands, collapse multi-chunk living docs by `(system,
   component)` before return so the per-row boost doesn't flood results.
 
+## Surfaced 2026-09-01 (silent-success session)
+
+- [ ] **Audit the other silent-accept paths.** The ingest path returned `accepted` over a discarded
+  write for a subject over 80 chars, and the comment described it as mirroring "the legacy
+  SafeIngest silent-accept posture". If that posture exists elsewhere, the same class of loss is
+  waiting there. Grep for handlers that return success without having written, not just this one.
+- [ ] **`chunk_integrity_check` cannot see a missing parent.** It looks for chunks whose parent is
+  gone, which is the right check for the failure it was built for and blind to a row that was never
+  inserted. A count-based reconcile — ingest calls accepted vs rows written, over a window — would
+  cover the gap. Low effort, and it is the check that would have caught 08-24 the same day.
+- [ ] **Re-examine the 80-char subject rule itself.** Kept deliberately (Mike, 2026-08-25) and it
+  was never the bug, but a legitimate descriptive subject clears 80 easily — the CA note's own
+  subject would. Now that a drop is loud instead of silent, the cost of the rule being slightly
+  wrong is a visible error rather than lost data, so this is lower priority than it was.
+- [ ] **Retirement airlock: nothing prunes `retirement_requests`.** Decided and executed requests
+  accumulate with no TTL. Not urgent at current volume; worth a line in the runbook before it is.
+
 ---
 
 ## Long-Term Direction
