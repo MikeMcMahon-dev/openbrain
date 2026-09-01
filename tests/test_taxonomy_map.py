@@ -36,10 +36,46 @@ def m(subject, topic="", owner="mike.mcmahon67", source_type="text", content="x"
 ])
 def test_result_always_has_full_contract(subject, topic, owner, source_type):
     r = map_to_taxonomy(subject, topic, owner, source_type, "content")
-    assert set(r) == {"domain", "environment", "system", "tags", "shape", "drop", "reason"}
+    assert set(r) == {"domain", "environment", "system", "tags", "shape", "drop", "reason",
+                      "drop_kind"}
     assert isinstance(r["tags"], list)
     assert isinstance(r["drop"], bool)
     assert r["shape"] in VALID_SHAPES
+    # drop_kind is meaningful only when something was dropped, and must never be invented.
+    if r["drop"]:
+        assert r["drop_kind"] in {"allowlisted", "malformed"}
+    else:
+        assert r["drop_kind"] is None
+
+
+# drop_kind is not decoration: the ingest path branches on it, and getting it wrong reintroduces
+# the 2026-08-24 bug where a real note was discarded under a 200/accepted. "allowlisted" keeps the
+# legacy silent-accept posture (the smoke suite ingests under those keys on purpose and asserts
+# accepted); "malformed" fails closed. Mislabel a malformed drop as allowlisted and notes go
+# missing silently again, so the mapping from trigger to kind is asserted here explicitly.
+
+def test_smoke_test_subject_is_an_allowlisted_drop():
+    r = m("smoke test", "2026-03-29")
+    assert r["drop"] is True
+    assert r["drop_kind"] == "allowlisted"
+
+
+def test_smoke_test_owner_is_an_allowlisted_drop():
+    r = m("Home Network", "NAS Benchmark", owner="tenant-a-owner")
+    assert r["drop"] is True
+    assert r["drop_kind"] == "allowlisted"
+
+
+def test_overlong_subject_is_a_malformed_drop():
+    r = m("x" * 81)
+    assert r["drop"] is True
+    assert r["drop_kind"] == "malformed"
+
+
+def test_the_length_boundary_is_exactly_eighty():
+    """80 is legal, 81 drops. The threshold is load-bearing and was mis-reported as ~55 once."""
+    assert m("y" * 80)["drop"] is False
+    assert m("y" * 81)["drop"] is True
 
 
 def test_non_dropped_rows_have_valid_taxonomy():
