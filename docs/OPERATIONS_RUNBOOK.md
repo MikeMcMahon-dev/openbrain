@@ -140,6 +140,13 @@ Note: `vault/` is a symlink to the iCloud Obsidian vault — do NOT create subdi
 
 ---
 
+## Removing something from the vault
+
+Retiring or deleting a knowledge row goes through the removal airlock: agents request, only Mike
+performs, and approving is separate from executing. Retire preserves content and forecloses a
+later delete; delete is irreversible. Full procedure, gotchas and a worked example:
+**[docs/RETIREMENT_RUNBOOK.md](RETIREMENT_RUNBOOK.md)**.
+
 ## Safe commit gates
 
 - Do not include generated artifacts:
