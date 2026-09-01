@@ -228,16 +228,29 @@ def _norm(value: str | None) -> str:
     return (value or "").strip()
 
 
+def _looks_like_test_scaffolding(subject: str) -> bool:
+    """Deliberate test scaffolding, recognised by name rather than by the explicit allowlist.
+
+    Split out of _looks_malformed on 2026-09-01. It used to live there, which meant
+    `pdf_smoke_test` and `docx_url_smoke_test` were classified as MALFORMED - and since the ingest
+    path fails closed on malformed drops, that would have started rejecting the smoke suite's own
+    fixtures, which ingest under those subjects on purpose and assert `accepted`. Only
+    `mcp_smoke` escaped, because it does not match either pattern, which is why the smoke run
+    still passed and hid it.
+
+    Scaffolding is the same category as _DROP_SUBJECTS: an opt-in no-write, not a heuristic
+    firing on a note somebody meant to keep.
+    """
+    low = subject.lower()
+    return bool(re.search(r"\bsmoke[_\s-]?test\b", low) or low.endswith("_smoke_test"))
+
+
 def _looks_malformed(subject: str) -> bool:
     """Heuristic for sentences-as-subjects / garbage (001_domain_discovery.md)."""
     if subject.startswith("[malformed subject:"):
         return True
     # Subjects > 80 chars are full sentences used as the subject key (smoke/PR messages).
     if len(subject) > 80:
-        return True
-    # Subjects that are obviously test scaffolding by name.
-    low = subject.lower()
-    if re.search(r"\bsmoke[_\s-]?test\b", low) or low.endswith("_smoke_test"):
         return True
     return False
 
@@ -322,6 +335,13 @@ def map_to_taxonomy(
     if own.lower() in _DROP_OWNERS:
         return result(None, None, None, [], drop=True, drop_kind=DROP_ALLOWLISTED,
                       reason=f"drop: smoke-test owner '{own}'")
+
+    # 1b. Drop: named test scaffolding. MUST precede the malformed check - it is an opt-in
+    #     no-write like the allowlist below, not a heuristic, and classifying it as malformed
+    #     would make the ingest path fail closed on the smoke suite's own fixtures.
+    if subj and _looks_like_test_scaffolding(subj):
+        return result(None, None, None, [], drop=True, drop_kind=DROP_ALLOWLISTED,
+                      reason=f"drop: test scaffolding subject '{subj}'")
 
     # 2. Drop: malformed / sentence-as-subject / garbage.
     if subj and _looks_malformed(subj):
