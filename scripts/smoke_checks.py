@@ -1197,6 +1197,61 @@ def smoke_local(idempotency_source: str | None = None, idempotency_owner: str | 
     # Wire-serialization guardrails — see the 2026-08-22 plan_ingest Decimal incident
     failed += _smoke_wire_serialization_local()
 
+    # Curation-drop guardrails — see the 2026-08-24 silent-discard incident
+    failed += _smoke_curation_drop_local()
+
+    return failed
+
+
+def _smoke_curation_drop_local() -> int:
+    """A curation drop must never be reported as an accepted write.
+
+    On 2026-08-24 eight whitepaper sections were ingested, answered "accepted", and never
+    written: subjects over 80 chars hit the malformed-subject heuristic, which returned a
+    silent success. Nothing caught it. chunk_integrity_check could not — there is no orphan
+    chunk to find when the parent row was never inserted, so it reported healthy.
+
+    These cases fail if that posture ever comes back. Both directions are asserted, because
+    the fix has two sides and only testing one leaves the other free to regress:
+
+      - a malformed subject must return an error (=> status "failed"), and
+      - an allowlisted smoke subject must still return success, because the smoke suite
+        ingests under those keys precisely so its probes never land and asserts "accepted".
+
+    Everything here is pure mapper + early-return logic: no DB, no embedding, no writes.
+    """
+    from api._openbrain_api import _write_text_ingest_knowledge
+
+    failed = 0
+    # Built by length rather than by eye: a hand-written fixture came out at exactly 80 and
+    # sat one character under the rule it was meant to trip.
+    overlong = ("SpectreNet internal CA renewal validation and monitoring rollout status "
+                "written out as a sentence").ljust(81, ".")
+
+    if len(overlong) <= 80:  # guard the fixture itself, not just the behaviour
+        print(f"curation-drop: FAIL — fixture is only {len(overlong)} chars, cannot trip the rule")
+        return 1
+
+    warnings: list[str] = []
+    err = _write_text_ingest_knowledge("body", "mike.mcmahon67", overlong, "CA", warnings=warnings)
+    if not err:
+        print("curation-drop: FAIL — an 81-char subject was silently discarded under a success")
+        failed += 1
+    else:
+        print("curation-drop malformed subject: ok (failed, nothing written)")
+
+    warnings = []
+    err = _write_text_ingest_knowledge("body", "mike.mcmahon67", "mcp_smoke", "smoke",
+                                       warnings=warnings)
+    if err:
+        print(f"curation-drop: FAIL — allowlisted smoke subject now errors: {err[:80]}")
+        failed += 1
+    elif not warnings:
+        print("curation-drop: FAIL — allowlisted drop wrote nothing and said nothing")
+        failed += 1
+    else:
+        print("curation-drop allowlisted subject: ok (accepted, no-write reported in warnings)")
+
     return failed
 
 
