@@ -38,6 +38,13 @@ CANONICAL_TAGS: list[str] = [
     # moment durability gates anything destructive. Lowercase to mark it distinct from
     # the TitleCase topic tags.
     "durable",
+    "DNS",
+    "CoreDNS",
+    "Technitium",
+    "Prometheus",
+    "GitOps",
+    "MemoryArchive",
+    "Retired",
     # ── approved via scripts/tag_review.py append below this line ──
 ]
 # fmt: on

@@ -281,7 +281,20 @@ def main() -> None:
     )
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
-            print(r.read().decode())
+            raw = r.read().decode()
+            print(raw)
+            # The JSON above echoes the whole document back, so a one-line note buried in
+            # `details` is not something anyone reads. Tags queued for review are exactly
+            # the thing that gets missed - the write succeeds, the note looks tagged, and
+            # the tags are actually parked in an approval queue nobody is working. Say it
+            # again, on its own, after the wall of JSON.
+            try:
+                queued = [d for d in (json.loads(raw).get("details") or [])
+                          if "queued for review" in str(d)]
+            except Exception:
+                queued = []
+            for line in queued:
+                print(f"\n!! {line}")
     except urllib.error.HTTPError as e:
         body = e.read().decode(errors="replace")[:500]
         if "Cloudflare" in body or "you have been blocked" in body:
