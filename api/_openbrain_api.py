@@ -1504,6 +1504,17 @@ def _write_text_ingest_knowledge(
     )
     status = result.get("status")
     if status == "accepted":
+        # Tell the caller when tags were queued rather than written (ADR-012). This travels
+        # the same `warnings` channel the taxonomy honored-vs-inferred notes use, so it lands
+        # in the ingest response's `details` alongside them. Without it the queue is silent
+        # and an ingest that looks fully successful has quietly parked half its metadata.
+        queued = result.get("tags_queued_for_review") or []
+        if queued and warnings is not None:
+            warnings.append(
+                "ingest: %d tag(s) NOT written - queued for review (ADR-012): %s. "
+                "Approve with scripts/tag_review.py --approve <TAG> --yes, then re-ingest "
+                "to attach them." % (len(queued), ", ".join(str(t) for t in queued))
+            )
         return None
     # rejected / conflict / error all surface as a failure string to the caller.
     return result.get("message") or f"knowledge write {status}"

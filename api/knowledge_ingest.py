@@ -286,6 +286,15 @@ def write_knowledge(
     except Exception:
         embedding = None  # embedding is best-effort, same as handle_ingest_state
 
+    # Hoisted out of the transaction so the RESPONSE can name them. Queuing a tag for
+    # review is the correct behaviour, but it was invisible to the caller: the response
+    # reports honored-vs-inferred mismatches for domain, environment and system and said
+    # nothing about tags, so a note ingested with four good tags came back carrying only
+    # shape:note with no explanation. That reads as "the API dropped my tags" and was
+    # diagnosed as exactly that once. A governance queue nobody is told about is a
+    # memory hole.
+    unknown_tags: list[str] = []
+
     try:
         with get_db_conn() as conn:
             # ── Tag governance (ADR-012) ──────────────────────────────────────
@@ -403,6 +412,10 @@ def write_knowledge(
         "environment": environment,
         "shape": resolved_shape,
         "tags": tag_list,
+        # Tags that were NOT written because they are not in the controlled vocabulary.
+        # They are queued in tag_proposals for approval via scripts/tag_review.py, not
+        # discarded. Empty list is the normal case.
+        "tags_queued_for_review": list(unknown_tags),
         # Non-null when living-doc auto-supersession retired a prior current row.
         "superseded_id": supersedes_id,
     }
