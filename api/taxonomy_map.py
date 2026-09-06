@@ -71,6 +71,12 @@ TAG_ALIASES: dict[str, str | None] = {
     "baremetal": "Bare-Metal",
     "nvidia-prep": "NV-Prep",
     "nv-prep": "NV-Prep",
+    # Bare "ADR" is the facet; a per-ADR tag would grow the vocabulary forever and the
+    # number is already in the note's title (Mike, 2026-09-05). ADR-017 was approved and
+    # then reversed once that was noticed - it is removed from tag_vocabulary, and this
+    # folds any straggler rather than re-queueing it. Later numbers will queue as
+    # proposals, which is the loop working: remap them onto ADR.
+    "adr-017": "ADR",
     "smoketest": None,   # retired: smoke-test scaffolding
     "smoke-test": None,
 }

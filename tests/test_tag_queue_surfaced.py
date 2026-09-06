@@ -81,3 +81,26 @@ def test_write_knowledge_declares_the_key_on_success():
     src = inspect.getsource(knowledge_ingest.write_knowledge)
     assert '"tags_queued_for_review"' in src
     assert "unknown_tags: list[str] = []" in src   # hoisted, so the return can see it
+
+
+def test_numbered_adr_folds_onto_the_bare_facet():
+    """Bare `ADR` is the facet; a per-ADR tag would grow the vocabulary forever and the
+    number is already in the note title (Mike, 2026-09-05). ADR-017 was approved and then
+    reversed once that was noticed, so the alias has to catch the straggler."""
+    from api.taxonomy_map import normalize_tags
+
+    canonical, unknown = normalize_tags(["ADR-017"], allowed={"ADR"})
+    assert canonical == ["ADR"]
+    assert unknown == []
+
+
+def test_an_unaliased_numbered_adr_is_queued_not_accepted():
+    """The other direction, which is the one that decides whether the rule holds. A later
+    number has no alias and must NOT slip through as its own tag — it queues, and the
+    reviewer remaps it onto ADR. Silently accepting it would rebuild the scheme we just
+    removed, one ADR at a time."""
+    from api.taxonomy_map import normalize_tags
+
+    canonical, unknown = normalize_tags(["ADR-020"], allowed={"ADR"})
+    assert canonical == []
+    assert unknown == ["ADR-020"]
