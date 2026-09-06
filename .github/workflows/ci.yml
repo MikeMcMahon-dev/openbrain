@@ -64,6 +64,22 @@ jobs:
       # red build always means "you broke something". `scripts/` carries ~100 pre-existing E501s
       # (the tracked "Lint pass 2" backlog item) and joins this list once that chore PR lands.
       # A CI that fails on day one is a CI everyone learns to ignore.
+      # The pre-push hook is the local half of this lint. Git SILENTLY ignores a hook that is not
+      # executable - only a faint `advice.ignoredHook` hint - so a hook committed 100644 is inert in
+      # every clone and nothing says so. That happened on 2026-09-05: the guard added to keep lint
+      # errors out of CI was itself inert, and CI stayed green either way. CI cannot see whether a
+      # developer wired core.hooksPath, but it CAN refuse to let the file regress to non-executable.
+      - name: Pre-push hook must stay executable
+        run: |
+          mode=$(git ls-files -s .githooks/pre-push | awk '{print $1}')
+          echo "mode: $mode"
+          if [ "$mode" != "100755" ]; then
+            echo "::error file=.githooks/pre-push::Committed mode is $mode, expected 100755."
+            echo "Git ignores non-executable hooks silently, so the pre-push lint guard is inert."
+            echo "Fix with: git update-index --chmod=+x .githooks/pre-push"
+            exit 1
+          fi
+
       - name: Lint
         run: ruff check api/ mcp_server/ tests/
 

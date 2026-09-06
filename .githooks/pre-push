@@ -19,16 +19,28 @@ if [ -x .venv/bin/python3 ] && .venv/bin/python3 -m ruff --version >/dev/null 2>
 elif command -v ruff >/dev/null 2>&1; then
   RUFF="ruff"
 else
-  echo "pre-push: ruff not found (tried .venv/bin/python3 -m ruff, then PATH)." >&2
-  echo "pre-push: install it or push with --no-verify if you mean to." >&2
+  printf '\n' >&2
+  echo "################################################################" >&2
+  echo "##  PUSH BLOCKED - ruff not found, so the lint CANNOT run     ##" >&2
+  echo "##  tried: .venv/bin/python3 -m ruff, then ruff on PATH       ##" >&2
+  echo "##  install it, or override with:  git push --no-verify       ##" >&2
+  echo "################################################################" >&2
+  printf '\n' >&2
   # Fail closed. A guard that cannot evaluate its own rule blocks rather than waving the push on.
   exit 1
 fi
 
-echo "pre-push: $RUFF check api/ mcp_server/ tests/"
-if ! $RUFF check api/ mcp_server/ tests/; then
-  echo "" >&2
-  echo "pre-push: BLOCKED - fix the above, or 'git push --no-verify' to override." >&2
+# Quiet on success, unmissable on failure. A guard that chatters on every push teaches people to
+# scroll past it, which is how the loud case gets missed too.
+if ! out=$($RUFF check api/ mcp_server/ tests/ 2>&1); then
+  printf '\n' >&2
+  echo "################################################################" >&2
+  echo "##  PUSH BLOCKED - ruff found problems                        ##" >&2
+  echo "################################################################" >&2
+  printf '%s\n' "$out" >&2
+  echo "################################################################" >&2
+  echo "##  Fix the above, or override with:  git push --no-verify    ##" >&2
+  echo "################################################################" >&2
+  printf '\n' >&2
   exit 1
 fi
-echo "pre-push: lint clean"
