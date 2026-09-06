@@ -1,0 +1,34 @@
+#!/bin/sh
+# Run the same lint CI runs, BEFORE the push leaves the machine.
+#
+# Enable once per clone (git hooks are not shared through the repo by default):
+#     git config core.hooksPath .githooks
+#
+# Written 2026-09-05 after a fix was pushed, merged-approved, and stopped by CI for two E501s -
+# lines the change itself had made 108 chars against a 100 limit. The lint was available locally
+# the whole time; nobody ran it. A round trip through GitHub is a slow way to learn about a line
+# length.
+#
+# Skip deliberately with:  git push --no-verify
+set -e
+
+# Prefer the venv, which is where ruff and psycopg actually live. System python3 has neither, and
+# assuming otherwise has already cost a wrong "not installed" diagnosis once.
+if [ -x .venv/bin/python3 ] && .venv/bin/python3 -m ruff --version >/dev/null 2>&1; then
+  RUFF=".venv/bin/python3 -m ruff"
+elif command -v ruff >/dev/null 2>&1; then
+  RUFF="ruff"
+else
+  echo "pre-push: ruff not found (tried .venv/bin/python3 -m ruff, then PATH)." >&2
+  echo "pre-push: install it or push with --no-verify if you mean to." >&2
+  # Fail closed. A guard that cannot evaluate its own rule blocks rather than waving the push on.
+  exit 1
+fi
+
+echo "pre-push: $RUFF check api/ mcp_server/ tests/"
+if ! $RUFF check api/ mcp_server/ tests/; then
+  echo "" >&2
+  echo "pre-push: BLOCKED - fix the above, or 'git push --no-verify' to override." >&2
+  exit 1
+fi
+echo "pre-push: lint clean"

@@ -551,7 +551,9 @@ def log_query(
     Never raises — logging must not mask the original response.
     """
     try:
-        with connect(_db_conninfo(), row_factory=dict_row, autocommit=True, prepare_threshold=None) as conn:
+        with connect(
+            _db_conninfo(), row_factory=dict_row, autocommit=True, prepare_threshold=None
+        ) as conn:
             conn.execute(
                 """
                 INSERT INTO public.query_log
@@ -580,7 +582,9 @@ def log_error(
     tb_text = _tb.format_exc()
 
     try:
-        with connect(_db_conninfo(), row_factory=dict_row, autocommit=True, prepare_threshold=None) as conn:
+        with connect(
+            _db_conninfo(), row_factory=dict_row, autocommit=True, prepare_threshold=None
+        ) as conn:
             conn.execute(
                 """
                 INSERT INTO public.error_log
