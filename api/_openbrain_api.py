@@ -312,7 +312,7 @@ def _db_connect() -> tuple[Any | None, str | None]:
         return None, "psycopg is not installed in this runtime."
 
     try:
-        return connect(_db_conninfo(), row_factory=dict_row), None
+        return connect(_db_conninfo(), row_factory=dict_row, prepare_threshold=None), None
     except Exception as exc:
         return None, f"Database connection failed: {exc}"
 
@@ -551,7 +551,9 @@ def log_query(
     Never raises — logging must not mask the original response.
     """
     try:
-        with connect(_db_conninfo(), row_factory=dict_row, autocommit=True) as conn:
+        with connect(
+            _db_conninfo(), row_factory=dict_row, autocommit=True, prepare_threshold=None
+        ) as conn:
             conn.execute(
                 """
                 INSERT INTO public.query_log
@@ -580,7 +582,9 @@ def log_error(
     tb_text = _tb.format_exc()
 
     try:
-        with connect(_db_conninfo(), row_factory=dict_row, autocommit=True) as conn:
+        with connect(
+            _db_conninfo(), row_factory=dict_row, autocommit=True, prepare_threshold=None
+        ) as conn:
             conn.execute(
                 """
                 INSERT INTO public.error_log
@@ -603,11 +607,17 @@ def source_reference(row: Mapping[str, Any]) -> str:
 
 
 def get_db_conn():
+    # prepare_threshold=None disables psycopg3's automatic prepared statements. SUPABASE_DB_URL
+    # points at the Supabase pooler on :6543, which is TRANSACTION mode: a prepared statement is
+    # created on one pooled backend and is gone on the next, so the second write in a loop dies
+    # with "prepared statement _pg3_0 already exists". That is what left two knowledge rows
+    # unchunked and search-invisible on 2026-09-05 while the ingest reported "accepted", and what
+    # made backfill_orphan_chunks.py fail every time it was run to repair them.
     if not DB_URL:
         raise RuntimeError("SUPABASE_DB_URL is not configured.")
     if connect is None:
         raise RuntimeError("psycopg is not installed in this runtime.")
-    return connect(_db_conninfo(), row_factory=dict_row)
+    return connect(_db_conninfo(), row_factory=dict_row, prepare_threshold=None)
 
 
 def embedding_request(text: str) -> list[float] | None:
