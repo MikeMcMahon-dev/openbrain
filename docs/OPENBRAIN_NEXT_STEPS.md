@@ -605,6 +605,19 @@ and default-off. Remaining:
   was never the bug, but a legitimate descriptive subject clears 80 easily — the CA note's own
   subject would. Now that a drop is loud instead of silent, the cost of the rule being slightly
   wrong is a visible error rather than lost data, so this is lower priority than it was.
+- [ ] **Add the pooler/prepared-statement class to the ingest smoke suite.** 2026-09-05: psycopg3
+  prepares statements automatically and `SUPABASE_DB_URL` is the pooler on :6543 (transaction mode),
+  so the SECOND insert in the chunk-writing loop died and rows landed unchunked - search-invisible
+  while the API answered `accepted`. Fixed in PR#122 (`prepare_threshold=None` on all four connect
+  sites). Nothing currently *tests* that class: a smoke case ingesting a document long enough to
+  produce **two or more chunks**, asserting chunk count > 1, would have caught it and would catch the
+  next variant. A single-chunk fixture passes whether or not the loop survives its second iteration,
+  which is why the existing suite missed it.
+- [ ] **`backfill_orphan_chunks.py` failed on the same error it exists to repair.** Detection
+  (`chunk_integrity_check.py`) worked; repair did not, because both used the same connection path.
+  So the problem read as unfixable rather than misdiagnosed, and the orphans survived several
+  attempts. Worth a rule: the repair tool for a data-integrity failure should not share the code
+  path that caused it, or should at least be exercised in CI against a seeded orphan.
 - [ ] **Retirement airlock: nothing prunes `retirement_requests`.** Decided and executed requests
   accumulate with no TTL. Not urgent at current volume; worth a line in the runbook before it is.
 
