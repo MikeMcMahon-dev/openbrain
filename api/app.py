@@ -51,6 +51,16 @@ def _extract_path(request) -> str:
 
 def handler(request):
     path = _extract_path(request)
+    # Deny retired OAuth paths, including trailing slashes and /api aliases.
+    # The edge also rejects these; keep the application boundary fail-closed.
+    retired_path = path.split("?", 1)[0].rstrip("/")
+    if retired_path in {"/.well-known/oauth-authorization-server",
+                        "/api/.well-known/oauth-authorization-server"}:
+        return handle_discovery(request)
+    if retired_path in {"/authorize", "/api/authorize"}:
+        return handle_authorize(request)
+    if retired_path in {"/token", "/api/token"}:
+        return handle_token(request)
     if path in {"/", "/health", "/api/health"}:
         return health_handler(request)
     if path in {"/search", "/api/search"}:
@@ -96,12 +106,6 @@ def handler(request):
         return claude_handler(request, tool_mode="ingest")
     if path in {"/mcp/messages", "/api/mcp/messages"}:
         return mcp_handler(request)
-    if path in {"/.well-known/oauth-authorization-server"}:
-        return handle_discovery(request)
-    if path in {"/authorize"}:
-        return handle_authorize(request)
-    if path in {"/token"}:
-        return handle_token(request)
     if path in {"/session_report", "/api/session_report"}:
         return session_report_handler(request)
     if path in {"/api/cron/session_report"}:
