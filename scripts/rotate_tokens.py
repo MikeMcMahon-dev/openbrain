@@ -111,16 +111,21 @@ def update_vercel_env(project_id: str, env_id: str, new_value: str) -> None:
     )
 
 
-def update_env_local(new_map: dict[str, str]) -> None:
+def update_env_local(new_map: dict[str, str], shared_token: str) -> None:
     content = ENV_LOCAL.read_text()
     new_value = json.dumps(new_map)
-    pattern = r"^OPENBRAIN_TOKEN_OWNER_MAP=.*$"
-    new_line = f"OPENBRAIN_TOKEN_OWNER_MAP={new_value}"
+    replacements = {
+        "OPENBRAIN_TOKEN_OWNER_MAP": new_value,
+        "OPENBRAIN_TOOL_ACCESS_TOKEN": shared_token,
+    }
 
-    if re.search(pattern, content, flags=re.MULTILINE):
-        content = re.sub(pattern, new_line, content, flags=re.MULTILINE)
-    else:
-        content = content.rstrip() + f"\n{new_line}\n"
+    for key, value in replacements.items():
+        pattern = rf"^{re.escape(key)}=.*$"
+        new_line = f"{key}={value}"
+        if re.search(pattern, content, flags=re.MULTILINE):
+            content = re.sub(pattern, new_line, content, flags=re.MULTILINE)
+        else:
+            content = content.rstrip() + f"\n{new_line}\n"
 
     ENV_LOCAL.write_text(content)
 
@@ -170,9 +175,19 @@ def main() -> None:
     update_vercel_env(project_id, env_id, json.dumps(new_map))
     print("  Vercel updated.")
 
+    # Keep the legacy shared-token fallback bound to Mike's mapped token. This
+    # prevents an old shared token from authenticating without an owner.
+    shared_token = next(token for token, owner in new_map.items() if owner == "mike.mcmahon67")
+    shared_env_id = get_env_var_id(project_id, "OPENBRAIN_TOOL_ACCESS_TOKEN")
+    if not shared_env_id:
+        print("ERROR: OPENBRAIN_TOOL_ACCESS_TOKEN not found in Vercel project env vars.")
+        raise SystemExit(1)
+    update_vercel_env(project_id, shared_env_id, shared_token)
+    print("  Shared fallback token updated.")
+
     # Update .env.local
     print("Updating .env.local...")
-    update_env_local(new_map)
+    update_env_local(new_map, shared_token)
     print("  .env.local updated.")
 
     # Redeploy prompt
