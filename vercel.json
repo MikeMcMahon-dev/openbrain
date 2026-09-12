@@ -22,6 +22,13 @@
   ],
   "routes": [
     {
+      "src": "/(api/)?(authorize|token|\\.well-known/oauth-authorization-server)/?$",
+      "status": 410,
+      "headers": {
+        "Cache-Control": "no-store"
+      }
+    },
+    {
       "src": "/api/(.*)",
       "dest": "/api/index.py"
     },
@@ -47,18 +54,6 @@
     },
     {
       "src": "/mcp/messages(/)?",
-      "dest": "/api/index.py"
-    },
-    {
-      "src": "/.well-known/oauth-authorization-server",
-      "dest": "/api/index.py"
-    },
-    {
-      "src": "/authorize(/)?",
-      "dest": "/api/index.py"
-    },
-    {
-      "src": "/token(/)?",
       "dest": "/api/index.py"
     },
     {
