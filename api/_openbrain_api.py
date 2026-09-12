@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import ipaddress
 import json
 import os
 import re
@@ -1705,6 +1706,10 @@ def _fetch_url(source: str) -> str:
         def get_text(self) -> str:
             return "\n".join(self._parts)
 
+    safe, reason = _url_destination_safe(source)
+    if not safe:
+        raise ValueError(reason or "URL destination is not allowed")
+
     request = urllib.request.Request(
         source,
         headers={"User-Agent": "openbrain-ingester/1.0"},
@@ -2251,6 +2256,10 @@ def _source_reachable(source_type: str, source: str) -> tuple[bool, str | None]:
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             return False, "invalid URL format"
 
+        safe, reason = _url_destination_safe(source)
+        if not safe:
+            return False, reason
+
         request = urllib.request.Request(source, method="HEAD")
         try:
             with urllib.request.urlopen(request, timeout=5) as response:
@@ -2268,4 +2277,24 @@ def _source_reachable(source_type: str, source: str) -> tuple[bool, str | None]:
         return False, f"{source_type} source not found at path"
     if source_type in {"pdf", "docx"} and not path.is_file():
         return False, f"{source_type} source must be a file"
+    return True, None
+
+
+def _url_destination_safe(source: str) -> tuple[bool, str | None]:
+    """Reject URL destinations that resolve to local or private networks."""
+    parsed = urllib.parse.urlparse(source)
+    hostname = parsed.hostname
+    if not hostname:
+        return False, "URL hostname is required"
+    try:
+        addresses = {
+            ipaddress.ip_address(info[4][0])
+            for info in socket.getaddrinfo(hostname, parsed.port, type=socket.SOCK_STREAM)
+        }
+    except (OSError, ValueError) as exc:
+        return False, f"URL hostname could not be resolved: {exc}"
+    for address in addresses:
+        if (address.is_private or address.is_loopback or address.is_link_local
+                or address.is_reserved or address.is_multicast or address.is_unspecified):
+            return False, "URL destination resolves to a private or local network"
     return True, None
