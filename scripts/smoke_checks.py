@@ -997,7 +997,7 @@ def smoke_local(idempotency_source: str | None = None, idempotency_owner: str | 
             },
             200,
             True,
-            "mike.mcmahon67",
+            "mike.mcmahon67" if os.getenv("OPENBRAIN_TOKEN_OWNER_MAP") else "anneliesepaige",
         ),
         (
             {
@@ -1734,8 +1734,9 @@ def smoke_live(base_url: str) -> int:
             "/api/ingest",
             {"source_type": "obsidian", "source": "/tmp", "owner": "evil-user"},
             200,
-            {"x-openbrain-owner": "tenant-a-owner", **_auth},
-            "tenant-a-owner",
+            # Spoof a different owner; the mapped preview token must bind Mike.
+            {"x-openbrain-owner": "anneliesepaige", **_auth},
+            "mike.mcmahon67",
         ),
         ("/openbrain_query", {"query": "test"}, 200, _auth),
         (
