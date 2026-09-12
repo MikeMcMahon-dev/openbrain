@@ -33,15 +33,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
-    # Job-level so `if: env.X != ''` works below. The `secrets` context is NOT available in a
-    # step-level `if` — using it there is not a no-op, it fails the whole workflow at parse time
-    # with zero jobs and no log, which is a genuinely opaque way to find out.
+    # Expose only a presence flag at job scope; secret values are step-scoped.
     env:
-      OPENBRAIN_TOOL_ACCESS_TOKEN: ${{ secrets.OPENBRAIN_TOOL_ACCESS_TOKEN }}
-      SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
-      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-      VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
-      PREVIEW_URL: ${{ github.event.deployment_status.environment_url }}
+      HAS_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET != '' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -59,7 +53,13 @@ jobs:
       - name: Smoke the preview deployment
         # Skip rather than fail when the bypass secret is absent — a preview URL is unreachable
         # without it, and a red X for missing configuration teaches people to ignore red Xs.
-        if: env.VERCEL_AUTOMATION_BYPASS_SECRET != ''
+        if: env.HAS_BYPASS_SECRET == 'true'
+        env:
+          OPENBRAIN_TOOL_ACCESS_TOKEN: ${{ secrets.OPENBRAIN_TOOL_ACCESS_TOKEN }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+          PREVIEW_URL: ${{ github.event.deployment_status.environment_url }}
         run: |
           echo "Smoking $PREVIEW_URL"
           python scripts/smoke_checks.py --live "$PREVIEW_URL"

@@ -37,12 +37,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
-    # Job-level so every step inherits them AND so `if: env.X != ''` works — the `secrets`
-    # context is not available in a step-level `if`.
+    # Expose only presence flags at job scope; secret values are step-scoped below.
     env:
-      SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
-      OPENBRAIN_TOOL_ACCESS_TOKEN: ${{ secrets.OPENBRAIN_TOOL_ACCESS_TOKEN }}
-      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      HAS_DB_SECRET: ${{ secrets.SUPABASE_DB_URL != '' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -88,13 +85,21 @@ jobs:
       # Documented in tests/conftest.py.
       - name: Unit + integration tests
         working-directory: tests
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          OPENBRAIN_TOOL_ACCESS_TOKEN: ${{ secrets.OPENBRAIN_TOOL_ACCESS_TOKEN }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: python -m pytest -q
 
       # Read-only by force. This is the gate that would have caught the plan_ingest Decimal bug:
       # it drives mcp_http.handler() the way Vercel does, so a response that is a valid Python
       # object but an invalid JSON payload fails here instead of in production.
       - name: Smoke (read-only)
-        if: env.SUPABASE_DB_URL != ''
+        if: env.HAS_DB_SECRET == 'true'
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          OPENBRAIN_TOOL_ACCESS_TOKEN: ${{ secrets.OPENBRAIN_TOOL_ACCESS_TOKEN }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: python scripts/smoke_checks.py --read-only
 
       # The same suite with the ingest gate ON. A feature flag has two states and only one of
@@ -103,7 +108,10 @@ jobs:
       # step is what makes flipping OPENBRAIN_REQUIRE_INGEST_PLAN a non-event instead of an
       # incident. It stays after the flag is on: the pair then guards the rollback direction.
       - name: Smoke (read-only, ingest gate ENFORCED)
-        if: env.SUPABASE_DB_URL != ''
+        if: env.HAS_DB_SECRET == 'true'
         env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          OPENBRAIN_TOOL_ACCESS_TOKEN: ${{ secrets.OPENBRAIN_TOOL_ACCESS_TOKEN }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           OPENBRAIN_REQUIRE_INGEST_PLAN: "1"
         run: python scripts/smoke_checks.py --read-only
