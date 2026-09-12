@@ -222,13 +222,16 @@ The OB2 design spec SQL queries need this adaptation.
 
 ---
 
-## Last Successful Checks (2026-05-01)
+## Historical Checks (2026-05-01)
+
+> These results describe the pre-remediation OAuth deployment. OAuth discovery and issuance were
+> retired on 2026-09-12; current authentication uses provisioned bearer tokens.
 
 - Deployment smoke: `https://openbrain-rouge.vercel.app`
   - Live smoke: **30/30** (includes 4 new OAuth flow cases)
   - Vault queries returning real content — `kubernetes` high, `Talos` high, `openbrain` medium
 - DB state: 668+ rows, writes confirmed under `mike.mcmahon67`
-- Claude.ai native MCP connector: **live** — OAuth completes, all 4 tools available
+- Claude Code MCP adapter: **live** — provisioned bearer token, all 4 tools available
 - SSH commit signing configured for `claude` OS user, verified on GitHub
 - Git:
   - Latest merged commit: `67dd916` (main)
@@ -239,13 +242,13 @@ The OB2 design spec SQL queries need this adaptation.
 
 ## Session Notes — 2026-05-01
 
-### What shipped
+### What shipped (historical — 2026-05-01)
 - **Token rotation** — `opbr_*` bearer tokens rotated, `docs/MCP_SETUP.md` scrubbed of real token
 - **Pre-commit guardrails** (`scripts/pre-commit`) — blocks direct commits to main and `opbr_` token patterns; `make install-hooks` / `make dev-install` wire it
 - **MCP HTTP endpoint** — `/mcp/messages` route added to `vercel.json`; `notifications/initialized` handling added to `mcp_http.py`
-- **OAuth 2.0 server** (`api/oauth.py`) — stateless HMAC-signed authorization codes, PKCE S256, 5-minute code TTL; endpoints: `/.well-known/oauth-authorization-server`, `/authorize`, `/token`
+- **OAuth 2.0 server** (`api/oauth.py`) — retired 2026-09-12; former discovery/authorization/token routes now return HTTP 410
 - **Two routing bugs fixed** — `queryStringParameters` vs `query` key mismatch in `handle_authorize`; `urllib.parse.unquote_plus` missing from `index.py` query string parser (caused `redirect_uri` to arrive URL-encoded → garbled Location header)
-- **OAuth smoke tests** — 4 new cases in `smoke_checks.py` covering discovery, authorize redirect, token exchange, and unknown-client rejection
+- **OAuth retirement smoke tests** — current checks cover discovery, authorization, token, and trailing-slash variants returning HTTP 410
 - **SSH commit signing** for `claude` OS user — ed25519 key at `~/.ssh/id_ed25519_signing`, global git config set, signing key on CC-mcmahon-dev GitHub account
 - **SUPABASE_DB_URL trailing quote** — found in Vercel Shared Variables; trailing `"` made database name `postgres"` → all DB reads failed silently for ~2-3 weeks
 
