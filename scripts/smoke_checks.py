@@ -989,13 +989,15 @@ def smoke_local(idempotency_source: str | None = None, idempotency_owner: str | 
                 ),
                 "headers": {
                     "Content-Type": "application/json",
-                    "x-openbrain-owner": "tenant-a-owner",
+                    # Deliberately spoof a different owner; the mapped CI token
+                    # must win and bind this request to Mike.
+                    "x-openbrain-owner": "anneliesepaige",
                     **_auth,
                 },
             },
             200,
             True,
-            "tenant-a-owner",
+            "mike.mcmahon67",
         ),
         (
             {
