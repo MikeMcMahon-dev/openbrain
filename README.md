@@ -8,13 +8,14 @@ Documented at [mikemcmahon.dev](https://mikemcmahon.dev).
 
 ## OpenBrain 2.0 Status
 
-OB2 adds temporal lifecycle, domain separation, and a compounding wiki layer to the existing RAG system.
+OB2 adds temporal lifecycle and domain separation to the existing RAG system. The planned wiki
+layer is dormant and disabled; the portfolio blog is the implemented publishing surface.
 
 | Stage | Status |
 |---|---|
 | Schema migration (`public.knowledge`, `public.wiki_pages`) | ✅ Complete — applied to production |
 | Data migration (699 rows from `thoughts` → `knowledge`) | ✅ Complete — all rows at `status='historical'` |
-| API endpoints (ingest_state, supersession, query_state, wiki) | ✅ Complete — 6 new endpoints live |
+| API endpoints (ingest_state, supersession, query_state) | ✅ Complete — wiki endpoints dormant/disabled |
 | State promotion (historical → current for operational records) | ⏳ Pending human review |
 | Legacy endpoint cutover (retarget to `knowledge`) | ⏳ Pending migration validation |
 
