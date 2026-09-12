@@ -203,7 +203,7 @@ def require_auth(metadata: dict[str, Any]) -> dict[str, Any] | None:
     Drop-in guard for raw endpoints that previously had no auth check.
     Passes through when no tokens are configured (dev/local).
     """
-    is_authorized, reason, _owner = _require_tool_auth(metadata)
+    is_authorized, reason, resolved_owner = _require_tool_auth(metadata)
     if not is_authorized:
         return response_payload(
             401,
@@ -213,6 +213,14 @@ def require_auth(metadata: dict[str, Any]) -> dict[str, Any] | None:
                 "status": 401,
             },
         )
+    # A token-mapped owner is authoritative.  Bind it into the request context
+    # so caller-controlled owner headers and body fields cannot cross tenants.
+    if resolved_owner:
+        headers = metadata.get("headers")
+        if not isinstance(headers, dict):
+            headers = {}
+            metadata["headers"] = headers
+        headers["x-openbrain-owner"] = resolved_owner
     return None
 
 
