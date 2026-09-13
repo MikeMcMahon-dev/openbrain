@@ -326,7 +326,8 @@ def _list_tools() -> list[dict]:
             "description": (
                 "PREVIEW an ingest before committing it — the vault's equivalent of a "
                 "'terraform plan'. Writes nothing. Returns the living docs already in scope, "
-                "what a commit would supersede, and a plan_token to pass to ingest.\n\n"
+                "what a commit would supersede, which of your tags are canonical vs would be "
+                "parked for approval, and a plan_token to pass to ingest.\n\n"
                 "Call this FIRST for any note about a system you have written about before. "
                 "You cannot reliably tell an update from a new note without seeing what "
                 "already exists, and this is the only way to see it."
@@ -353,6 +354,17 @@ def _list_tools() -> list[dict]:
                         "description": (
                             "Living-doc identity you believe this updates. Supplying it makes "
                             "the plan report exactly which row would be superseded."
+                        ),
+                    },
+                    "tags": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "The tags you intend to attach. The plan reports which are "
+                            "canonical and which ingest would park in the approval queue "
+                            "instead of writing (ADR-012). Surface the unknown ones to the "
+                            "user for approve/remap/drop BEFORE ingesting; do not ingest and "
+                            "hope."
                         ),
                     },
                 },
@@ -532,7 +544,8 @@ def _call_tool(name: str, arguments: dict, metadata: dict) -> dict[str, Any]:
         # plan/apply unusable from the Claude connector the moment the flag flipped.
         return _wrap_content(build_plan(
             (arguments.get("source") or "").strip(), owner,
-            system=arguments.get("system"), component=arguments.get("component")))
+            system=arguments.get("system"), component=arguments.get("component"),
+            tags=[str(t) for t in (arguments.get("tags") or []) if str(t).strip()]))
 
     elif name == "generate_quiz":
         normalized = {

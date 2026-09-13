@@ -249,3 +249,27 @@ def test_plan_token_survives_trailing_whitespace_across_surfaces():
     stale = ip.encode_plan_token(ip.content_hash(raw), OWNER)
     ok, _ = ip.decode_plan_token(stale, ip.content_hash(raw.strip()), OWNER)
     assert not ok, "an unstripped-hash token must not validate — that was the latent bug"
+
+
+# ── tag report (ADR-012 pre-check) ────────────────────────────────────────────
+
+
+def test_classify_tags_splits_against_db_vocabulary():
+    rep = ip.classify_tags(["k8s", "brand-new", "shape:note"], {"K8s", "DNS"})
+    assert rep["vocabulary_source"] == "db"
+    # case-folds to the DB spelling; namespaced tags pass through untouched
+    assert rep["canonical"] == ["K8s", "shape:note"]
+    assert rep["unknown"] == ["brand-new"]
+
+
+def test_classify_tags_names_the_seed_when_db_is_unreachable():
+    """Falling back to the static seed is allowed, but it must be visible: a tag approved in
+    the DB after the last deploy would read as unknown here, and the caller needs to know why."""
+    rep = ip.classify_tags(["ADR"], None)
+    assert rep["vocabulary_source"] == "static-seed"
+    assert rep["canonical"] == ["ADR"]
+
+
+def test_classify_tags_empty_is_empty():
+    rep = ip.classify_tags(None, {"K8s"})
+    assert rep == {"canonical": [], "unknown": [], "vocabulary_source": "db"}

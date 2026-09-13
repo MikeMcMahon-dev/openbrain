@@ -76,6 +76,10 @@ CANONICAL_TAGS: list[str] = [
     "Bluetooth",
     "Retrieval",
     "ADR",
+    "local-inference",
+    "mac-mini",
+    "ollama",
+    "eval-harness",
     # ── approved via scripts/tag_review.py append below this line ──
 ]
 # fmt: on
