@@ -175,7 +175,7 @@ def test_cimd_client_id_is_fetched_and_validated():
     meta = {"client_id": url, "redirect_uris": [REDIRECT]}
     with patch.object(oauth, "_fetch_cimd", return_value=meta):
         client = oauth.resolve_client(url)
-    assert client == {"redirect_uris": [REDIRECT]}
+    assert client == {"redirect_uris": [REDIRECT], "name": "chatgpt.com"}
     borrowed = {"client_id": "https://other", "redirect_uris": [REDIRECT]}
     with patch.object(oauth, "_fetch_cimd", return_value=borrowed):
         assert oauth.resolve_client(url) is None, "metadata must name itself as the client_id"
@@ -185,6 +185,35 @@ def test_register_requires_https_redirects():
     resp = oauth.handle_register({"method": "POST", "body": json.dumps(
         {"redirect_uris": ["http://localhost/cb"]})})
     assert resp["statusCode"] == 400
+
+
+def test_register_refuses_redirects_off_the_host_allowlist():
+    """Open registration is safe only because a client can never point anywhere but
+    ChatGPT/Claude: a phishing client with its own redirect cannot be registered at all."""
+    resp = oauth.handle_register({"method": "POST", "body": json.dumps(
+        {"redirect_uris": ["https://evil.example/cb"], "client_name": "Totally ChatGPT"})})
+    assert resp["statusCode"] == 400
+    assert "evil.example" in json.loads(resp["body"])["error_description"]
+    # a mixed list is refused whole, not trimmed to the good entries
+    resp = oauth.handle_register({"method": "POST", "body": json.dumps(
+        {"redirect_uris": [REDIRECT, "https://evil.example/cb"]})})
+    assert resp["statusCode"] == 400
+
+
+def test_host_allowlist_is_configurable_and_matches_subdomains(monkeypatch):
+    monkeypatch.setenv("OPENBRAIN_OAUTH_REDIRECT_HOSTS", "example.org")
+    assert oauth.host_allowed("https://app.example.org/cb")
+    assert oauth.host_allowed("https://example.org/cb")
+    assert not oauth.host_allowed("https://example.org.evil.net/cb")
+    assert not oauth.host_allowed("https://chatgpt.com/cb")
+
+
+def test_login_page_names_the_client_and_the_return_host():
+    client_id = _register()
+    _, challenge = _pkce()
+    body = _authorize_get(client_id, challenge)["body"]
+    assert "<b>ChatGPT</b> is asking for access" in body
+    assert "<b>chatgpt.com</b>" in body
 
 
 # ── token exchange ────────────────────────────────────────────────────────────

@@ -49,8 +49,17 @@ was written: OpenAI's MCP client lists our tools and calls `search` over plain P
 | tools | `POST /mcp/messages` | `Authorization: Bearer obt_…` resolves to the owner; every tool is owner-scoped |
 
 Client id metadata documents (`client_id` = an https URL naming itself) are accepted too.
-The hand-configured claude.ai connector (client id = owner name) keeps working but is
-restricted to `claude.ai` / `claude.com` redirect hosts.
+The hand-configured claude.ai connector (client id = owner name) keeps working.
+
+**Why open registration does not expose the vault.** `/register` hands out nothing but a
+signed statement "app X may receive codes at redirect Y" — no token, no data. Access still
+requires an owner's passphrase on the sign-in page. The one attack open registration
+enables elsewhere is phishing: register a client whose redirect is the attacker's site, lure
+the owner to the real sign-in page, collect the code. Two things close it here: every
+redirect (registered, CIMD, legacy) must be on `OPENBRAIN_OAUTH_REDIRECT_HOSTS` (default
+`chatgpt.com,openai.com,claude.ai,claude.com`, subdomains included), so a client pointing
+anywhere else cannot be registered at all; and the sign-in page names the requesting app and
+the host you will be returned to, so a mismatch is visible before you type anything.
 
 ### Revoking / rotating
 

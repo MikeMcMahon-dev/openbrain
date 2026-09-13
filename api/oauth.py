@@ -47,7 +47,11 @@ SCOPE = "openbrain"
 # A real-cost hash to verify against when the username is unknown, so the response time
 # does not separate "no such owner" from "wrong passphrase".
 _DUMMY_HASH = hash_passphrase("not-a-real-passphrase")
-DEFAULT_LEGACY_REDIRECT_HOSTS = "claude.ai,claude.com"
+# Every redirect_uri — registered, CIMD, or legacy — must land on one of these hosts. This
+# is what makes open registration safe in a single-family system: /register will sign a
+# client for anyone, but a client can only ever send a code to ChatGPT or Claude, so a
+# registration pointing anywhere else is refused and a phishing client cannot exist.
+DEFAULT_REDIRECT_HOSTS = "chatgpt.com,openai.com,claude.ai,claude.com"
 
 
 # ── response helpers ──────────────────────────────────────────────────────────
@@ -105,9 +109,17 @@ def _form(request: dict, coerce: bool = True) -> dict[str, Any]:
 
 # ── clients ───────────────────────────────────────────────────────────────────
 
-def _legacy_hosts() -> set[str]:
-    raw = os.getenv("OPENBRAIN_OAUTH_LEGACY_REDIRECT_HOSTS", DEFAULT_LEGACY_REDIRECT_HOSTS)
+def allowed_redirect_hosts() -> set[str]:
+    raw = os.getenv("OPENBRAIN_OAUTH_REDIRECT_HOSTS", DEFAULT_REDIRECT_HOSTS)
     return {h.strip().lower() for h in raw.split(",") if h.strip()}
+
+
+def host_allowed(uri: str) -> bool:
+    if not uri.startswith("https://"):
+        return False
+    host = (urllib.parse.urlsplit(uri).hostname or "").lower()
+    allowed = allowed_redirect_hosts()
+    return host in allowed or any(host.endswith("." + h) for h in allowed)
 
 
 def _fetch_cimd(url: str) -> dict | None:
@@ -123,14 +135,16 @@ def _fetch_cimd(url: str) -> dict | None:
 def resolve_client(client_id: str) -> dict[str, Any] | None:
     """What this client is allowed to do, or None if it is nobody.
 
-    Returns {"redirect_uris": [...]} for registered/CIMD clients (exact-match redirects) or
-    {"redirect_hosts": {...}} for the legacy owner-name clients (host allowlist).
+    Returns {"redirect_uris": [...], "name": ...} for registered/CIMD clients (exact-match
+    redirects) or {"legacy": True, "name": ...} for the owner-name clients (host allowlist).
     """
     if not client_id:
         return None
     if client_id.startswith(CLIENT_PREFIX):
         data = verify("client", client_id, prefix=CLIENT_PREFIX)
-        return {"redirect_uris": list(data.get("ru") or [])} if data else None
+        if not data:
+            return None
+        return {"redirect_uris": list(data.get("ru") or []), "name": data.get("n") or ""}
     if client_id.startswith("https://"):
         meta = _fetch_cimd(client_id)
         # The document must name itself: a metadata URL that claims a different client_id
@@ -138,19 +152,21 @@ def resolve_client(client_id: str) -> dict[str, Any] | None:
         if not meta or meta.get("client_id") != client_id:
             return None
         uris = [u for u in (meta.get("redirect_uris") or []) if isinstance(u, str)]
-        return {"redirect_uris": uris} if uris else None
+        name = str(meta.get("client_name") or urllib.parse.urlsplit(client_id).hostname or "")
+        return {"redirect_uris": uris, "name": name} if uris else None
     if client_id in set(_get_token_owner_map().values()):
-        return {"redirect_hosts": _legacy_hosts()}
+        return {"legacy": True, "name": "Claude"}
     return None
 
 
 def redirect_allowed(client: dict[str, Any], redirect_uri: str) -> bool:
-    if not redirect_uri or not redirect_uri.startswith("https://"):
+    """Registered clients: exact match against what they registered. Legacy clients: any
+    URI on an allowed host. Both: the host allowlist is the outer wall."""
+    if not host_allowed(redirect_uri):
         return False
     if "redirect_uris" in client:
         return redirect_uri in client["redirect_uris"]
-    host = (urllib.parse.urlsplit(redirect_uri).hostname or "").lower()
-    return host in client.get("redirect_hosts", set())
+    return bool(client.get("legacy"))
 
 
 def handle_register(request: dict) -> dict[str, Any]:
@@ -168,10 +184,15 @@ def handle_register(request: dict) -> dict[str, Any]:
             raw_uris = json.loads(raw_uris)
         except Exception:
             raw_uris = [raw_uris]
-    uris = [u for u in (raw_uris or []) if isinstance(u, str) and u.startswith("https://")]
+    uris = [u for u in (raw_uris or []) if isinstance(u, str)]
     if not uris:
         return _json(400, {"error": "invalid_redirect_uri",
                            "error_description": "at least one https redirect_uri is required"})
+    refused = [u for u in uris if not host_allowed(u)]
+    if refused:
+        return _json(400, {"error": "invalid_redirect_uri",
+                           "error_description": "redirect_uri host not allowed: "
+                                                + ", ".join(refused)})
     name = str(body.get("client_name") or "")[:80]
     now = int(time.time())
     try:
@@ -265,12 +286,15 @@ button{margin-top:1.25rem;width:100%;padding:.7rem;border:0;border-radius:8px;
 .muted{color:#666;font-size:.8rem;margin-top:1rem}
 """.splitlines())
 
-def _login_page(p: dict[str, str], error: str | None = None, status: int = 200) -> dict:
+def _login_page(p: dict[str, str], client: dict[str, Any] | None = None,
+                error: str | None = None, status: int = 200) -> dict:
     hidden = "\n".join(
         f'<input type="hidden" name="{k}" value="{html.escape(p.get(k, ""))}">'
         for k in _FORM_FIELDS)
     err = f'<p class="err">{html.escape(error)}</p>' if error else ""
     who = html.escape(p.get("username", ""))
+    asking = html.escape((client or {}).get("name") or "An app")
+    dest = html.escape(urllib.parse.urlsplit(p.get("redirect_uri", "")).hostname or "")
     return _html(status, f"""<!doctype html><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>OpenBrain sign-in</title>
@@ -279,6 +303,8 @@ def _login_page(p: dict[str, str], error: str | None = None, status: int = 200) 
 </style>
 <form method="post" action="/authorize" autocomplete="on">
 <h1>Sign in to OpenBrain</h1>
+<p class="muted"><b>{asking}</b> is asking for access. After you sign in you will be sent
+back to <b>{dest}</b>. If that is not the app you are setting up, close this page.</p>
 {hidden}
 <label for="u">Username</label>
 <input id="u" type="text" name="username" value="{who}" required autofocus>
@@ -307,7 +333,7 @@ def handle_authorize(request: dict) -> dict[str, Any]:
         return _error_page(err)
 
     if method == "GET":
-        return _login_page(p)
+        return _login_page(p, client)
     if method != "POST":
         return _json(405, {"error": "method_not_allowed"})
 
@@ -316,7 +342,7 @@ def handle_authorize(request: dict) -> dict[str, Any]:
     stored = owner_passphrases().get(username)
     ok = check_passphrase(passphrase, stored or _DUMMY_HASH)
     if not stored or not ok:
-        return _login_page(p, error="Username or passphrase is incorrect.", status=401)
+        return _login_page(p, client, error="Username or passphrase is incorrect.", status=401)
 
     code = sign("code", {
         "owner": username,
