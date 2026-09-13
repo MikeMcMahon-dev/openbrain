@@ -236,6 +236,11 @@ independently.
 
 If you're Beth (snapple01) or Annie (anneliesepaige), your tokens are different. Contact Mike for your personal token and owner ID, then follow the same setup steps above.
 
+## ChatGPT
+
+ChatGPT connects to the same endpoint via OAuth (username + passphrase sign-in, no token to
+paste). See `docs/CHATGPT_CONNECTOR.md` → *MCP connector*.
+
 ---
 
 ## Questions?

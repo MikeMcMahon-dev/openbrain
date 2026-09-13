@@ -25,7 +25,10 @@ def handler(request: dict) -> dict[str, Any]:
     # Validate authentication first
     is_authorized, reason, resolved_owner = _require_tool_auth(metadata)
     if not is_authorized:
-        return response_payload(
+        # RFC 9728: tell an MCP client where the authorization server is, so a connector
+        # can start the OAuth flow from this 401 instead of needing the URL typed in.
+        from api.oauth import www_authenticate
+        resp = response_payload(
             401,
             {
                 "error": "unauthorized",
@@ -33,6 +36,8 @@ def handler(request: dict) -> dict[str, Any]:
                 "status": 401,
             },
         )
+        resp["headers"] = {**resp["headers"], **www_authenticate(request)}
+        return resp
 
     # Inject owner into metadata for context resolution
     if resolved_owner:

@@ -11,7 +11,13 @@ from api.generate_quiz import handler as quiz_handler
 from api.health import handler as health_handler
 from api.ingest import handler as ingest_handler
 from api.mcp_http import handler as mcp_handler
-from api.oauth import handle_authorize, handle_discovery, handle_token
+from api.oauth import (
+    handle_authorize,
+    handle_discovery,
+    handle_protected_resource,
+    handle_register,
+    handle_token,
+)
 from api.ob2_state import (
     handle_confirm_supersession,
     handle_ingest_state,
@@ -51,16 +57,21 @@ def _extract_path(request) -> str:
 
 def handler(request):
     path = _extract_path(request)
-    # Deny retired OAuth paths, including trailing slashes and /api aliases.
-    # The edge also rejects these; keep the application boundary fail-closed.
-    retired_path = path.split("?", 1)[0].rstrip("/")
-    if retired_path in {"/.well-known/oauth-authorization-server",
-                        "/api/.well-known/oauth-authorization-server"}:
+    # OAuth surface (api/oauth.py): authenticated flow — login + PKCE + registration.
+    # Trailing slashes and /api aliases route the same way the retired stubs did.
+    oauth_path = path.split("?", 1)[0].rstrip("/")
+    if oauth_path in {"/.well-known/oauth-authorization-server",
+                      "/api/.well-known/oauth-authorization-server"}:
         return handle_discovery(request)
-    if retired_path in {"/authorize", "/api/authorize"}:
+    if oauth_path in {"/.well-known/oauth-protected-resource",
+                      "/api/.well-known/oauth-protected-resource"}:
+        return handle_protected_resource(request)
+    if oauth_path in {"/authorize", "/api/authorize"}:
         return handle_authorize(request)
-    if retired_path in {"/token", "/api/token"}:
+    if oauth_path in {"/token", "/api/token"}:
         return handle_token(request)
+    if oauth_path in {"/register", "/api/register"}:
+        return handle_register(request)
     if path in {"/", "/health", "/api/health"}:
         return health_handler(request)
     if path in {"/search", "/api/search"}:
