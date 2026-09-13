@@ -60,11 +60,18 @@ def _write_response(request: "handler", response: dict[str, object]) -> None:
 
     request.send_response(status)
     headers = response.get("headers")
+    sent_content_type = False
     if isinstance(headers, dict):
         for name, value in headers.items():
             request.send_header(str(name), str(value))
+            if str(name).lower() == "content-type":
+                sent_content_type = True
 
-    request.send_header("Content-Type", "application/json")
+    # JSON is the default, not an override: the OAuth sign-in page is text/html, and a
+    # second Content-Type header appended after it made browsers parse the form as JSON
+    # ("SyntaxError: JSON.parse: unexpected character" in the ChatGPT connector flow).
+    if not sent_content_type:
+        request.send_header("Content-Type", "application/json")
     request.send_header("Content-Length", str(len(data)))
     request.end_headers()
     request.wfile.write(data)
