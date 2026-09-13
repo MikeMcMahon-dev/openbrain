@@ -22,11 +22,8 @@
   ],
   "routes": [
     {
-      "src": "/(api/)?(authorize|token|\\.well-known/oauth-authorization-server)/?$",
-      "status": 410,
-      "headers": {
-        "Cache-Control": "no-store"
-      }
+      "src": "/(authorize|token|register|\\.well-known/oauth-authorization-server|\\.well-known/oauth-protected-resource)/?$",
+      "dest": "/api/index.py"
     },
     {
       "src": "/api/(.*)",

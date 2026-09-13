@@ -1941,42 +1941,169 @@ def smoke_live(base_url: str) -> int:
 
 
 def smoke_oauth(base_url: str) -> int:
-    """Verify retired OAuth endpoints deny access without following redirects.
+    """Smoke the OAuth surface against a live deployment (api/oauth.py, 2026-09-13 contract).
 
-    Never attempt a real authorization-code exchange or print response bodies.
-    A redirect, login page, SPA fallback, or re-enabled issuer must fail this check.
+    What must hold: /register signs a client only for an allow-listed redirect host; GET
+    /authorize renders a login form (never a code); a wrong passphrase is refused without a
+    redirect; an unknown client or unregistered redirect is rendered, never redirected; and
+    an unauthenticated /mcp/messages 401 carries the RFC 9728 discovery hint.
+
+    The previous version of this check asserted the opposite - a bare owner name got a 302
+    with a code - which was the OB-1 hole written down as the expected result. The full
+    sign-in -> token -> tools/list path runs only when OPENBRAIN_OAUTH_SMOKE_USER and
+    OPENBRAIN_OAUTH_SMOKE_PASSPHRASE are set (a dedicated smoke owner, never a real one).
     """
-    class _NoRedirect(urllib.request.HTTPErrorProcessor):
-        def http_response(self, req, resp):
-            return resp
-        https_response = http_response
+    import base64
+    import hashlib
+    import secrets
 
-    opener = urllib.request.build_opener(_NoRedirect)
     failed = 0
-    for prefix in ("", "/api"):
-        for endpoint in ("/.well-known/oauth-authorization-server", "/authorize", "/token"):
-            for suffix in ("", "/"):
-                path = prefix + endpoint + suffix
-                method = "POST" if endpoint == "/token" else "GET"
-                data = b"grant_type=authorization_code&code=retired&code_verifier=retired"
-                request = urllib.request.Request(
-                    base_url.rstrip("/") + path,
-                    data=data if method == "POST" else None,
-                    headers={**_preview_bypass_headers(),
-                             "Content-Type": "application/x-www-form-urlencoded"},
-                    method=method,
-                )
-                try:
-                    with opener.open(request, timeout=10) as response:
-                        denied = response.status == 410 and not response.headers.get("Location")
-                        if denied:
-                            print(f"oauth disabled {path}: ok (410)")
-                        else:
-                            print(f"oauth disabled {path}: FAIL — HTTP {response.status}")
-                            failed += 1
-                except Exception:
-                    print(f"oauth disabled {path}: FAIL — transport error")
-                    failed += 1
+
+    def _pkce() -> tuple[str, str]:
+        v = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip("=")
+        c = base64.urlsafe_b64encode(hashlib.sha256(v.encode()).digest()).decode().rstrip("=")
+        return v, c
+
+    def _raw(method: str, path: str, data: bytes | None = None,
+             content_type: str | None = None,
+             extra: dict[str, str] | None = None) -> tuple[int, dict[str, str], str]:
+        """One request, redirects NOT followed. Returns (status, headers-lowercased, body).
+        Carries the preview-bypass headers like the other live helpers."""
+        class _NoRedirect(urllib.request.HTTPErrorProcessor):
+            def http_response(self, req, resp):
+                return resp
+            https_response = http_response
+
+        headers = {**_preview_bypass_headers(), **(extra or {})}
+        if content_type:
+            headers["Content-Type"] = content_type
+        request = urllib.request.Request(f"{base_url}{path}", data=data, headers=headers,
+                                         method=method)
+        resp = urllib.request.build_opener(_NoRedirect).open(request, timeout=15)
+        return (resp.status, {k.lower(): v for k, v in resp.headers.items()},
+                resp.read().decode("utf-8", errors="replace"))
+
+    def _check(label: str, ok: bool, detail: str) -> None:
+        nonlocal failed
+        if ok:
+            print(f"{label}: ok ({detail})")
+        else:
+            print(f"{label}: FAIL — {detail}")
+            failed += 1
+
+    chatgpt_redirect = "https://chatgpt.com/connector_platform_oauth_redirect"
+    form_ct = "application/x-www-form-urlencoded"
+
+    # ── discovery (both documents) ─────────────────────────────────────────────
+    try:
+        status, _h, body = _raw("GET", "/.well-known/oauth-authorization-server")
+        disc = json.loads(body) if status == 200 else {}
+        _check("oauth/.well-known", status == 200 and "registration_endpoint" in disc
+               and disc.get("code_challenge_methods_supported") == ["S256"],
+               f"{status}; registration_endpoint="
+               f"{'yes' if 'registration_endpoint' in disc else 'MISSING'}")
+        status, _h, body = _raw("GET", "/.well-known/oauth-protected-resource")
+        prm = json.loads(body) if status == 200 else {}
+        _check("oauth/protected-resource", status == 200 and bool(prm.get("authorization_servers")),
+               f"{status}")
+    except Exception as exc:
+        _check("oauth/discovery", False, str(exc))
+
+    # ── 401 on the MCP endpoint points at the discovery document ───────────────
+    try:
+        list_req = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}).encode()
+        status, h, _b = _raw("POST", "/mcp/messages", list_req, "application/json")
+        www = h.get("www-authenticate", "")
+        _check("oauth/mcp 401 discovery hint", status == 401 and "resource_metadata=" in www,
+               f"{status}; WWW-Authenticate={www[:60]!r}")
+    except Exception as exc:
+        _check("oauth/mcp 401 discovery hint", False, str(exc))
+
+    # ── registration: allow-listed host accepted, anything else refused ────────
+    client_id = ""
+    try:
+        status, _h, body = _raw("POST", "/register", json.dumps(
+            {"redirect_uris": [chatgpt_redirect], "client_name": "smoke"}).encode(),
+            "application/json")
+        client_id = json.loads(body).get("client_id", "") if status == 201 else ""
+        _check("oauth/register chatgpt.com", status == 201 and client_id.startswith("obc_"),
+               f"{status}")
+        status, _h, body = _raw("POST", "/register", json.dumps(
+            {"redirect_uris": ["https://evil.example/cb"], "client_name": "smoke"}).encode(),
+            "application/json")
+        _check("oauth/register off-allowlist host refused", status == 400,
+               f"{status}; {body[:80]}")
+    except Exception as exc:
+        _check("oauth/register", False, str(exc))
+
+    if not client_id:
+        return failed
+
+    v, c = _pkce()
+    auth_params = {
+        "response_type": "code", "client_id": client_id, "redirect_uri": chatgpt_redirect,
+        "code_challenge": c, "code_challenge_method": "S256", "state": "smoke_state",
+    }
+
+    # ── GET /authorize renders a login, never a code ───────────────────────────
+    try:
+        status, h, body = _raw("GET", "/authorize?" + urllib.parse.urlencode(auth_params))
+        _check("oauth/authorize renders login",
+               status == 200 and 'name="passphrase"' in body and "location" not in h,
+               f"{status}; form={'yes' if 'name=\"passphrase\"' in body else 'NO'}")
+    except Exception as exc:
+        _check("oauth/authorize renders login", False, str(exc))
+
+    # ── wrong passphrase: refused, no redirect ─────────────────────────────────
+    try:
+        status, h, body = _raw("POST", "/authorize", urllib.parse.urlencode(
+            {**auth_params, "username": "mike.mcmahon67", "passphrase": "smoke-wrong"}).encode(),
+            form_ct)
+        _check("oauth/authorize wrong passphrase", status == 401 and "location" not in h,
+               f"{status}; redirected={'YES' if 'location' in h else 'no'}")
+    except Exception as exc:
+        _check("oauth/authorize wrong passphrase", False, str(exc))
+
+    # ── unknown client / unregistered redirect: rendered, never redirected ─────
+    try:
+        status, h, _b = _raw("GET", "/authorize?" + urllib.parse.urlencode(
+            {**auth_params, "client_id": "nobody@example.com"}))
+        _check("oauth/authorize unknown client", status == 400 and "location" not in h,
+               f"{status}; redirected={'YES' if 'location' in h else 'no'}")
+        status, h, _b = _raw("GET", "/authorize?" + urllib.parse.urlencode(
+            {**auth_params, "redirect_uri": "https://chatgpt.com/not-what-was-registered"}))
+        _check("oauth/authorize unregistered redirect", status == 400 and "location" not in h,
+               f"{status}; redirected={'YES' if 'location' in h else 'no'}")
+    except Exception as exc:
+        _check("oauth/authorize rejections", False, str(exc))
+
+    # ── full sign-in -> token -> tool call, only with a dedicated smoke owner ──
+    smoke_user = os.getenv("OPENBRAIN_OAUTH_SMOKE_USER", "")
+    smoke_pass = os.getenv("OPENBRAIN_OAUTH_SMOKE_PASSPHRASE", "")
+    if not (smoke_user and smoke_pass):
+        print("oauth/sign-in flow: skipped (set OPENBRAIN_OAUTH_SMOKE_USER/_PASSPHRASE)")
+        return failed
+    try:
+        status, h, _b = _raw("POST", "/authorize", urllib.parse.urlencode(
+            {**auth_params, "username": smoke_user, "passphrase": smoke_pass}).encode(), form_ct)
+        qs = dict(urllib.parse.parse_qsl(urllib.parse.urlparse(h.get("location", "")).query))
+        code = qs.get("code", "")
+        _check("oauth/sign-in", status == 302 and bool(code) and qs.get("state") == "smoke_state",
+               f"{status}; code={'yes' if code else 'NO'}")
+        status, _h, body = _raw("POST", "/token", urllib.parse.urlencode({
+            "grant_type": "authorization_code", "code": code, "code_verifier": v,
+            "redirect_uri": chatgpt_redirect, "client_id": client_id}).encode(), form_ct)
+        access = json.loads(body).get("access_token", "") if status == 200 else ""
+        _check("oauth/token", status == 200 and access.startswith("obt_"), f"{status}")
+        status, _h, body = _raw("POST", "/mcp/messages", list_req, "application/json",
+                                {"Authorization": f"Bearer {access}"})
+        tools = [t["name"] for t in json.loads(body).get("result", {}).get("tools", [])] \
+            if status == 200 else []
+        _check("oauth/token calls mcp", status == 200 and "search" in tools,
+               f"{status}; {len(tools)} tools")
+    except Exception as exc:
+        _check("oauth/sign-in flow", False, str(exc))
+
     return failed
 
 

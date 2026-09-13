@@ -195,6 +195,12 @@ def _require_tool_auth(
     if access_token and candidate == access_token:
         return True, None, None
 
+    # OAuth-issued tokens (api/oauth.py): signed, expiring, bound to (owner, client).
+    from api.oauth_tokens import verify_access_token
+    oauth_owner = verify_access_token(candidate)
+    if oauth_owner:
+        return True, None, oauth_owner
+
     return False, "Invalid tool access token.", None
 
 
