@@ -284,3 +284,48 @@ def test_code_ttl_is_short():
 
 def test_env_is_isolated():
     assert os.getenv("OPENBRAIN_OAUTH_PASSPHRASES")
+
+
+# ── the wire: what the browser actually receives ─────────────────────────────
+
+def _served(response: dict) -> list[tuple[str, str]]:
+    """Run a handler response through api.index._write_response and capture the headers
+    as sent. The handler's headers were right; the writer appended a second Content-Type."""
+    from api import index
+
+    class _Fake:
+        def __init__(self):
+            self.headers: list[tuple[str, str]] = []
+            self.status = None
+
+            class _W:
+                def write(self, _b):
+                    pass
+            self.wfile = _W()
+
+        def send_response(self, status):
+            self.status = status
+
+        def send_header(self, k, v):
+            self.headers.append((k, v))
+
+        def end_headers(self):
+            pass
+
+    fake = _Fake()
+    index._write_response(fake, response)
+    return fake.headers
+
+
+def test_login_page_is_served_as_html_exactly_once():
+    client_id = _register()
+    _, challenge = _pkce()
+    headers = _served(_authorize_get(client_id, challenge))
+    cts = [v for k, v in headers if k.lower() == "content-type"]
+    assert cts == ["text/html; charset=utf-8"], cts
+
+
+def test_json_responses_still_default_to_json():
+    headers = _served({"statusCode": 200, "body": "{}"})
+    cts = [v for k, v in headers if k.lower() == "content-type"]
+    assert cts == ["application/json"]
