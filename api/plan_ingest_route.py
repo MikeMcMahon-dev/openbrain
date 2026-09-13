@@ -66,5 +66,6 @@ def handler(request):
         owner,
         system=payload.get("system") or None,
         component=payload.get("component") or None,
+        tags=[str(t) for t in (payload.get("tags") or []) if str(t).strip()],
     )
     return response_payload(200, plan)

@@ -149,10 +149,36 @@ def _similar_docs(conn, embedding_sql_param, limit: int = 3) -> list[dict[str, A
     return [dict(r) for r in rows if (r["similarity"] or 0) >= SIMILAR_SUGGEST_FLOOR]
 
 
+def classify_tags(tags: list[str] | None,
+                  vocabulary: set[str] | None) -> dict[str, Any]:
+    """Say, BEFORE the write, what ingest will do with each descriptive tag.
+
+    Ingest folds tags to the controlled vocabulary and parks anything it does not recognise
+    in tag_proposals (ADR-012). That parking is silent from the writer's side - the JSON
+    echo says the note was written, and the tags are simply not on it. Reporting the split
+    here lets the caller get the unknown ones approved (or remapped, or dropped) before the
+    write, instead of discovering the queue afterwards and re-ingesting.
+
+    `vocabulary` None means public.tag_vocabulary was unreachable; the static seed is used
+    and `vocabulary_source` says so, so the caller can decide whether that is good enough.
+    Namespaced tags (shape:*, component:*) are never descriptive vocabulary and pass through.
+    """
+    from api.taxonomy_map import normalize_tags
+
+    canonical, unknown = normalize_tags(list(tags or []), allowed=vocabulary)
+    return {
+        "canonical": canonical,
+        "unknown": unknown,
+        "vocabulary_source": "static-seed" if vocabulary is None else "db",
+    }
+
+
 def build_plan(content: str, owner: str, *, system: str | None = None,
-               component: str | None = None) -> dict[str, Any]:
+               component: str | None = None,
+               tags: list[str] | None = None) -> dict[str, Any]:
     """Read-only preview. Writes nothing. Returns current state, blast radius, and a token."""
     from api._openbrain_api import get_db_conn
+    from api.knowledge_ingest import _load_tag_vocabulary
 
     chash = content_hash(content)
     embedding_param = None
@@ -167,6 +193,7 @@ def build_plan(content: str, owner: str, *, system: str | None = None,
     with get_db_conn() as conn:
         living = _living_docs(conn, system)
         similar = _similar_docs(conn, embedding_param)
+        tag_report = classify_tags(tags, _load_tag_vocabulary(conn))
 
         would_supersede = None
         if system and component:
@@ -191,6 +218,7 @@ def build_plan(content: str, owner: str, *, system: str | None = None,
                       "not distinguish an update from a note. Use it to catch a missing system."),
         },
         "would_supersede": would_supersede,
+        "tags": tag_report,
         "decline_reason_threshold": DECLINE_REASON_THRESHOLD,
         "decision_required": (
             "Commit with EITHER component=<one of the above> to update that living doc, OR "
@@ -228,7 +256,8 @@ def verify_apply(payload: dict[str, Any], owner: str, content: str) -> tuple[boo
 
     if not token:
         plan = build_plan(content, owner, system=payload.get("system"),
-                          component=component_identity(payload))
+                          component=component_identity(payload),
+                          tags=[str(t) for t in (payload.get("tags") or [])])
         return False, {
             "error": "plan_required",
             "status": 409,

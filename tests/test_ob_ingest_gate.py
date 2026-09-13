@@ -50,3 +50,34 @@ def test_missing_threshold_with_no_suggestions_stays_quiet():
     close, known = ob.close_matches(_plan([]))
     assert known is False
     assert close == []
+
+
+# ── tag pre-check (ADR-012) ───────────────────────────────────────────────────
+
+
+def test_unknown_tags_come_from_the_server_report():
+    plan = {"tags": {"canonical": ["K8s"], "unknown": ["kubez"], "vocabulary_source": "db"}}
+    unknown, said = ob.unknown_tags(plan, ["K8s", "kubez", "shape:note"])
+    assert said is True
+    assert unknown == ["kubez"]
+
+
+def test_all_canonical_is_quiet():
+    plan = {"tags": {"canonical": ["K8s", "DNS"], "unknown": [], "vocabulary_source": "db"}}
+    unknown, said = ob.unknown_tags(plan, ["K8s", "DNS", "component:x"])
+    assert said is True
+    assert unknown == []
+
+
+def test_missing_tag_report_fails_closed():
+    """A server that cannot say which tags it will park gets no benefit of the doubt: every
+    descriptive tag is unverified. Namespaced tags are never vocabulary and stay out of it."""
+    unknown, said = ob.unknown_tags({}, ["K8s", "kubez", "shape:note", "component:x"])
+    assert said is False
+    assert unknown == ["K8s", "kubez"]
+
+
+def test_missing_tag_report_with_no_descriptive_tags_stays_quiet():
+    unknown, said = ob.unknown_tags({}, ["shape:note", "component:x"])
+    assert said is False
+    assert unknown == []

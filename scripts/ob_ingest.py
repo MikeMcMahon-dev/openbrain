@@ -49,6 +49,21 @@ PLAN/APPLY (ADR ingest airlock):
   The vault can change inside the token's TTL, so the server re-derives candidates at apply time.
   If one appeared since the plan, the apply 409s naming it — re-run and decide again.
 
+TAGS ARE PRE-CHECKED (ADR-012):
+  Ingest folds tags to the controlled vocabulary and silently parks anything unknown in
+  tag_proposals — the write succeeds, the JSON echo looks tagged, and the tags are not on the
+  row. The plan now reports which of --tags are canonical and which would be parked, and this
+  script STOPS (exit 2) on any unknown tag BEFORE writing. Get them decided first:
+
+    .venv/bin/python scripts/tag_review.py --approve <TAG> --yes      # new canonical tag
+    .venv/bin/python scripts/tag_review.py --list                     # see what exists to reuse
+    (or just drop the tag from --tags)
+
+  then re-run. If an agent is driving this for Mike, SURFACE the unknown tags to him as a
+  choice per tag (approve / reuse an existing tag / drop) — do not approve on his behalf and
+  do not pass --allow-unknown-tags to make the stop go away. That flag exists for the case
+  where parking in the queue is the intent.
+
   --component X  adds the tag `component:X` (ADR-008 identity key). The (system, component:X)
   pair is the supersession identity, so `--system` is REQUIRED with --component — a null
   system is what made the identity unsatisfiable on purpose (ADR-018 P2 / ADR-019).
@@ -82,12 +97,14 @@ def load_token(explicit: str | None = None) -> str | None:
 
 
 def fetch_plan(base: str, token: str, body: str,
-               system: str | None, component: str | None) -> dict:
+               system: str | None, component: str | None,
+               tags: list[str] | None = None) -> dict:
     """POST the plan. Read-only on the server — writes nothing, returns current state plus a
     short-lived token bound to this exact content."""
     req = urllib.request.Request(
         base.rstrip("/") + "/api/plan_ingest",
-        data=json.dumps({"source": body, "system": system, "component": component}).encode(),
+        data=json.dumps({"source": body, "system": system, "component": component,
+                         "tags": tags or []}).encode(),
         headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
         method="POST",
     )
@@ -117,6 +134,11 @@ def print_plan(plan: dict, system: str | None) -> None:
     ws = plan.get("would_supersede")
     print(f"\nWould supersede: {ws['id']} ({ws['component_key']})" if ws
           else "\nWould supersede: nothing (this would be a NEW row)")
+    tr = plan.get("tags")
+    if tr is not None:
+        print(f"\nTags (vocabulary: {tr.get('vocabulary_source')}):")
+        print(f"  canonical: {', '.join(tr.get('canonical') or []) or '(none)'}")
+        print(f"  UNKNOWN:   {', '.join(tr.get('unknown') or []) or '(none)'}")
 
 
 def close_matches(plan: dict) -> tuple[list[dict], bool]:
@@ -135,6 +157,21 @@ def close_matches(plan: dict) -> tuple[list[dict], bool]:
     if threshold is None:
         return similar, False
     return [d for d in similar if (d.get("similarity") or 0) >= threshold], True
+
+
+def unknown_tags(plan: dict, requested: list[str]) -> tuple[list[str], bool]:
+    """(tags ingest would park instead of write, whether the server actually said so).
+
+    Namespaced tags (shape:*, component:*) are never vocabulary and are never unknown. For
+    the rest, the plan's `tags` block is the authority. A server too old to send it cannot be
+    evaluated here, and a gate that cannot evaluate its rule fails CLOSED: every descriptive
+    tag is treated as unverified so the caller has to look, same rule as close_matches().
+    """
+    descriptive = [t for t in requested if ":" not in t]
+    report = plan.get("tags")
+    if report is None:
+        return descriptive, False
+    return list(report.get("unknown") or []), True
 
 
 def main() -> None:
@@ -172,6 +209,10 @@ def main() -> None:
                    help="why this is a new record rather than an update. Required with "
                         "--ack-not-updating when a candidate scores at or above the plan's "
                         "decline_reason_threshold.")
+    p.add_argument("--allow-unknown-tags", dest="allow_unknown_tags", action="store_true",
+                   help="proceed even if some --tags are not in the vocabulary; they are "
+                        "queued for review and NOT written to the row (ADR-012). Default is "
+                        "to stop so they can be approved/remapped/dropped first.")
     p.add_argument("--no-plan", dest="do_plan", action="store_false",
                    help="ESCAPE HATCH: skip the automatic plan round-trip. Only for when "
                         "/api/plan_ingest is unreachable and a wrap still has to land. This "
@@ -221,7 +262,7 @@ def main() -> None:
     # rides along on the ingest.
     plan = None
     if args.do_plan:
-        plan = fetch_plan(args.base, token, body, args.system, args.component)
+        plan = fetch_plan(args.base, token, body, args.system, args.component, tags)
 
     if args.plan:
         if plan is None:
@@ -234,6 +275,26 @@ def main() -> None:
 
     if plan is not None:
         payload["plan_token"] = plan["plan_token"]
+
+        # Tags first: a parked tag is a silent partial write, and re-ingesting to attach it
+        # later means a duplicate row (there is no content-hash dedupe on knowledge).
+        unknown, server_said = unknown_tags(plan, tags)
+        if unknown and not args.allow_unknown_tags:
+            if server_said:
+                print("STOPPED — these tags are not in the vocabulary and would be parked for "
+                      "review instead of written. Nothing written.\n")
+            else:
+                print("STOPPED — this server did not report tag status, so none of the "
+                      "descriptive tags can be verified here. Nothing written.\n")
+            for t in unknown:
+                print(f"  - {t}")
+            print("\nDecide each one, then re-run:")
+            print("  .venv/bin/python scripts/tag_review.py --list              # reuse an "
+                  "existing tag")
+            print("  .venv/bin/python scripts/tag_review.py --approve <TAG> --yes")
+            print("  (or drop it from --tags; --allow-unknown-tags queues them and writes "
+                  "the row without them)")
+            sys.exit(2)
 
         # The decision the gate exists to force. --component IS the decision ("update that one"),
         # so it needs nothing further. Without one, every candidate the plan surfaced has to be
