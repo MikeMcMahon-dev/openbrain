@@ -4,6 +4,30 @@ This document tracks planned improvements for the OpenBrain system.
 
 ---
 
+## ChatGPT MCP connector — follow-ups (2026-09-13)
+
+Shipped in #132/#133: OAuth login + dynamic registration + signed tokens; ChatGPT (free tier
+included) connects at `/mcp/messages`. Left deliberately undone:
+
+- **Connector icon** — nothing advertised; cosmetic.
+- **Citation shape** — ChatGPT wants `search` results to carry `title` + `url` and `fetch` to take
+  a single `id` and return `{id, title, text, url, metadata}`; ours are `{id, document_id,
+  heading, snippet}` / `fetch(ids[])` in a text envelope. Tools work; citation chips do not
+  render. Mike: hold until he has seen it in use.
+- **Dedicated smoke owner** — `OPENBRAIN_OAUTH_SMOKE_USER` / `_PASSPHRASE` as GitHub secrets plus
+  a matching hash in the preview's `OPENBRAIN_OAUTH_PASSPHRASES`, so `smoke_checks.py` runs the
+  full sign-in → token → `tools/list` path instead of reporting `skipped`. Never a real owner.
+- **`scripts/rotate_tokens.py` defect** — `get_env_var_id` takes the FIRST Vercel entry with the
+  key and `update_vercel_env` forces `target: [production, preview, development]`. With per-
+  environment entries that produces the duplicate/"Needs Attention" state seen 2026-09-13 and
+  will do so again on the Jan 1 rotation. Handle every entry for the key; preserve each one's
+  `target`.
+- **Refresh tokens** — none issued; family re-signs in every 90 days. Fine for now.
+- **`docs/CLAUDE.md` mentions `api/tutor.py` / SOCrATIC_RULES** — not on main. Either the file
+  went missing or the doc is aspirational; find out before anyone builds Annie's tutor on it.
+
+---
+
 ## Temporal / supersession redesign — ADR-018a (current)
 
 **Full plan + P3 detail:** `docs/HANDOFF-P3-transition-records-2026-08-01.md`. P1 (recency net)
