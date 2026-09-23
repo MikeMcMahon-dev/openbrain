@@ -180,6 +180,31 @@ tools). Per-query token cost measured down ~79% (12.7k → 2.6k for skim+fetch).
 
 ---
 
+## Migration / schema follow-ups (2026-09-23)
+
+Surfaced while adding Data API grant checks ahead of Supabase's 2026-10-30 change (PR #135).
+
+- **The migration set cannot rebuild this schema.** 10 tables are created by numbered migrations;
+  **16 are live.** Six exist in production with no migration at all: `error_log`, `query_log`,
+  `thoughts`, `open_brain_users`, `open_brain_tenants`, `open_brain_tenant_memberships`. A fresh
+  project or preview branch built from `001`–`013` comes up missing them. Decide whether to
+  backfill migrations for the six or to accept that the numbered series is not the rebuild path and
+  say so in the log.
+- **`migration_status.py` grant checks are in place but only assert the CURRENT policy**
+  (`service_role` everything, `anon`/`authenticated` nothing). If a Data API client is ever added,
+  that inverted check becomes wrong and must be revisited deliberately rather than deleted in
+  frustration.
+- **No mechanical check that a new migration carries its grants.** `TEMPLATE.sql` documents it and
+  `migration_status.py` catches the *result* after apply, but nothing fails a grant-less
+  `CREATE TABLE` at authoring time. A lint over `supabase/migrations/*.sql` would close that.
+- **`sql_trial.py` hardening left one gap.** It now refuses transaction control (it was creating
+  real prod tables while printing `TRIAL PASSED`), but a migration file legitimately containing
+  `BEGIN`/`COMMIT` must therefore be trialled with those lines stripped. A `--strip-transaction`
+  flag would make the gate frictionless instead of requiring a `grep -v` pipeline that someone will
+  eventually skip.
+
+---
+
 ## Retrieval ranking — boost component:*-keyed current-state (2026-07-19)
 
 > **Update (2026-07-30): the boost shipped in PR #66 / ADR-014** — env-gated
@@ -201,6 +226,30 @@ doc. Stopgap today was manual curation (retiring obsolete event notes to `status
   curation cheap.
 - Consider a domain/owner down-weight so cross-domain noise (e.g. Study/Personal chunks) stops
   appearing in operational current-state results.
+
+**New evidence (2026-09-23) — the problem is worse than "event notes out-rank living docs".**
+Measured on a direct "pmx-01 crash root cause" query: the row holding the CORRECT resolution
+(faulty PSU, 2026-07-07) scored **0.018** while the stale 2026-07-03 investigation it corrects
+scored **0.020+** — and the stale one won. From the `signals` block, the resolution carried
+`recency_decay_applied: 0.553` and the stale document `1.0`.
+
+The resolution is *older in ingest time* than the document it supersedes, so decay punished the
+right answer and left the wrong one at full weight. `status` does not enter the score at all.
+
+Why this is a sharper problem than the original framing:
+- It is not event-vs-living-doc. **A correction is systematically disadvantaged against the thing
+  it corrects**, whenever the correction was written first — which is common, because you record a
+  fix before someone later re-ingests a stale summary.
+- The per-instance remedy (retire the stale row) is **reactive**: it only works once someone has
+  noticed the wrong answer winning, and the whole failure mode is that nobody notices. That row sat
+  `status=current` with three wrong claims in it for **81 days**.
+
+Two questions for the architecture session:
+- Should `superseded`/`historical` take a hard ranking penalty, or drop out of default retrieval
+  entirely and be reachable only via an explicit as-of read? (`component_boost_applied: 2.0`
+  already exists, so the scoring function is clearly not untouchable.)
+- Should `recency_decay` key off **valid-time** (`valid_from`, ADR-018 fact-onset) rather than
+  ingest time, so a correction about a July fact is not penalised for being written in July?
 
 ---
 
