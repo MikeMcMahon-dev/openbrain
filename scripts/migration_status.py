@@ -10,6 +10,8 @@ while their objects were live in production.
     python scripts/migration_status.py --quiet   # exit 1 if anything is MISSING, no output
 
 Adding a migration? Add its check here AND a row in migration_log.md, in the same change.
+If it CREATEs a table in public, it must also GRANT to service_role - see TEMPLATE.sql and
+the "grants:" checks below. Supabase stops auto-granting new public tables on 2026-10-30.
 """
 from __future__ import annotations
 
@@ -28,8 +30,15 @@ if _ENV.exists():
 
 import psycopg  # noqa: E402
 
-# (label, SQL returning a single boolean: True when the migration IS applied)
-CHECKS: list[tuple[str, str]] = [
+# Roles the Data API would use. OpenBrain deliberately grants to service_role ONLY:
+# it reaches Postgres through psycopg on a direct connection, never through PostgREST,
+# and the Supabase anon key is PUBLIC by design (it ships in client bundles). A
+# `GRANT SELECT ... TO anon` on these tables would publish the knowledge vault.
+
+# (label, SQL returning a single boolean: True when OK) with an optional third element:
+# SQL returning rows that NAME the offenders, printed only when the check fails. A count
+# tells you something is wrong; the names tell you what to do about it.
+CHECKS: list[tuple[str, str] | tuple[str, str, str]] = [
     ("001 knowledge",             "SELECT to_regclass('public.knowledge') IS NOT NULL"),
     ("002 wiki_pages",            "SELECT to_regclass('public.wiki_pages') IS NOT NULL"),
     ("003 tag_vocabulary",        "SELECT to_regclass('public.tag_vocabulary') IS NOT NULL"),
@@ -58,6 +67,31 @@ CHECKS: list[tuple[str, str]] = [
     ("013 retirement FK dropped",
      """SELECT count(*) = 0 FROM pg_constraint
          WHERE conrelid='public.retirement_requests'::regclass AND contype='f'"""),
+
+    # --- Data API grants (Supabase stops auto-granting new public tables 2026-10-30) ---
+    # From that date a table created without grants is unreachable through the Data API,
+    # in new projects, preview branches and `supabase db reset` alike. Nothing here uses
+    # the Data API today, so this is a tripwire rather than a liveness check: it catches
+    # the day a table lands with the wrong grants, in either direction.
+    ("grants: service_role on all tables",
+     """SELECT count(*) = 0 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+         WHERE n.nspname = 'public' AND c.relkind = 'r'
+           AND NOT has_table_privilege('service_role', c.oid, 'SELECT')""",
+     """SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+         WHERE n.nspname = 'public' AND c.relkind = 'r'
+           AND NOT has_table_privilege('service_role', c.oid, 'SELECT')
+         ORDER BY c.relname"""),
+
+    # Deliberately inverted: anon/authenticated must have NOTHING. This is the one check
+    # here that guards an exposure rather than an absence - the anon key is public, so a
+    # stray grant publishes the vault. It fires on a grant, not on a missing one.
+    ("grants: no anon/authenticated",
+     """SELECT count(*) = 0 FROM information_schema.role_table_grants
+         WHERE table_schema = 'public' AND grantee IN ('anon', 'authenticated')""",
+     """SELECT grantee || ' -> ' || table_name || ' (' || privilege_type || ')'
+         FROM information_schema.role_table_grants
+         WHERE table_schema = 'public' AND grantee IN ('anon', 'authenticated')
+         ORDER BY grantee, table_name, privilege_type"""),
 ]
 
 
@@ -65,7 +99,9 @@ def main(argv: list[str]) -> int:
     quiet = "--quiet" in argv
     missing = 0
     with psycopg.connect(os.environ["SUPABASE_DB_URL"], prepare_threshold=None) as conn:
-        for label, sql in CHECKS:
+        for check in CHECKS:
+            label, sql = check[0], check[1]
+            detail_sql = check[2] if len(check) > 2 else None
             try:
                 applied = bool(conn.execute(sql).fetchone()[0])
             except Exception as exc:
@@ -80,6 +116,15 @@ def main(argv: list[str]) -> int:
                 missing += 1
             if not quiet:
                 print(f"  {label:<30} {'APPLIED' if applied else 'MISSING'}")
+                # Read the artifact under the number: a failing check names its offenders.
+                if not applied and detail_sql:
+                    try:
+                        for (row,) in conn.execute(detail_sql).fetchall():
+                            print(f"  {'':<30}   -> {row}")
+                    except Exception as exc:  # detail is a nicety; never mask the failure
+                        conn.rollback()
+                        print(f"  {'':<30}   (detail query failed: "
+                              f"{str(exc).splitlines()[0][:50]})")
     if not quiet:
         print(f"\n{len(CHECKS) - missing}/{len(CHECKS)} applied."
               + ("" if not missing else f"  {missing} MISSING — see migration_log.md"))
