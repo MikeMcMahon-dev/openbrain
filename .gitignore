@@ -1,6 +1,9 @@
 .venv/
 .env
 __pycache__/
+# Editor swap files hold the whole buffer - for .env.local that is every secret in it.
+*.sw[op]
+.venv.old-*/
 brain_server/__pycache__/
 brain_index/
 .vercel/
