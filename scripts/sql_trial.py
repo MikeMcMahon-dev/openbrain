@@ -38,6 +38,30 @@ def main() -> int:
     if not sql.strip():
         print("usage: sql_trial.py \"<sql>\"   (or pipe SQL on stdin)")
         return 2
+    # REFUSE transaction control. This tool's whole promise is "always rolls back, never
+    # mutates" — and a COMMIT (or END) inside the input commits THIS tool's wrapping
+    # transaction, after which the rollback has nothing left to undo. On 2026-09-23 a
+    # trial of a migration template containing BEGIN/COMMIT created a real table in prod
+    # while printing TRIAL PASSED. Migrations legitimately carry transaction control, so
+    # this must fail closed rather than be remembered.
+    import re as _re
+    _stripped = _re.sub(r"--[^\n]*", "", sql)              # line comments
+    _stripped = _re.sub(r"/\*.*?\*/", "", _stripped, flags=_re.S)  # block comments
+    _bad = sorted({
+        m.group(1).upper()
+        for m in _re.finditer(r"(?:^|;)\s*(commit|end|rollback|begin|start\s+transaction)\b",
+                              _stripped, _re.I | _re.M)
+    })
+    if _bad:
+        print("REFUSING — transaction control found in the input: " + ", ".join(_bad))
+        print("  sql_trial.py supplies the BEGIN..ROLLBACK itself. A COMMIT or END in the")
+        print("  input commits this tool's transaction, so the rollback protects nothing and")
+        print("  the statements land in PROD while the output still reads TRIAL PASSED.")
+        print("  Strip the transaction control and re-run, e.g.:")
+        print("    grep -vEi '^[[:space:]]*(BEGIN|COMMIT|END|ROLLBACK);' file.sql | \\")
+        print("      python scripts/sql_trial.py")
+        return 2
+
     dsn = os.getenv("SUPABASE_DB_URL") or os.getenv("DATABASE_URL")
     if not dsn:
         print("no SUPABASE_DB_URL in env (.env.local)")
@@ -48,11 +72,19 @@ def main() -> int:
     try:
         with conn.cursor() as cur:
             cur.execute(sql)
-            status = cur.statusmessage
+            # psycopg leaves the cursor on the FIRST result, so `statusmessage` alone
+            # reports the first statement, not the last. This previously printed that as
+            # "last statement", which reads like confirmation the whole block ran. Walk
+            # the result sets so the count and the final status are both honest.
+            statuses = [cur.statusmessage]
+            while cur.nextset():
+                statuses.append(cur.statusmessage)
         conn.rollback()
         print("TRIAL PASSED — executed in a transaction, then ROLLED BACK (prod unchanged).")
-        if status:
-            print(f"  last statement: {status}")
+        statuses = [x for x in statuses if x]
+        if statuses:
+            print(f"  statements executed: {len(statuses)}")
+            print(f"  first -> last: {statuses[0]} -> {statuses[-1]}")
         print("  -> safe to hand over, WITH this output attached as evidence.")
         return 0
     except Exception as exc:
