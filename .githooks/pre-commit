@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Git runs hooks from core.hooksPath, which is .githooks. The pre-commit guardrails themselves live
+# in scripts/pre-commit (commits to main, OpenBrain tokens, ADR-020 schema gate). Without this shim
+# git never ran them: hooksPath pointed here and nothing here called them (found 2026-09-25).
+exec "$(git rev-parse --show-toplevel)/scripts/pre-commit" "$@"
