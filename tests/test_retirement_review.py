@@ -50,3 +50,122 @@ def test_perform_raises_rather_than_swallowing():
     except RuntimeError:
         return
     raise AssertionError("_perform swallowed the error; cmd_execute could not mark it failed")
+
+
+# ── review: the one-command interactive flow ─────────────────────────────────────────────────
+# Each test pins a way the flow could do harm: writing before the final confirm, executing an
+# item that was skipped, treating a closed stdin as consent, overwriting a request decided
+# elsewhere, or running unattended.
+
+from contextlib import contextmanager  # noqa: E402
+from datetime import datetime  # noqa: E402
+
+
+def _pending(rid, method="retire"):
+    return {"id": rid, "target_id": f"tgt-{rid}", "method": method, "reason_code": "manual",
+            "rationale": "because", "requested_by": "claude", "requested_at": datetime(2026, 9, 24),
+            "evidence": {}, "content": f"content of {rid}", "title": f"title {rid}",
+            "target_status": "current"}
+
+
+class _Cur(list):
+    rowcount = 0
+
+
+class _FakeConn:
+    def __init__(self, pending, still_pending=None):
+        self.pending = pending
+        self.still_pending = set(still_pending if still_pending is not None
+                                 else [p["id"] for p in pending])
+        self.writes: list[tuple[str, list]] = []
+        self.commits = 0
+
+    def execute(self, sql, params=None):
+        if "WHERE r.status = 'pending'" in sql:
+            return _Cur(self.pending)
+        if sql.lstrip().startswith("UPDATE"):
+            self.writes.append((sql, params))
+            cur = _Cur()
+            cur.rowcount = 1 if params[3] in self.still_pending else 0
+            return cur
+        if "ANY(" in sql:
+            ids = params[0]
+            return _Cur({"id": i, "target_id": f"tgt-{i}", "method": "retire",
+                         "reason_code": "manual"} for i in ids)
+        raise AssertionError(f"unexpected SQL: {sql[:60]}")
+
+    def commit(self):
+        self.commits += 1
+
+
+def _run_review(conn, answers, tty=True):
+    ran: list = []
+    feed = iter(answers)
+
+    def read(_prompt=""):
+        try:
+            return next(feed)
+        except StopIteration:
+            raise EOFError
+
+    @contextmanager
+    def fake_conn():
+        yield conn
+
+    orig_conn, orig_run = rr._conn, rr._run_approved
+    rr._conn = fake_conn
+    rr._run_approved = lambda c, rows: (ran.extend(r["id"] for r in rows), 0)[1]
+    try:
+        rc = rr.cmd_review(None, read=read, isatty=lambda: tty)
+    finally:
+        rr._conn, rr._run_approved = orig_conn, orig_run
+    return rc, ran
+
+
+def test_review_refuses_without_a_terminal_and_touches_nothing():
+    conn = _FakeConn([_pending("a")])
+    rc, ran = _run_review(conn, [], tty=False)
+    assert rc == 2 and not conn.writes and not ran
+
+
+def test_review_answer_no_writes_nothing():
+    conn = _FakeConn([_pending("a"), _pending("b")])
+    rc, ran = _run_review(conn, ["a", "", "d", "", "n"])
+    assert not conn.writes, "decisions were written before the final confirm"
+    assert not ran and rc == 1
+
+
+def test_review_executes_only_what_was_approved_in_this_pass():
+    conn = _FakeConn([_pending("a"), _pending("b", "delete"), _pending("c")])
+    rc, ran = _run_review(conn, ["a", "note a", "s", "d", "", "y"])
+    decided = {p[3]: p[0] for _, p in conn.writes}
+    assert decided == {"a": "approved", "c": "denied"}, "skipped item b must stay pending"
+    assert ran == ["a"], "only this pass's approvals execute; a denial or skip never does"
+    assert rc == 0
+
+
+def test_review_record_only_does_not_execute():
+    conn = _FakeConn([_pending("a")])
+    rc, ran = _run_review(conn, ["a", "", "r"])
+    assert [p[3] for _, p in conn.writes] == ["a"] and not ran and rc == 0
+
+
+def test_review_eof_mid_queue_is_a_quit_not_a_decision():
+    conn = _FakeConn([_pending("a"), _pending("b")])
+    rc, ran = _run_review(conn, ["a"])          # stdin closes at the note prompt
+    assert not conn.writes and not ran
+    conn = _FakeConn([_pending("a")])
+    rc, ran = _run_review(conn, ["a", ""])      # stdin closes at the final confirm
+    assert not conn.writes and not ran, "EOF at the confirm must mean no, never yes"
+
+
+def test_review_does_not_execute_a_request_decided_elsewhere_meanwhile():
+    conn = _FakeConn([_pending("a"), _pending("b")], still_pending=["b"])
+    rc, ran = _run_review(conn, ["a", "", "a", "", "y"])
+    assert ran == ["b"], "a was decided by someone else after listing; it must not run"
+
+
+def test_review_view_then_decide():
+    conn = _FakeConn([_pending("a")])
+    rc, ran = _run_review(conn, ["v", "x", "a", "", "y"])   # view, invalid key, then approve
+    assert ran == ["a"]
