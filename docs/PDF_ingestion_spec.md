@@ -1,7 +1,7 @@
 # OpenBrain PDF Ingestion — Implementation Spec
 
 **Handoff target:** Fresh Claude session  
-**Repo:** `/Users/mmcmahon/src/home-lab`  
+**Repo:** `/Users/Shared/home-lab`  
 **Working dir:** `open-brain/`  
 **Status:** Decision made — ready to implement  
 **Follow-on:** After this is done, implement `WIP/PDF_ingestion_testing.md`

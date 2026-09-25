@@ -1,7 +1,7 @@
 # OpenBrain PDF Ingestion — Eval & Test Harness Spec
 
 **Handoff target:** Fresh Claude session  
-**Repo:** `/Users/mmcmahon/src/home-lab`  
+**Repo:** `/Users/Shared/home-lab`  
 **Working dir:** `open-brain/`  
 **Status:** Ready to implement — no decisions pending  
 **Priority:** Run this after PDF_ingestion_spec.md is implemented

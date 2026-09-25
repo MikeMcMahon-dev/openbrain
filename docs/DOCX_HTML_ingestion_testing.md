@@ -1,7 +1,7 @@
 # OpenBrain DOCX + URL Ingestion — Eval & Test Harness Spec
 
 **Handoff target:** Fresh Claude session  
-**Repo:** `/Users/mmcmahon/src/home-lab`  
+**Repo:** `/Users/Shared/home-lab`  
 **Working dir:** `open-brain/`  
 **Status:** Ready to implement after `WIP/DOCX_HTML_ingestion_spec.md` is done  
 **Suggested model:** `claude-haiku-4-5-20251001` — pattern-following work; fall back to `claude-sonnet-4-6` if needed  

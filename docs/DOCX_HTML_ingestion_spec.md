@@ -1,7 +1,7 @@
 # OpenBrain DOCX + URL Ingestion — Implementation Spec
 
 **Handoff target:** Fresh Claude session  
-**Repo:** `/Users/mmcmahon/src/home-lab`  
+**Repo:** `/Users/Shared/home-lab`  
 **Working dir:** `open-brain/`  
 **Status:** Decisions made — ready to implement  
 **Suggested model:** `claude-haiku-4-5-20251001` — this is pattern-following work; if output quality is insufficient fall back to `claude-sonnet-4-6`  

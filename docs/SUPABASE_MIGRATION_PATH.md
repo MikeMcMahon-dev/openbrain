@@ -64,7 +64,7 @@ Recent migration outcome:
 
 1. Keep legacy Chroma-based reads retired; Supabase is the only production read/write path.
 2. Deliver Vercel read path using Supabase source with `visibility` and `tenant_id` filters.
-3. Run Vercel smoke checks in [docs/VERCEL_SMOKE_CHECKS.md](/Users/mmcmahon/src/home-lab/open-brain/docs/VERCEL_SMOKE_CHECKS.md).
+3. Run Vercel smoke checks in [docs/VERCEL_SMOKE_CHECKS.md](VERCEL_SMOKE_CHECKS.md).
 4. Verify ingestion + query stability for family demo flows.
 5. Enable formal RLS policy layer after auth + tenancy wiring is in place.
 6. Retire legacy dependency only after accepted stability gates are met.

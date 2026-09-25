@@ -201,9 +201,10 @@ Results are always written to:
 
 ## Key Design Constraints
 
-1. **OPENAI_API_KEY is not stored in open-brain's `.env.local`**. It is loaded at runtime from
-   `/Users/mmcmahon/src/home-lab/agent-lab/agent_lab/.env`. The agent-lab project owns the key;
-   open-brain is a consumer. Rotate the key in agent-lab only.
+1. **OPENAI_API_KEY lives in open-brain's own `.env.local`** (since 2026-09-25). It used to be
+   borrowed from agent-lab's `.env` at a pre-move path that stopped existing, which quietly dropped
+   Judge B. Without the key the fidelity harness now refuses to run, unless `--single-judge`
+   is passed.
 
 2. **No vault ingestion required for evaluation**. The harness reads vault markdown files directly
    as ground truth when cross-checking Mike's infrastructure answers. This means eval works even if

@@ -15,9 +15,12 @@ Eval flow per test case:
   5. Agreement logic: both judges within 0.15 fidelity + same hallucination flag = high-confidence
      Disagreement = flag for human review
 
-OPENAI_API_KEY is intentionally NOT stored in open-brain's .env.local.
-It is loaded at runtime from: /Users/mmcmahon/src/home-lab/agent-lab/agent_lab/.env
-Rotate it there. This harness is a consumer, not an owner of that key.
+OPENAI_API_KEY (Judge B) lives in open-brain's own .env.local, like every other key this repo uses.
+Until 2026-09-25 it was borrowed from agent-lab's .env at a pre-move path under /Users/mmcmahon/src,
+which no longer existed - so Judge B had silently dropped out. Each repo now owns its keys.
+
+Without the key the run REFUSES to start rather than quietly degrading. Pass --single-judge to run
+with Judge A only on purpose; results are then flagged single_judge.
 
 Usage:
     python scripts/test_answer_fidelity.py              # all cases
@@ -45,14 +48,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from dotenv import load_dotenv  # noqa: E402
 
-load_dotenv(Path(__file__).parent.parent / ".env.local")
-
-# Load OPENAI_API_KEY from agent-lab (it is not stored here)
-_AGENT_LAB_ENV = Path("/Users/mmcmahon/src/home-lab/agent-lab/agent_lab/.env")
-_OPENAI_KEY_LOADED = False
-if _AGENT_LAB_ENV.exists():
-    load_dotenv(_AGENT_LAB_ENV, override=False)  # don't overwrite already-set vars
-    _OPENAI_KEY_LOADED = bool(os.getenv("OPENAI_API_KEY"))
+_ENV_LOCAL = Path(__file__).parent.parent / ".env.local"
+load_dotenv(_ENV_LOCAL)  # OPENAI_API_KEY included - see module docstring
 
 from api._openbrain_api import retrieve_thoughts  # noqa: E402
 
@@ -67,11 +64,6 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 SINGLE_JUDGE_MODE = not bool(OPENAI_API_KEY)
-if SINGLE_JUDGE_MODE:
-    print(
-        "[WARNING] OPENAI_API_KEY not available. Running in single-judge mode (Judge A only). "
-        f"Expected key at: {_AGENT_LAB_ENV}"
-    )
 
 # ---------------------------------------------------------------------------
 # Judge prompt template
@@ -814,7 +806,20 @@ if __name__ == "__main__":
     parser.add_argument("--owner", type=str, default=None, help="Filter to one owner")
     parser.add_argument("--adversarial", action="store_true", help="Run adversarial cases only")
     parser.add_argument("--verbose", action="store_true", help="Show full judge reasoning")
+    parser.add_argument(
+        "--single-judge", action="store_true",
+        help="Run with Judge A only when OPENAI_API_KEY is absent (otherwise refuse)",
+    )
     args = parser.parse_args()
+
+    if SINGLE_JUDGE_MODE and not args.single_judge:
+        print(
+            f"ERROR: OPENAI_API_KEY is not set (expected in {_ENV_LOCAL}). "
+            "Judge B (gpt-4o) would be missing and every result would be single-judge. "
+            "Add the key, or pass --single-judge to run degraded on purpose.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
 
     tests = list(TEST_CASES)
 
