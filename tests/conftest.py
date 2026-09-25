@@ -1,10 +1,10 @@
 """Pytest bootstrap for the test suite.
 
-Put the repo root on sys.path so `from api import ...` resolves when pytest is
-invoked from inside tests/ (which is how the suite must be run — the repo root
-holds a `vault/` symlink into an iCloud store that is unreadable for some users,
-so pytest's rootdir scandir crashes if it starts there). Run via `make test`,
-or `cd tests && python -m pytest`.
+Put the repo root on sys.path so `from api import ...` resolves however pytest is
+invoked: `make test`, plain `pytest` from the repo root (pytest.ini limits collection
+to tests/), or `cd tests && python -m pytest`. The root used to hold a `vault/` symlink
+into an iCloud store unreadable for some users, and pytest crashed listing it. It was
+removed 2026-09-25.
 
 Also load .env.local into os.environ HERE (conftest runs before any test module or
 `api` import), so DB-dependent tests see SUPABASE_DB_URL regardless of collection
