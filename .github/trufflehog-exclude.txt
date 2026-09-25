@@ -1,0 +1,3 @@
+# Paths the secret scan skips: one regex per line, matched against the repo-relative path.
+# Only for files proven to hold fake/example values. Say why on the line above each entry.
+# Keep this list short: every entry is a place a real secret could hide unnoticed.

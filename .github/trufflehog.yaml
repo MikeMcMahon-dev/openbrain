@@ -1,0 +1,27 @@
+# TruffleHog custom detectors, on top of its ~800 built-in ones.
+# Shared by every repo's secret-scan workflow; keep the copies identical (source: home-lab).
+detectors:
+  # Planted at runtime by the workflow's self-test step to prove the scanner still detects
+  # anything. Never commit a matching string - it would (correctly) fail the scan.
+  - name: SelfTestCanary
+    keywords: [trufflehog-canary]
+    regex:
+      canary: 'trufflehog-canary-[0-9a-f]{12}'
+    verify: []
+
+  # OpenBrain API/MCP bearer tokens. TruffleHog has no built-in detector for them.
+  # Incident: 2026-05-01, docs/MCP_SETUP.md.
+  - name: OpenBrainToken
+    keywords: [opbr_]
+    regex:
+      token: 'opbr_[A-Za-z0-9_-]{20,}'
+    verify: []
+
+  # Proxmox API token SECRET: "<user>@<realm>!<tokenname>=<uuid>". The token ID on its own
+  # (no =uuid) is not a secret and sits in tfvars on purpose; this only matches the full secret.
+  # Incident: 2026-05-06, ai-engineering-plan/CURRENT_STATE.md.
+  - name: ProxmoxApiTokenSecret
+    keywords: ['@pam!', '@pve!']
+    regex:
+      secret: '[A-Za-z0-9._-]+@p(?:am|ve)![A-Za-z0-9._-]+[=:][ ]*[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+    verify: []
