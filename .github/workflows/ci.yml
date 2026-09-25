@@ -80,9 +80,8 @@ jobs:
       - name: Lint
         run: ruff check api/ mcp_server/ tests/
 
-      # The suite must run from inside tests/: the repo root holds a `vault/` symlink into an
-      # iCloud store that is unreadable for some users, and pytest's rootdir scan crashes on it.
-      # Documented in tests/conftest.py.
+      # pytest.ini limits collection to tests/. Running from inside tests/ is kept because it
+      # works either way; the vault/ symlink that once forced it was removed 2026-09-25.
       - name: Unit + integration tests
         working-directory: tests
         env:

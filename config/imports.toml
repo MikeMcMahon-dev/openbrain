@@ -2,7 +2,10 @@
 
 [data_sources]
 
-obsidian = "vault"
+# The Obsidian vault was bulk-imported long ago. Day-to-day writes go through the MCP ingest,
+# so there is no default here. For a one-off re-import, set an explicit path (absolute, or
+# relative to the repo root):
+# obsidian = "/Users/<you>/Library/Mobile Documents/iCloud~md~obsidian/Documents/Shared Vault"
 project_docs = "docs"
 project_docs_exclude = ["gpt_instructions"]
 # Optional additional sources for student study materials.

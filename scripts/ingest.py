@@ -569,15 +569,23 @@ tenant_id = TENANT_ID
 
 documents: list[dict[str, Any]] = []
 
-obsidian_path = project_root / _normalize_file_name(data_sources.get("obsidian", "vault"))
-if obsidian_path.exists():
-    for doc in load_markdown_documents(obsidian_path, subject="engineering", topic="notes"):
-        doc["source_type"] = "obsidian"
-        _enrich_document(doc, pipeline_owner, pipeline_user_id, doc["source"])
-        documents.append(doc)
-    print(f"Loaded {len(documents)} documents after markdown input")
+# No default: the vault was bulk-imported long ago, and a silent default is how a stray
+# symlink would re-import the whole thing. Opt in with an explicit data_sources.obsidian.
+_obsidian_source = data_sources.get("obsidian")
+if not _obsidian_source:
+    print("Skipping Obsidian ingestion (data_sources.obsidian not set)")
 else:
-    print(f"Skipping Obsidian ingestion path: {obsidian_path} (not found)")
+    obsidian_path = Path(_obsidian_source)
+    if not obsidian_path.is_absolute():
+        obsidian_path = project_root / _normalize_file_name(_obsidian_source)
+    if obsidian_path.exists():
+        for doc in load_markdown_documents(obsidian_path, subject="engineering", topic="notes"):
+            doc["source_type"] = "obsidian"
+            _enrich_document(doc, pipeline_owner, pipeline_user_id, doc["source"])
+            documents.append(doc)
+        print(f"Loaded {len(documents)} documents after markdown input")
+    else:
+        print(f"Skipping Obsidian ingestion path: {obsidian_path} (not found)")
 
 _project_docs_exclude = _resolve_data_sources(config, "project_docs_exclude")
 for project_docs_source in _resolve_data_sources(config, "project_docs"):

@@ -81,10 +81,9 @@ smoke-live:
 	@python scripts/smoke_checks.py --live "$(SMOKE_URL)"
 
 test:
-	@# Must run from tests/: the repo root holds a `vault/` symlink into an iCloud
-	@# store that is unreadable for some users, so pytest's rootdir scandir crashes
-	@# if it starts at the root. tests/conftest.py puts the repo on sys.path.
-	@cd tests && python -m pytest -q
+	@# pytest.ini limits collection to tests/, so this also works as plain `pytest`
+	@# from the repo root. tests/conftest.py puts the repo on sys.path.
+	@python -m pytest -q
 
 test-supersession:
 	@# Supersession harness (ADR-018). Deterministic — no DB, no live embeddings.
