@@ -19,9 +19,10 @@ migrate-test:
 	@.venv/bin/python3 scripts/test_migration.py
 
 install-hooks:
-	@git config core.hooksPath scripts
-	@chmod +x scripts/pre-commit
-	@echo "Pre-commit hook installed. Blocks: direct commits to main, OpenBrain tokens in staged files."
+	@# One hooks dir for everything: .githooks (pre-commit shims to scripts/pre-commit; pre-push runs ruff).
+	@git config core.hooksPath .githooks
+	@chmod +x .githooks/* scripts/pre-commit
+	@echo "Hooks installed from .githooks. pre-commit blocks: commits to main, OpenBrain tokens, ADR-020 schema drops. pre-push: ruff."
 
 dev-install:
 	@python3 -m pip install -r requirements-dev.txt -q
