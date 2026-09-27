@@ -44,6 +44,7 @@ production. A header a human must remember to update is a header that lies.
 | 011 | drop stale `validate_knowledge_chunked_insert` trigger + function | ✅ | 2026-08-06, direct psycopg | **0** non-internal triggers on `knowledge_chunked`; **0** `pg_proc` rows named `validate_knowledge_chunked_insert` |
 | 012 | `retirement_requests` airlock table | ✅ | 2026-08-22/23 *(unrecorded — applied by an agent session, not by Mike)* | `retirement_requests` = 13 cols / 8 constraints / 4 indexes |
 | 013 | drop `retirement_requests.target_id` FK | ✅ | 2026-08-23, direct psycopg (trialed BEGIN..ROLLBACK first) | **0** rows in `pg_constraint` with `contype='f'` on `public.retirement_requests` |
+| 014 | `Career` added to `system_vocabulary` | ✅ | 2026-09-26, Claude Code session at Mike's request, direct psycopg (`sql_trial.py` PASSED with a `Career`+`component:` write; same write alone FAILED on the vocab trigger as a control) | `system_vocabulary` has `Career`; `vocab: DB == canonical_systems` check in `migration_status.py` |
 
 ## Verify everything in one query
 
@@ -76,6 +77,8 @@ UNION ALL SELECT '011 stale trigger dropped', CASE WHEN (SELECT count(*) FROM pg
 UNION ALL SELECT '013 retirement FK dropped', CASE WHEN (SELECT count(*) FROM pg_constraint
         WHERE conrelid='public.retirement_requests'::regclass AND contype='f') = 0
         THEN 'APPLIED' ELSE 'MISSING' END
+UNION ALL SELECT '014 Career system', CASE WHEN EXISTS (SELECT 1 FROM public.system_vocabulary
+        WHERE system = 'Career') THEN 'APPLIED' ELSE 'MISSING' END
 ORDER BY 1;
 ```
 

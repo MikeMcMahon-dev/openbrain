@@ -42,6 +42,32 @@ def test_canonical_systems_membership():
     assert not is_canonical_system("bogus")
     assert not is_canonical_system(None)
     assert "OpenBrain" in CANONICAL_SYSTEMS and "Annie" in CANONICAL_SYSTEMS
+    assert "Career" in CANONICAL_SYSTEMS  # migration 014
+
+
+def _system_enums(node):
+    """Every `enum` list under a key named `system`, anywhere in an OpenAPI doc."""
+    if isinstance(node, dict):
+        for k, v in node.items():
+            if k == "system" and isinstance(v, dict) and "enum" in v:
+                yield v["enum"]
+            yield from _system_enums(v)
+    elif isinstance(node, list):
+        for v in node:
+            yield from _system_enums(v)
+
+
+def test_action_spec_system_enums_match_canonical():
+    # The GPT/Claude Action specs are hand-maintained YAML, not generated from
+    # CANONICAL_SYSTEMS. A namespace missing there is one those clients can never select.
+    import pathlib
+    import yaml
+    docs = pathlib.Path(__file__).resolve().parent.parent / "docs"
+    for name in ("CLAUDE_ACTION_SPEC.yaml", "CUSTOM_GPT_ACTION_SPEC.yaml"):
+        enums = list(_system_enums(yaml.safe_load((docs / name).read_text())))
+        assert enums, f"{name}: no system enum found — the walker is looking in the wrong place"
+        for e in enums:
+            assert set(e) == CANONICAL_SYSTEMS, f"{name}: {sorted(set(e) ^ CANONICAL_SYSTEMS)}"
 
 
 def test_system_override_flows_to_write():

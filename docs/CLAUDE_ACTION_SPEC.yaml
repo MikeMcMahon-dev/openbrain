@@ -255,6 +255,7 @@ paths:
                     - FlightSim
                     - MikeMcMahon-Dev
                     - Annie
+                    - Career
                 component:
                   type: string
                   description: >-
@@ -407,6 +408,7 @@ paths:
                     - FlightSim
                     - MikeMcMahon-Dev
                     - Annie
+                    - Career
                 component:
                   type: string
                   description: Living-doc identity (ADR-008). Set ONLY for a canonical current-state document that should REPLACE its prior version on re-ingest (e.g. dns-current-state) — never for append-only session notes. Requires system. Re-ingesting the same (system, component) retires the old version via a supersession event.
