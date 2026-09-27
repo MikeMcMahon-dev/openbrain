@@ -61,6 +61,7 @@ def test_action_spec_system_enums_match_canonical():
     # The GPT/Claude Action specs are hand-maintained YAML, not generated from
     # CANONICAL_SYSTEMS. A namespace missing there is one those clients can never select.
     import pathlib
+
     import yaml
     docs = pathlib.Path(__file__).resolve().parent.parent / "docs"
     for name in ("CLAUDE_ACTION_SPEC.yaml", "CUSTOM_GPT_ACTION_SPEC.yaml"):
