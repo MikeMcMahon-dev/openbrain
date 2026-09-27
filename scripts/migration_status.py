@@ -30,6 +30,12 @@ if _ENV.exists():
 
 import psycopg  # noqa: E402
 
+sys.path.insert(0, str(ROOT))
+from api.canonical_systems import CANONICAL_SYSTEMS  # noqa: E402
+
+# Literal, not a bind param: CHECKS are plain SQL strings. Values are code constants.
+_CANON_ARRAY = "ARRAY[" + ", ".join(f"'{s}'" for s in sorted(CANONICAL_SYSTEMS)) + "]::text[]"
+
 # Roles the Data API would use. OpenBrain deliberately grants to service_role ONLY:
 # it reaches Postgres through psycopg on a direct connection, never through PostgREST,
 # and the Supabase anon key is PUBLIC by design (it ships in client bundles). A
@@ -67,6 +73,20 @@ CHECKS: list[tuple[str, str] | tuple[str, str, str]] = [
     ("013 retirement FK dropped",
      """SELECT count(*) = 0 FROM pg_constraint
          WHERE conrelid='public.retirement_requests'::regclass AND contype='f'"""),
+    ("014 Career system",
+     "SELECT EXISTS (SELECT 1 FROM public.system_vocabulary WHERE system = 'Career')"),
+
+    # --- system vocabulary drift (api/canonical_systems.py is the source of truth) ---
+    # Both directions: a code value missing from the DB is a namespace the MCP enum offers
+    # and the trigger rejects; a DB value missing from code is one no client can select.
+    ("vocab: DB == canonical_systems",
+     f"""SELECT (SELECT array_agg(system ORDER BY system) FROM public.system_vocabulary)
+                = {_CANON_ARRAY}""",
+     f"""SELECT 'DB only: ' || system FROM public.system_vocabulary
+          WHERE NOT (system = ANY({_CANON_ARRAY}))
+         UNION ALL
+         SELECT 'code only: ' || s FROM unnest({_CANON_ARRAY}) s
+          WHERE s NOT IN (SELECT system FROM public.system_vocabulary)"""),
 
     # --- Data API grants (Supabase stops auto-granting new public tables 2026-10-30) ---
     # From that date a table created without grants is unreachable through the Data API,

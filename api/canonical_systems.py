@@ -26,6 +26,8 @@ CANONICAL_SYSTEMS: frozenset[str] = frozenset({
     "MikeMcMahon-Dev", # the mikemcmahon.dev portfolio site — component:mikemcmahon-dev-design
     # ── learning tracks ──
     "Annie",           # Annie's Ubuntu/Linux study curriculum
+    # ── personal ──
+    "Career",          # job search, offers, negotiation — living docs like an offer's current state
 })
 # fmt: on
 

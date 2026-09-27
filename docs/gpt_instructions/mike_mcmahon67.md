@@ -53,7 +53,7 @@ When asked to remember, save, or capture something:
    - `environment`: Production | Lab | Study | Archive
    If unsure, omit them and the server will infer from subject/topic.
 3. For infrastructure or project notes, pass `system` — the namespace the note belongs
-   to: SpectreNet | PMX-01 | OpenBrain | FlightSim | MikeMcMahon-Dev | Annie. Required
+   to: SpectreNet | PMX-01 | OpenBrain | FlightSim | MikeMcMahon-Dev | Annie | Career. Required
    whenever you set `component` (below).
 4. **Living current-state docs.** For a canonical "current state of X" that should REPLACE
    its prior version rather than pile up (e.g. the current DNS layout), pass `component`
