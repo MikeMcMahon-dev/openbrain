@@ -4,6 +4,38 @@ This document tracks planned improvements for the OpenBrain system.
 
 ---
 
+## Tutoring-integrity trip-wire + Custom GPT retirement — follow-ups (2026-11-01)
+
+Shipped: #142 (token-owner binding), #143 (trip-wire, fail-closed crons/report, migration 015),
+#144 (env-backup gitignore). Probe lane `zz-integrity-probe` live (reports to Mike only). Design,
+decisions and rules are private (`home-lab/openbrain-private/`).
+
+- **Custom GPTs retire 2026-12-11.** Actions do not migrate to plugins; plugins use MCP + OAuth
+  only. Every family GPT, including the student tutor, stops working that day unless replaced.
+  Plan for the student (Mike, 2026-11-01): leave the Custom GPT in place until retirement; trial
+  a plugin later (no time invested yet); a dedicated tutor-product is the likely long-term path.
+  Free-tier ChatGPT did connect to `/mcp/messages` on 2026-09-13, so the plugin route is not ruled
+  out by plan tier. Unverified: whether teen accounts may add custom connectors.
+- **If a plugin is pursued: expose `integrity_event` on the hosted MCP surface.** Not there today
+  (only the Action route). Owner from the OAuth token; same guards as `api/integrity_event.py`.
+  Without it a plugin cannot self-report, which is the only path that sees no-tool-call turns.
+- **Attempt signal** (proposed, not built): `query_log.had_student_attempt` (bool, migration
+  016) + instruction to pass `student_attempt`; numbered-item sessions WITH attempts stop flagging.
+  Fixes the main false-alarm source (honest item-by-item work, homework or practice alike).
+- **Instruction overflow** (proposed): move tool-call mechanics to Action/tool descriptions and
+  post-call presentation to the server `tutor_prompt`; Core Rule, assignment detection, when-to-log,
+  safety and tone stay native (they govern turns with no tool call). Moot if plugins lift the limit.
+- **Decommission at retirement, if the tutor GPT is not replaced:** drop the student from
+  `INTEGRITY_RULES.monitored_owners` (events self-purge in 30 days); decide whether the nightly
+  report for that owner continues (heartbeat emails would otherwise arrive daily forever).
+- **Smoke harness gap:** the local comparison on 2026-11-01 grepped only `FAIL`-prefixed lines and
+  missed `expected N, got M` failures. Make `smoke_checks.py` print one uniform failure prefix.
+- **Live-smoke side effect, historical:** before #143 the unauthenticated cron smoke case ran the
+  real nightly report on every live/preview smoke run (REPORT_CONFIGS set in both). Fixed; a
+  Resend history check would confirm how many extra report emails went out.
+
+---
+
 ## ChatGPT MCP connector — follow-ups (2026-09-13)
 
 Shipped in #132/#133: OAuth login + dynamic registration + signed tokens; ChatGPT (free tier
