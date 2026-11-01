@@ -248,6 +248,27 @@ def require_auth_owner(
     return None, resolved_owner
 
 
+def require_cron_secret(metadata: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Guard for /api/cron/* handlers. Returns an error response, or None if authorized.
+
+    Fails CLOSED: with CRON_SECRET unset every cron request is refused. The handlers used to
+    skip the check when it was unset, which left the cron routes callable by anyone. Vercel
+    sends `Authorization: Bearer <CRON_SECRET>` on scheduled invocations once it is set.
+    """
+    import hmac
+
+    secret = os.getenv("CRON_SECRET", "")
+    if not secret:
+        return response_payload(500, {"error": "cron_secret_not_configured", "status": 500})
+    headers = _stringify_headers(metadata.get("headers"))
+    auth = headers.get("authorization", "")
+    if auth.lower().startswith("bearer "):
+        auth = auth.split(" ", 1)[1].strip()
+    if not hmac.compare_digest(auth.encode(), secret.encode()):
+        return response_payload(401, {"error": "unauthorized", "status": 401})
+    return None
+
+
 def _stringify_headers(headers: Any) -> dict[str, str]:
     if not isinstance(headers, Mapping):
         return {}

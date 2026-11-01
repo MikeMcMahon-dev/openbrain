@@ -5,7 +5,7 @@ the result to public.supersession_reconcile_log. drift_count>0 rows ARE the aler
 paging, no network boundary (runs on Vercel, writes to Supabase). Drift is a bug: recovery is
 replay from the event log, not restore.
 
-Vercel sets CRON_SECRET automatically and sends it as:
+Vercel sends CRON_SECRET (which must be set; the handler fails closed without it) as:
     Authorization: Bearer <CRON_SECRET>
 
 Schedule is defined in vercel.json crons config (0 4 * * * = 10pm MDT / 4am UTC, an hour after
@@ -13,13 +13,12 @@ the session report).
 """
 from __future__ import annotations
 
-import os
 from typing import Any
 
 from api._openbrain_api import (
-    _stringify_headers,
     get_db_conn,
     parse_request,
+    require_cron_secret,
     response_payload,
 )
 from api.supersession_reconcile import reconcile_supersession, write_reconcile_log
@@ -34,14 +33,9 @@ def handler(request) -> dict[str, Any]:
     if metadata["method"] not in {"GET", "POST"}:
         return response_payload(405, {"error": "method_not_allowed", "status": 405})
 
-    cron_secret = os.getenv("CRON_SECRET", "")
-    if cron_secret:
-        headers = _stringify_headers(metadata.get("headers"))
-        auth = headers.get("authorization", "")
-        if auth.lower().startswith("bearer "):
-            auth = auth.split(" ", 1)[1].strip()
-        if auth != cron_secret:
-            return response_payload(401, {"error": "unauthorized", "status": 401})
+    cron_error = require_cron_secret(metadata)
+    if cron_error:
+        return cron_error
 
     try:
         with get_db_conn() as conn:

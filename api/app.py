@@ -10,6 +10,7 @@ from api.generate_flashcards import handler as flashcards_handler
 from api.generate_quiz import handler as quiz_handler
 from api.health import handler as health_handler
 from api.ingest import handler as ingest_handler
+from api.integrity_event import handler as integrity_event_handler
 from api.mcp_http import handler as mcp_handler
 from api.oauth import (
     handle_authorize,
@@ -99,6 +100,11 @@ def handler(request):
                 "/tools/openbrain_propose_retirement", "/claude_propose_retirement",
                 "/tools/claude_propose_retirement"}:
         return retirement_handler(request)
+    # Tutoring-integrity self-report (write-only). Bypasses the chatgpt adapter on purpose: the
+    # owner must come from the token alone, never from a header.
+    if path in {"/openbrain_integrity_event", "/tools/openbrain_integrity_event",
+                "/api/integrity_event"}:
+        return integrity_event_handler(request)
     if path in {"/openbrain_query", "/tools/openbrain_query"}:
         return chatgpt_handler(request, tool_mode="query")
     if path in {"/openbrain_generate_quiz", "/tools/openbrain_generate_quiz"}:

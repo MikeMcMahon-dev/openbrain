@@ -75,6 +75,12 @@ CHECKS: list[tuple[str, str] | tuple[str, str, str]] = [
          WHERE conrelid='public.retirement_requests'::regclass AND contype='f'"""),
     ("014 Career system",
      "SELECT EXISTS (SELECT 1 FROM public.system_vocabulary WHERE system = 'Career')"),
+    ("015 integrity_events",
+     """SELECT to_regclass('public.integrity_events') IS NOT NULL
+           AND COALESCE((SELECT relrowsecurity FROM pg_class
+                         WHERE oid = to_regclass('public.integrity_events')), false)
+           AND EXISTS (SELECT 1 FROM pg_constraint
+                        WHERE conname = 'integrity_events_owner_idem_key')"""),
 
     # --- system vocabulary drift (api/canonical_systems.py is the source of truth) ---
     # Both directions: a code value missing from the DB is a namespace the MCP enum offers

@@ -10,14 +10,14 @@ entry to vercel.json crons:
 It refreshes the pending review queue (never re-flags a dismissed/confirmed pair). Confirmation
 stays a HUMAN action via scripts/contradiction_review.py — this only surfaces candidates.
 
-Vercel sets CRON_SECRET automatically and sends it as: Authorization: Bearer <CRON_SECRET>.
+Vercel sends CRON_SECRET as: Authorization: Bearer <CRON_SECRET>. It must be set; the
+handler fails closed without it.
 """
 from __future__ import annotations
 
-import os
 from typing import Any
 
-from api._openbrain_api import _stringify_headers, parse_request, response_payload
+from api._openbrain_api import parse_request, require_cron_secret, response_payload
 from api.contradiction_detect import detect_candidates
 
 
@@ -30,14 +30,9 @@ def handler(request) -> dict[str, Any]:
     if metadata["method"] not in {"GET", "POST"}:
         return response_payload(405, {"error": "method_not_allowed", "status": 405})
 
-    cron_secret = os.getenv("CRON_SECRET", "")
-    if cron_secret:
-        headers = _stringify_headers(metadata.get("headers"))
-        auth = headers.get("authorization", "")
-        if auth.lower().startswith("bearer "):
-            auth = auth.split(" ", 1)[1].strip()
-        if auth != cron_secret:
-            return response_payload(401, {"error": "unauthorized", "status": 401})
+    cron_error = require_cron_secret(metadata)
+    if cron_error:
+        return cron_error
 
     try:
         rep = detect_candidates()
