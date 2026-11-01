@@ -333,6 +333,76 @@ paths:
             application/json:
               schema:
                 type: object
+  /openbrain_integrity_event:
+    post:
+      operationId: openbrain_integrity_event
+      summary: Record a possible tutoring-integrity event
+      description: >-
+        Records a short, factual note that an assignment answer was requested, requested again
+        after a refusal, or may have been given away. Write-only; enabled only for monitored
+        student accounts. Send one event per occurrence. Never include personal or unrelated
+        conversation. Only tell the student something was logged if status is "logged" or
+        "duplicate".
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [event_type, reason]
+              properties:
+                event_type:
+                  type: string
+                  enum:
+                    - answer_request
+                    - repeated_bypass
+                    - possible_answer_disclosure
+                    - worksheet_completion
+                    - unsupported_confirmation
+                reason:
+                  type: string
+                  maxLength: 280
+                  description: One line, subject and what was asked. Nothing personal.
+                subject_hint:
+                  type: string
+                  maxLength: 80
+                  description: Optional subject, e.g. "algebra worksheet".
+                idempotency_key:
+                  type: string
+                  maxLength: 64
+                  description: Optional; repeat the same key to avoid a duplicate event.
+      responses:
+        "201":
+          description: Logged.
+          content:
+            application/json:
+              schema:
+                type: object
+        "200":
+          description: Duplicate of an event already logged.
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: Invalid event. Not logged.
+          content:
+            application/json:
+              schema:
+                type: object
+        "403":
+          description: Not enabled for this account. Not logged.
+          content:
+            application/json:
+              schema:
+                type: object
+        "503":
+          description: Monitoring not configured. Not logged.
+          content:
+            application/json:
+              schema:
+                type: object
   /openbrain_ingest:
     post:
       operationId: openbrain_ingest

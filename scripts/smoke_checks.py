@@ -43,13 +43,16 @@ def _read_runtime_env() -> None:
 _read_runtime_env()
 
 
-def _make_result(name: str, status: int, payload: Any, expected: int) -> tuple[bool, str]:
+def _make_result(
+    name: str, status: int, payload: Any, expected: int | frozenset[int]
+) -> tuple[bool, str]:
     body_str = ""
     if isinstance(payload, (dict, list)):
         body_str = json.dumps(payload)
     else:
         body_str = str(payload)
-    if status != expected:
+    allowed = expected if isinstance(expected, frozenset) else {expected}
+    if status not in allowed:
         return (
             False,
             f"{name}: expected {expected}, got {status}; body={body_str[:320]}",
@@ -1147,14 +1150,16 @@ def smoke_local(idempotency_source: str | None = None, idempotency_owner: str | 
             },
             403 if os.getenv("OPENBRAIN_TOKEN_OWNER_MAP") else 200,
         ),
-        # cron endpoint — 200 with no REPORT_CONFIGS set (returns skipped)
+        # cron endpoint — an unauthenticated call must be REFUSED: 401 with CRON_SECRET set,
+        # 500 (cron_secret_not_configured) without it. Never 200: the handler used to skip
+        # auth when CRON_SECRET was unset, so this case ran the real report.
         (
             {
                 "path": "/api/cron/session_report",
                 "method": "GET",
                 "headers": {},
             },
-            200,
+            401 if os.getenv("CRON_SECRET") else 500,
         ),
     ]
 
@@ -1820,11 +1825,13 @@ def smoke_live(base_url: str) -> int:
             403,
             _auth,
         ),
-        # cron endpoint — no REPORT_CONFIGS → 200 skipped
+        # cron endpoint — an unauthenticated call must be refused (401 with CRON_SECRET set on
+        # the deployment, 500 without). It used to expect 200, which on a deployment with
+        # REPORT_CONFIGS set meant every live smoke run sent the real nightly report.
         (
             "/api/cron/session_report",
             None,
-            200,
+            frozenset({401, 500}),
         ),
     ]
 

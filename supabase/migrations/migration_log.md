@@ -45,6 +45,7 @@ production. A header a human must remember to update is a header that lies.
 | 012 | `retirement_requests` airlock table | ✅ | 2026-08-22/23 *(unrecorded — applied by an agent session, not by Mike)* | `retirement_requests` = 13 cols / 8 constraints / 4 indexes |
 | 013 | drop `retirement_requests.target_id` FK | ✅ | 2026-08-23, direct psycopg (trialed BEGIN..ROLLBACK first) | **0** rows in `pg_constraint` with `contype='f'` on `public.retirement_requests` |
 | 014 | `Career` added to `system_vocabulary` | ✅ | 2026-09-26, Claude Code session at Mike's request, direct psycopg (`sql_trial.py` PASSED with a `Career`+`component:` write; same write alone FAILED on the vocab trigger as a control) | `system_vocabulary` has `Career`; `vocab: DB == canonical_systems` check in `migration_status.py` |
+| 015 | `integrity_events` table (tutoring-integrity trip-wire), RLS on, service_role grant | ✅ | 2026-11-01, applied by Mike from his terminal via `.venv/bin/python` + psycopg (file as committed, own BEGIN..COMMIT; guarded to refuse if the table existed). Before: `sql_trial.py` PASSED twice (create + insert + replayed insert deduped to 1 row; re-run just before apply); control with `event_type='cheating'` FAILED on `integrity_events_event_type_check`; no residue. After (Claude Code, read-only): RLS on, 0 policies, 10 constraints, 3 indexes + pkey, no anon/authenticated grants, owner `postgres` same as `query_log`, 0 rows. | `015 integrity_events` check in `migration_status.py` (table + RLS + `integrity_events_owner_idem_key`); 18/18 APPLIED |
 
 ## Verify everything in one query
 
@@ -79,6 +80,8 @@ UNION ALL SELECT '013 retirement FK dropped', CASE WHEN (SELECT count(*) FROM pg
         THEN 'APPLIED' ELSE 'MISSING' END
 UNION ALL SELECT '014 Career system', CASE WHEN EXISTS (SELECT 1 FROM public.system_vocabulary
         WHERE system = 'Career') THEN 'APPLIED' ELSE 'MISSING' END
+UNION ALL SELECT '015 integrity_events', CASE WHEN to_regclass('public.integrity_events')
+        IS NOT NULL THEN 'APPLIED' ELSE 'MISSING' END
 ORDER BY 1;
 ```
 

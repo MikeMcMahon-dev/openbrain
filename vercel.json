@@ -30,11 +30,11 @@
       "dest": "/api/index.py"
     },
     {
-      "src": "/openbrain_(query|generate_quiz|generate_flashcards|ingest|plan_ingest)(/)?",
+      "src": "/openbrain_(query|generate_quiz|generate_flashcards|ingest|plan_ingest|integrity_event)(/)?",
       "dest": "/api/index.py"
     },
     {
-      "src": "/tools/openbrain_(query|generate_quiz|generate_flashcards|ingest|plan_ingest)(/)?",
+      "src": "/tools/openbrain_(query|generate_quiz|generate_flashcards|ingest|plan_ingest|integrity_event)(/)?",
       "dest": "/api/index.py"
     },
     {
