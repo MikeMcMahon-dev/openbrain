@@ -5,6 +5,7 @@ from typing import Any
 
 from api._openbrain_api import (
     _require_tool_auth,
+    bind_token_owner,
     ingest_payload,
     parse_request,
     query_payload,
@@ -14,13 +15,12 @@ from api._openbrain_api import (
 
 
 def _inject_token_owner(metadata: dict[str, Any], owner: str) -> None:
-    """Inject token-resolved owner as x-openbrain-owner if not already set."""
-    headers = metadata.get("headers")
-    if not isinstance(headers, dict):
-        headers = {}
-        metadata["headers"] = headers
-    if not headers.get("x-openbrain-owner"):
-        headers["x-openbrain-owner"] = owner
+    """Bind the token-resolved owner, overriding any caller-supplied owner header.
+
+    This used to keep a caller's x-openbrain-owner when present, which let any mapped
+    token act as any other owner on /openbrain_*, /claude_* and /mcp/messages.
+    """
+    bind_token_owner(metadata, owner)
 
 
 def _resolve_tool_payload(payload: Mapping[str, Any]) -> Mapping[str, Any]:

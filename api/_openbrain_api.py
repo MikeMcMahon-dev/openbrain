@@ -223,12 +223,34 @@ def require_auth(metadata: dict[str, Any]) -> dict[str, Any] | None:
     # A token-mapped owner is authoritative.  Bind it into the request context
     # so caller-controlled owner headers and body fields cannot cross tenants.
     if resolved_owner:
-        headers = metadata.get("headers")
-        if not isinstance(headers, dict):
-            headers = {}
-            metadata["headers"] = headers
-        headers["x-openbrain-owner"] = resolved_owner
+        bind_token_owner(metadata, resolved_owner)
     return None
+
+
+# Every header request_context() will read an owner from. Kept next to it on purpose.
+_OWNER_HEADERS = frozenset({
+    "x-openbrain-owner",
+    "x-openbrain-user-login",
+    "x-openbrain-user-id",
+    "x-slack-user-id",
+    "x-user-id",
+})
+
+
+def bind_token_owner(metadata: dict[str, Any], owner: str) -> None:
+    """Make the token-resolved owner the only owner the request can carry.
+
+    Drops every caller-supplied owner header, in any letter case, before setting
+    x-openbrain-owner. Setting the key alone is not enough: request_context() lowercases
+    headers, so a surviving "X-OpenBrain-Owner" variant could still win the coalesce.
+    """
+    headers = metadata.get("headers")
+    if not isinstance(headers, dict):
+        headers = {}
+        metadata["headers"] = headers
+    for key in [k for k in headers if isinstance(k, str) and k.lower() in _OWNER_HEADERS]:
+        del headers[key]
+    headers["x-openbrain-owner"] = owner
 
 
 def require_auth_owner(
