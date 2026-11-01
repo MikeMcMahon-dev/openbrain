@@ -11,6 +11,10 @@ brain_index/
 *.log
 .vercel
 .env*.local
+# Copies of env files carry every secret too: openbrain-private/probe_lane_setup.py writes
+# .env.local.bak-<stamp>, which `.env*.local` does not match.
+.env*.local.*
+.env*.bak*
 .DS_Store
 backups/
 # Local content-ingestion + diagnostic tooling — not part of the deployed app
